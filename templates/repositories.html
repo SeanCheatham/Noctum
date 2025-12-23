@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Repositories - Noctum{% endblock %}
+
+{% block content %}
+<h1>Repositories</h1>
+
+<div class="card">
+    <h3>Add Repository</h3>
+    <form id="add-repo-form" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <input type="text" id="repo-name" placeholder="Name"
+               style="flex: 1; min-width: 150px; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+        <input type="text" id="repo-path" placeholder="Path (e.g., /home/user/projects/myapp)"
+               style="flex: 2; min-width: 300px; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+        <button type="submit" class="btn">Add Repository</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Configured Repositories</h3>
+    {% if repositories.is_empty() %}
+        <div class="empty-state">
+            <p>No repositories configured yet.</p>
+            <p>Add a repository above to get started.</p>
+        </div>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Path</th>
+                    <th>Status</th>
+                    <th>Added</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for repo in repositories %}
+                <tr>
+                    <td>{{ repo.name }}</td>
+                    <td style="color: var(--text-secondary); font-family: monospace;">{{ repo.path }}</td>
+                    <td>
+                        {% if repo.enabled %}
+                            <span class="status-badge status-processing">Enabled</span>
+                        {% else %}
+                            <span class="status-badge status-idle">Disabled</span>
+                        {% endif %}
+                    </td>
+                    <td style="color: var(--text-secondary);">{{ repo.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('add-repo-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('repo-name').value;
+    const path = document.getElementById('repo-path').value;
+
+    try {
+        const response = await fetch('/repositories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, path })
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const error = await response.json();
+            alert('Error: ' + error.error);
+        }
+    } catch (err) {
+        alert('Failed to add repository: ' + err.message);
+    }
+});
+</script>
+{% endblock %}

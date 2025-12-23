@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Noctum{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="grid">
+    <div class="card">
+        <h3>Daemon Status</h3>
+        {% match daemon_status %}
+            {% when Some with (status) %}
+                <span class="status-badge status-{{ status.status }}">{{ status.status }}</span>
+                {% if let Some(task) = status.current_task %}
+                    <p style="margin-top: 0.5rem; color: var(--text-secondary);">
+                        Current: {{ task }}
+                    </p>
+                {% endif %}
+            {% when None %}
+                <span class="status-badge status-idle">Unknown</span>
+            {% endmatch %}
+    </div>
+
+    <div class="card">
+        <h3>Repositories</h3>
+        <p style="font-size: 2rem; font-weight: 600;">{{ repository_count }}</p>
+        <p style="color: var(--text-secondary);">configured repositories</p>
+        <a href="/repositories" class="btn" style="margin-top: 1rem;">Manage</a>
+    </div>
+
+    <div class="card">
+        <h3>Recent Results</h3>
+        <p style="font-size: 2rem; font-weight: 600;">{{ result_count }}</p>
+        <p style="color: var(--text-secondary);">analysis results</p>
+        <a href="/results" class="btn" style="margin-top: 1rem;">View All</a>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 2rem;">
+    <h3>Quick Start</h3>
+    <ol style="margin-left: 1.5rem; color: var(--text-secondary);">
+        <li style="margin-bottom: 0.5rem;">Ensure Ollama is running with a code model (e.g., codellama)</li>
+        <li style="margin-bottom: 0.5rem;">Add repositories you want to analyze</li>
+        <li style="margin-bottom: 0.5rem;">Noctum will automatically analyze when your system is idle</li>
+        <li>Check the Results page for insights and recommendations</li>
+    </ol>
+</div>
+{% endblock %}

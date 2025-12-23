@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Results - Noctum{% endblock %}
+
+{% block content %}
+<h1>Analysis Results</h1>
+
+<div class="card">
+    {% if results.is_empty() %}
+        <div class="empty-state">
+            <p>No analysis results yet.</p>
+            <p>Results will appear here once the daemon starts analyzing your repositories.</p>
+        </div>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Type</th>
+                    <th>Severity</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in results %}
+                <tr>
+                    <td style="font-family: monospace;">{{ result.file_path }}</td>
+                    <td>{{ result.analysis_type }}</td>
+                    <td>
+                        {% match result.severity %}
+                            {% when Some with (sev) %}
+                                <span class="status-badge
+                                    {% if sev == "critical" || sev == "error" %}status-paused
+                                    {% else if sev == "warning" %}status-paused
+                                    {% else %}status-idle{% endif %}">
+                                    {{ sev }}
+                                </span>
+                            {% when None %}
+                                <span class="status-badge status-idle">info</span>
+                        {% endmatch %}
+                    </td>
+                    <td style="color: var(--text-secondary);">{{ result.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+{% endblock %}

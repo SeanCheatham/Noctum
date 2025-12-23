@@ -1,0 +1,27 @@
+# Noctum Configuration Example
+# Copy this to ~/.config/noctum/config.toml or specify with --config
+
+[general]
+# Log level: trace, debug, info, warn, error
+log_level = "info"
+
+[web]
+# Web dashboard port
+port = 8420
+# Host to bind (use 0.0.0.0 to expose externally)
+host = "127.0.0.1"
+
+[ollama]
+# Ollama API URL
+url = "http://localhost:11434"
+# Model to use for analysis (must be available in Ollama)
+model = "codellama"
+
+[idle]
+# Minimum seconds of idle time before starting background work
+threshold_seconds = 300
+# How often to check for idle status (seconds)
+check_interval_seconds = 30
+
+# Optional: Override the data directory
+# data_dir = "/custom/path/to/noctum/data"
