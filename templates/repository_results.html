@@ -1,0 +1,360 @@
+{% extends "base.html" %} {% block title %}{{ repository.name }} - Results -
+Noctum{% endblock %} {% block content %}
+<style>
+    .breadcrumb {
+        margin-bottom: 1rem;
+        color: var(--text-secondary);
+    }
+    .breadcrumb a {
+        color: var(--accent);
+        text-decoration: none;
+    }
+    .breadcrumb a:hover {
+        text-decoration: underline;
+    }
+
+    .architecture-summary {
+        margin-bottom: 2rem;
+    }
+    .architecture-summary .card {
+        border-left: 3px solid var(--accent);
+    }
+    .markdown-content {
+        line-height: 1.7;
+    }
+    .markdown-content h1,
+    .markdown-content h2,
+    .markdown-content h3,
+    .markdown-content h4,
+    .markdown-content h5,
+    .markdown-content h6 {
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+        color: var(--text-primary);
+    }
+    .markdown-content h1 {
+        font-size: 1.5rem;
+    }
+    .markdown-content h2 {
+        font-size: 1.25rem;
+    }
+    .markdown-content h3 {
+        font-size: 1.1rem;
+    }
+    .markdown-content p {
+        margin-bottom: 1rem;
+    }
+    .markdown-content ul,
+    .markdown-content ol {
+        margin-bottom: 1rem;
+        padding-left: 1.5rem;
+    }
+    .markdown-content li {
+        margin-bottom: 0.25rem;
+    }
+    .markdown-content code {
+        background-color: var(--bg-tertiary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 3px;
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 0.875em;
+    }
+    .markdown-content pre {
+        background-color: var(--bg-tertiary);
+        padding: 1rem;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin-bottom: 1rem;
+    }
+    .markdown-content pre code {
+        background: none;
+        padding: 0;
+    }
+    .markdown-content blockquote {
+        border-left: 3px solid var(--border);
+        padding-left: 1rem;
+        margin: 1rem 0;
+        color: var(--text-secondary);
+    }
+    .markdown-content table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1rem;
+    }
+    .markdown-content th,
+    .markdown-content td {
+        border: 1px solid var(--border);
+        padding: 0.5rem;
+        text-align: left;
+    }
+    .markdown-content th {
+        background-color: var(--bg-tertiary);
+    }
+    .markdown-content strong {
+        color: var(--text-primary);
+    }
+
+    .file-list {
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 0.875rem;
+    }
+    .file-item {
+        cursor: pointer;
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .file-item:last-child {
+        border-bottom: none;
+    }
+    .file-item:hover {
+        background-color: var(--bg-tertiary);
+    }
+    .file-item.selected {
+        background-color: rgba(88, 166, 255, 0.15);
+    }
+    .file-icon {
+        color: var(--text-secondary);
+        flex-shrink: 0;
+    }
+    .file-path {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .results-container {
+        display: grid;
+        grid-template-columns: 350px 1fr;
+        gap: 1.5rem;
+    }
+    @media (max-width: 900px) {
+        .results-container {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .file-panel {
+        position: sticky;
+        top: 1rem;
+        max-height: calc(100vh - 2rem);
+        overflow-y: auto;
+    }
+    .file-panel .card {
+        padding: 0.5rem;
+    }
+
+    .detail-panel .card {
+        min-height: 300px;
+    }
+    .detail-placeholder {
+        color: var(--text-secondary);
+        text-align: center;
+        padding: 3rem;
+    }
+    .detail-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border);
+        gap: 1rem;
+    }
+    .detail-path {
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        word-break: break-all;
+    }
+    .detail-date {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        white-space: nowrap;
+    }
+
+    .empty-state {
+        color: var(--text-secondary);
+        padding: 2rem;
+        text-align: center;
+    }
+</style>
+
+<div class="breadcrumb">
+    <a href="/repositories">Repositories</a> / {{ repository.name }}
+</div>
+
+<h1>{{ repository.name }}</h1>
+<p
+    style="
+        color: var(--text-secondary);
+        margin-bottom: 1rem;
+        font-family: monospace;
+    "
+>
+    {{ repository.path }}
+</p>
+<p style="margin-bottom: 1.5rem">
+    <a
+        href="/repositories/{{ repository.id }}/mutations"
+        style="color: var(--accent); text-decoration: none"
+    >
+        View Mutation Testing Results &rarr;
+    </a>
+</p>
+
+{% match architecture_summary %} {% when Some with (summary) %}
+<div class="architecture-summary">
+    <div class="card">
+        <h3>Architecture Summary</h3>
+        <div class="detail-date" style="margin-bottom: 1rem">
+            Updated: {{ summary.created_at }}
+        </div>
+        <div class="markdown-content">{{ architecture_summary_html|safe }}</div>
+    </div>
+</div>
+{% when None %} {% endmatch %}
+
+<h2>File Analysis</h2>
+
+<div class="results-container">
+    <div class="file-panel">
+        <div class="card">
+            <div class="file-list" id="file-list">
+                {% if file_results.is_empty() %}
+                <div class="empty-state">No files analyzed yet</div>
+                {% else %} {% for result in file_results %}
+                <div
+                    class="file-item"
+                    data-path="{{ result.file_path }}"
+                    data-result="{{ result.result }}"
+                    data-date="{{ result.created_at }}"
+                >
+                    <span class="file-icon">&#128196;</span>
+                    <span class="file-path" title="{{ result.file_path }}"
+                        >{{ result.file_path }}</span
+                    >
+                </div>
+                {% endfor %} {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="detail-panel">
+        <div class="card" id="detail-card">
+            <div class="detail-placeholder" id="detail-placeholder">
+                Select a file from the list to view its analysis
+            </div>
+            <div id="detail-content" style="display: none">
+                <div class="detail-header">
+                    <div class="detail-path" id="detail-path"></div>
+                    <div class="detail-date" id="detail-date"></div>
+                </div>
+                <div class="markdown-content" id="detail-result"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Simple markdown to HTML conversion for dynamic content
+    function renderMarkdown(text) {
+        // Convert headers
+        text = text.replace(/^### (.*$)/gm, "<h3>$1</h3>");
+        text = text.replace(/^## (.*$)/gm, "<h2>$1</h2>");
+        text = text.replace(/^# (.*$)/gm, "<h1>$1</h1>");
+
+        // Convert bold and italic
+        text = text.replace(
+            /\*\*\*(.*?)\*\*\*/g,
+            "<strong><em>$1</em></strong>",
+        );
+        text = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+        text = text.replace(/\*(.*?)\*/g, "<em>$1</em>");
+
+        // Convert inline code
+        text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+        // Convert code blocks
+        text = text.replace(
+            /```(\w*)\n([\s\S]*?)```/g,
+            "<pre><code>$2</code></pre>",
+        );
+
+        // Convert unordered lists
+        text = text.replace(/^\s*[-*]\s+(.*)$/gm, "<li>$1</li>");
+        text = text.replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>");
+
+        // Convert numbered lists
+        text = text.replace(/^\s*\d+\.\s+(.*)$/gm, "<li>$1</li>");
+
+        // Convert paragraphs (lines with content not already wrapped)
+        const lines = text.split("\n");
+        let result = [];
+        let inParagraph = false;
+
+        for (let line of lines) {
+            const trimmed = line.trim();
+            if (trimmed === "") {
+                if (inParagraph) {
+                    result.push("</p>");
+                    inParagraph = false;
+                }
+                result.push("");
+            } else if (
+                trimmed.startsWith("<h") ||
+                trimmed.startsWith("<ul") ||
+                trimmed.startsWith("<ol") ||
+                trimmed.startsWith("<li") ||
+                trimmed.startsWith("<pre") ||
+                trimmed.startsWith("</")
+            ) {
+                if (inParagraph) {
+                    result.push("</p>");
+                    inParagraph = false;
+                }
+                result.push(line);
+            } else {
+                if (!inParagraph) {
+                    result.push("<p>");
+                    inParagraph = true;
+                }
+                result.push(line);
+            }
+        }
+        if (inParagraph) {
+            result.push("</p>");
+        }
+
+        return result.join("\n");
+    }
+
+    // Handle file selection
+    document.querySelectorAll(".file-item").forEach((file) => {
+        file.addEventListener("click", () => {
+            // Update selected state
+            document
+                .querySelectorAll(".file-item")
+                .forEach((f) => f.classList.remove("selected"));
+            file.classList.add("selected");
+
+            // Show detail content
+            const placeholder = document.getElementById("detail-placeholder");
+            const content = document.getElementById("detail-content");
+            const pathEl = document.getElementById("detail-path");
+            const dateEl = document.getElementById("detail-date");
+            const resultEl = document.getElementById("detail-result");
+
+            placeholder.style.display = "none";
+            content.style.display = "block";
+
+            pathEl.textContent = file.dataset.path;
+            dateEl.textContent = "Analyzed: " + file.dataset.date;
+            resultEl.innerHTML = renderMarkdown(file.dataset.result);
+        });
+    });
+</script>
+{% endblock %}

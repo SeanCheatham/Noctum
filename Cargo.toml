@@ -1,0 +1,68 @@
+[package]
+name = "noctum"
+version = "0.1.0"
+edition = "2021"
+description = "A local-first, AI-powered code analyzer that runs during idle time"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/SeanCheatham/Noctum"
+homepage = "https://github.com/SeanCheatham/Noctum"
+readme = "README.md"
+keywords = ["code-analysis", "mutation-testing", "ai", "rust", "ollama"]
+categories = ["development-tools", "command-line-utilities"]
+authors = ["Sean Cheatham"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.7", features = ["macros"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Configuration
+toml = "0.8"
+directories = "5"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# HTTP client (for Ollama API)
+reqwest = { version = "0.12", features = ["json"] }
+
+# File system traversal
+walkdir = "2"
+
+# Hashing
+sha2 = "0.10"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Templating
+askama = "0.12"
+
+# Markdown rendering
+pulldown-cmark = "0.10"
+chrono = "0.4.42"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

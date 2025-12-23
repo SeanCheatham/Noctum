@@ -1,0 +1,168 @@
+{% extends "base.html" %} {% block title %}Repositories - Noctum{% endblock %}
+{% block content %}
+<div
+    style="
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    "
+>
+    <h1 style="margin: 0">Repositories</h1>
+    <button id="scan-now-btn" class="btn" onclick="triggerScan()">
+        Scan Now
+    </button>
+</div>
+
+<div class="card">
+    <h3>Add Repository</h3>
+    <form id="add-repo-form" style="display: flex; gap: 1rem; flex-wrap: wrap">
+        <input
+            type="text"
+            id="repo-name"
+            placeholder="Name"
+            style="
+                flex: 1;
+                min-width: 150px;
+                padding: 0.5rem;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                color: var(--text-primary);
+            "
+        />
+        <input
+            type="text"
+            id="repo-path"
+            placeholder="Path (e.g., /home/user/projects/myapp)"
+            style="
+                flex: 2;
+                min-width: 300px;
+                padding: 0.5rem;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                color: var(--text-primary);
+            "
+        />
+        <button type="submit" class="btn">Add Repository</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Configured Repositories</h3>
+    {% if repositories.is_empty() %}
+    <div class="empty-state">
+        <p>No repositories configured yet.</p>
+        <p>Add a repository above to get started.</p>
+    </div>
+    {% else %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Path</th>
+                <th>Status</th>
+                <th>Added</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for repo in repositories %}
+            <tr>
+                <td>
+                    <a
+                        href="/repositories/{{ repo.id }}/results"
+                        style="color: var(--accent); text-decoration: none"
+                    >
+                        {{ repo.name }}
+                    </a>
+                </td>
+                <td
+                    style="color: var(--text-secondary); font-family: monospace"
+                >
+                    {{ repo.path }}
+                </td>
+                <td>
+                    {% if repo.enabled %}
+                    <span class="status-badge status-processing">Enabled</span>
+                    {% else %}
+                    <span class="status-badge status-idle">Disabled</span>
+                    {% endif %}
+                </td>
+                <td style="color: var(--text-secondary)">
+                    {{ repo.created_at }}
+                </td>
+                <td>
+                    <a
+                        href="/repositories/{{ repo.id }}/results"
+                        class="btn"
+                        style="font-size: 0.75rem; padding: 0.25rem 0.75rem"
+                    >
+                        View Results
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<script>
+    document
+        .getElementById("add-repo-form")
+        .addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const name = document.getElementById("repo-name").value;
+            const path = document.getElementById("repo-path").value;
+
+            try {
+                const response = await fetch("/repositories", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, path }),
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const error = await response.json();
+                    alert("Error: " + error.error);
+                }
+            } catch (err) {
+                alert("Failed to add repository: " + err.message);
+            }
+        });
+
+    async function triggerScan() {
+        const btn = document.getElementById("scan-now-btn");
+        const originalText = btn.textContent;
+        btn.textContent = "Triggering...";
+        btn.disabled = true;
+
+        try {
+            const response = await fetch("/api/scan/trigger", {
+                method: "POST",
+            });
+
+            if (response.ok) {
+                btn.textContent = "Scan Triggered!";
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }, 2000);
+            } else {
+                const error = await response.json();
+                alert("Error: " + (error.error || "Failed to trigger scan"));
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        } catch (err) {
+            alert("Failed to trigger scan: " + err.message);
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+</script>
+{% endblock %}

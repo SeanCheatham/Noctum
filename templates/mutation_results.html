@@ -1,0 +1,418 @@
+{% extends "base.html" %} {% block title %}Mutation Testing - {{ repository.name
+}} - Noctum{% endblock %} {% block content %}
+<style>
+    .breadcrumb {
+        margin-bottom: 1rem;
+        color: var(--text-secondary);
+    }
+    .breadcrumb a {
+        color: var(--accent);
+        text-decoration: none;
+    }
+    .breadcrumb a:hover {
+        text-decoration: underline;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    .summary-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1rem;
+        text-align: center;
+    }
+    .summary-value {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .summary-label {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+    }
+    .score-killed {
+        color: #3fb950;
+    }
+    .score-survived {
+        color: #f85149;
+    }
+    .score-timeout {
+        color: #d29922;
+    }
+    .score-compile {
+        color: var(--text-secondary);
+    }
+    .score-good {
+        color: #3fb950;
+    }
+    .score-medium {
+        color: #d29922;
+    }
+    .score-bad {
+        color: #f85149;
+    }
+
+    .mutation-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+    .mutation-table th,
+    .mutation-table td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+    }
+    .mutation-table th {
+        background: var(--bg-tertiary);
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+    }
+    .mutation-table tbody tr:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .code-cell {
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 0.8125rem;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .file-cell {
+        max-width: 250px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .outcome-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    .outcome-killed {
+        background: rgba(63, 185, 80, 0.2);
+        color: #3fb950;
+    }
+    .outcome-survived {
+        background: rgba(248, 81, 73, 0.2);
+        color: #f85149;
+    }
+    .outcome-timeout {
+        background: rgba(210, 153, 34, 0.2);
+        color: #d29922;
+    }
+    .outcome-compile_error {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+    }
+
+    .mutation-type {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .empty-state {
+        color: var(--text-secondary);
+        padding: 3rem;
+        text-align: center;
+    }
+
+    .table-container {
+        overflow-x: auto;
+    }
+
+    .back-link {
+        display: inline-block;
+        margin-bottom: 1.5rem;
+        color: var(--accent);
+        text-decoration: none;
+    }
+    .back-link:hover {
+        text-decoration: underline;
+    }
+
+    /* Expandable details */
+    .mutation-row {
+        cursor: pointer;
+    }
+    .mutation-row:hover {
+        background: var(--bg-tertiary);
+    }
+    .expand-icon {
+        display: inline-block;
+        width: 1rem;
+        text-align: center;
+        margin-right: 0.5rem;
+        transition: transform 0.2s;
+    }
+    .mutation-row.expanded .expand-icon {
+        transform: rotate(90deg);
+    }
+    .mutation-details {
+        display: none;
+        background: var(--bg-tertiary);
+    }
+    .mutation-details.show {
+        display: table-row;
+    }
+    .mutation-details td {
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .diff-container {
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 0.8125rem;
+        background: var(--bg-primary);
+        border-radius: 4px;
+        padding: 0.75rem;
+        overflow-x: auto;
+    }
+    .diff-line {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.125rem 0;
+    }
+    .diff-line-num {
+        color: var(--text-secondary);
+        min-width: 3rem;
+        text-align: right;
+        user-select: none;
+    }
+    .diff-original {
+        background: rgba(248, 81, 73, 0.15);
+        color: #f85149;
+    }
+    .diff-replacement {
+        background: rgba(63, 185, 80, 0.15);
+        color: #3fb950;
+    }
+    .diff-prefix {
+        user-select: none;
+        min-width: 1rem;
+    }
+</style>
+
+<div class="breadcrumb">
+    <a href="/repositories">Repositories</a> /
+    <a href="/repositories/{{ repository.id }}/results"
+        >{{ repository.name }}</a
+    >
+    / Mutation Testing
+</div>
+
+<h1>Mutation Testing Results</h1>
+<p
+    style="
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+        font-family: monospace;
+    "
+>
+    {{ repository.path }}
+</p>
+
+<a href="/repositories/{{ repository.id }}/results" class="back-link"
+    >&larr; Back to Code Analysis</a
+>
+
+<div class="summary-grid">
+    <div class="summary-card">
+        <div class="summary-value">{{ summary.total }}</div>
+        <div class="summary-label">Total Mutations</div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-value score-killed">{{ summary.killed }}</div>
+        <div class="summary-label">Killed</div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-value score-survived">{{ summary.survived }}</div>
+        <div class="summary-label">Survived</div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-value score-timeout">{{ summary.timeout }}</div>
+        <div class="summary-label">Timeout</div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-value score-compile">
+            {{ summary.compile_error }}
+        </div>
+        <div class="summary-label">Compile Error</div>
+    </div>
+    <div class="summary-card">
+        <div class="summary-value">{{ mutation_score_percent }}%</div>
+        <div class="summary-label">Mutation Score</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 1rem">Mutation Details</h3>
+    {% if results.is_empty() %}
+    <div class="empty-state">
+        <p>No mutation testing results yet.</p>
+        <p style="margin-top: 0.5rem">
+            Mutation testing runs automatically after architecture analysis
+            completes during the scheduled window.
+        </p>
+    </div>
+    {% else %}
+    <div class="table-container">
+        <table class="mutation-table">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Description</th>
+                    <th>Outcome</th>
+                    <th>Killing Test</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in results %}
+                <tr class="mutation-row" onclick="toggleDetails(this)">
+                    <td class="file-cell" title="{{ result.file_path }}">
+                        <span class="expand-icon">&#9654;</span>{{
+                        result.file_path }}
+                    </td>
+                    <td class="description-cell">{{ result.description }}</td>
+                    <td>
+                        <span
+                            class="outcome-badge outcome-{{ result.test_outcome }}"
+                        >
+                            {{ result.test_outcome }}
+                        </span>
+                    </td>
+                    <td class="code-cell">
+                        {% match result.killing_test %} {% when Some with (test)
+                        %}
+                        <code title="{{ test }}">{{ test }}</code>
+                        {% when None %} - {% endmatch %}
+                    </td>
+                </tr>
+                <tr class="mutation-details">
+                    <td colspan="4">
+                        <div
+                            style="
+                                margin-bottom: 0.5rem;
+                                color: var(--text-secondary);
+                            "
+                        >
+                            <strong>Reasoning:</strong> {{ result.reasoning }}
+                        </div>
+                        <div
+                            class="diff-container"
+                            data-replacements="{{ result.replacements_json }}"
+                        >
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <script>
+        function toggleDetails(row) {
+            const detailsRow = row.nextElementSibling;
+            row.classList.toggle("expanded");
+            detailsRow.classList.toggle("show");
+
+            // Parse and render diff on first expand
+            if (detailsRow.classList.contains("show")) {
+                const container = detailsRow.querySelector(".diff-container");
+                if (container && !container.dataset.rendered) {
+                    try {
+                        const data = JSON.parse(container.dataset.replacements);
+                        let html = "";
+
+                        // New format: { line_number, find, replace, original_line }
+                        if (
+                            data.line_number !== undefined &&
+                            data.find !== undefined
+                        ) {
+                            const lineNum = data.line_number;
+                            const originalLine = data.original_line || "";
+                            const mutatedLine = originalLine.replace(
+                                data.find,
+                                data.replace,
+                            );
+
+                            html += `<div class="diff-line diff-original">
+                                <span class="diff-line-num">${lineNum}</span>
+                                <span class="diff-prefix">-</span>
+                                <span>${escapeHtml(originalLine)}</span>
+                            </div>`;
+                            html += `<div class="diff-line diff-replacement">
+                                <span class="diff-line-num">${lineNum}</span>
+                                <span class="diff-prefix">+</span>
+                                <span>${escapeHtml(mutatedLine)}</span>
+                            </div>`;
+                        } else {
+                            // Old format fallback: { "line_num": { original, replacement } }
+                            for (const [lineNum, change] of Object.entries(
+                                data,
+                            ).sort((a, b) => parseInt(a[0]) - parseInt(b[0]))) {
+                                if (
+                                    change.original !== undefined &&
+                                    change.replacement !== undefined
+                                ) {
+                                    html += `<div class="diff-line diff-original">
+                                        <span class="diff-line-num">${lineNum}</span>
+                                        <span class="diff-prefix">-</span>
+                                        <span>${escapeHtml(change.original)}</span>
+                                    </div>`;
+                                    html += `<div class="diff-line diff-replacement">
+                                        <span class="diff-line-num">${lineNum}</span>
+                                        <span class="diff-prefix">+</span>
+                                        <span>${escapeHtml(change.replacement)}</span>
+                                    </div>`;
+                                }
+                            }
+                        }
+                        container.innerHTML =
+                            html || "<em>No changes recorded</em>";
+                        container.dataset.rendered = "true";
+                    } catch (e) {
+                        container.innerHTML =
+                            "<em>Unable to parse changes</em>";
+                    }
+                }
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Convert backtick-wrapped text to <code> elements
+        function formatBackticks(text) {
+            return escapeHtml(text).replace(
+                /`([^`]+)`/g,
+                "<code style=\"background: var(--bg-tertiary); padding: 0.125rem 0.375rem; border-radius: 3px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 0.8125rem;\">$1</code>",
+            );
+        }
+
+        // Apply backtick formatting to all description cells on page load
+        document.addEventListener("DOMContentLoaded", function () {
+            document
+                .querySelectorAll(".description-cell")
+                .forEach(function (cell) {
+                    cell.innerHTML = formatBackticks(cell.textContent);
+                });
+        });
+    </script>
+    {% endif %}
+</div>
+{% endblock %}
