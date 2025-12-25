@@ -8,7 +8,6 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::services::ServeDir;
-use tracing::info;
 
 /// Start the web server
 pub async fn start_server(state: Arc<AppState>, port: u16) -> anyhow::Result<()> {
@@ -51,7 +50,7 @@ pub async fn start_server(state: Arc<AppState>, port: u16) -> anyhow::Result<()>
     let addr = format!("127.0.0.1:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    info!("Web server listening on http://{}", addr);
+    tracing::info!("Web server listening on http://{}", addr);
 
     axum::serve(listener, app).await?;
 

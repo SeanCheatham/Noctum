@@ -8,7 +8,7 @@ mod web;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, Level};
+use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 use crate::config::Config;
@@ -56,23 +56,23 @@ async fn main() -> anyhow::Result<()> {
     let config_path = cli.config.clone().or_else(Config::default_config_path);
     let config = Config::load(cli.config.as_deref())?;
 
-    info!(
+    tracing::info!(
         "Config path: {}",
         config_path
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "(none, using defaults)".to_string())
     );
-    info!("Data directory: {}", config.data_dir().display());
+    tracing::info!("Data directory: {}", config.data_dir().display());
 
     match cli.command.unwrap_or(Commands::Start) {
         Commands::Start => {
-            info!("Starting Noctum daemon...");
+            tracing::info!("Starting Noctum daemon...");
 
             // Initialize database
             let db = Database::new(&config.database_path()).await?;
             db.run_migrations().await?;
-            info!("Database initialized");
+            tracing::info!("Database initialized");
 
             // Initialize daemon
             let config = Arc::new(RwLock::new(config));
@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             let web_port = config.read().await.web.port;
             let server_handle = tokio::spawn(start_server(state, web_port));
 
-            info!(
+            tracing::info!(
                 "Noctum is running. Dashboard available at http://localhost:{}",
                 web_port
             );

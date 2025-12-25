@@ -5,7 +5,6 @@ use crate::mutation::GeneratedMutation;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
-use tracing::{debug, warn};
 
 /// A mutation as returned by the LLM (line number + search/replace)
 #[derive(Debug, Deserialize)]
@@ -147,7 +146,7 @@ pub async fn analyze_and_generate_mutations(
         .filter_map(|raw| {
             // Validate line number is roughly in range
             if raw.line_number == 0 || raw.line_number > line_count + LINE_TOLERANCE {
-                warn!(
+                tracing::warn!(
                     "Line number {} out of range (file has {} lines)",
                     raw.line_number, line_count
                 );
@@ -156,11 +155,11 @@ pub async fn analyze_and_generate_mutations(
 
             // Validate find/replace are not empty and different
             if raw.find.is_empty() {
-                warn!("Empty 'find' text for mutation: {}", raw.description);
+                tracing::warn!("Empty 'find' text for mutation: {}", raw.description);
                 return None;
             }
             if raw.find == raw.replace {
-                warn!("'find' and 'replace' are identical: {}", raw.find);
+                tracing::warn!("'find' and 'replace' are identical: {}", raw.find);
                 return None;
             }
 
@@ -183,7 +182,7 @@ pub async fn analyze_and_generate_mutations(
                     let global_match = lines.iter().position(|l| l.contains(&raw.find));
                     match global_match {
                         Some(idx) => {
-                            debug!(
+                            tracing::debug!(
                                 "Found '{}' at line {} (LLM said line {})",
                                 raw.find,
                                 idx + 1,
@@ -192,7 +191,7 @@ pub async fn analyze_and_generate_mutations(
                             idx + 1
                         }
                         None => {
-                            warn!(
+                            tracing::warn!(
                                 "Could not find '{}' in file {} (LLM suggested line {})",
                                 raw.find, file_path, raw.line_number
                             );
@@ -214,7 +213,7 @@ pub async fn analyze_and_generate_mutations(
         .take(max_mutations)
         .collect();
 
-    debug!("Generated {} mutations for {}", mutations.len(), file_path);
+    tracing::debug!("Generated {} mutations for {}", mutations.len(), file_path);
 
     Ok(mutations)
 }

@@ -10,7 +10,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::info;
 
 use super::templates::{
     render_markdown, AnalysisResultView, MutationResultView, MutationResultsTemplate,
@@ -228,7 +227,7 @@ pub async fn add_endpoint(
         config.endpoints.push(new_endpoint);
     }
 
-    info!("Added new Ollama endpoint");
+    tracing::info!("Added new Ollama endpoint");
     (
         StatusCode::CREATED,
         Json(serde_json::json!({ "success": true })),
@@ -266,7 +265,7 @@ pub async fn update_endpoint(
         enabled: req.enabled,
     };
 
-    info!("Updated Ollama endpoint at index {}", index);
+    tracing::info!("Updated Ollama endpoint at index {}", index);
     (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
 }
 
@@ -287,7 +286,7 @@ pub async fn delete_endpoint(
 
     config.endpoints.remove(index);
 
-    info!("Deleted Ollama endpoint at index {}", index);
+    tracing::info!("Deleted Ollama endpoint at index {}", index);
     (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
 }
 
@@ -416,7 +415,7 @@ pub async fn api_update_config(
         daemon.set_schedule(config.schedule.clone()).await;
     }
 
-    info!(
+    tracing::info!(
         "Config updated: schedule = {:02}:00 - {:02}:00",
         start_hour, end_hour
     );
@@ -430,7 +429,7 @@ pub async fn api_save_config(State(state): State<Arc<AppState>>) -> impl IntoRes
 
     match config.save(None) {
         Ok(()) => {
-            info!("Config saved to disk");
+            tracing::info!("Config saved to disk");
             (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
         }
         Err(e) => (
@@ -459,7 +458,7 @@ pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoR
                 daemon.set_schedule(schedule).await;
             }
 
-            info!("Config reloaded from disk");
+            tracing::info!("Config reloaded from disk");
             (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
         }
         Err(e) => (
@@ -478,7 +477,7 @@ pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoR
 pub async fn api_trigger_scan(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let daemon = state.daemon.read().await;
     daemon.trigger_scan();
-    info!("Scan triggered via API");
+    tracing::info!("Scan triggered via API");
     (
         StatusCode::OK,
         Json(serde_json::json!({ "success": true, "message": "Scan triggered" })),

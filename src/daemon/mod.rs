@@ -11,7 +11,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::{interval, Duration};
-use tracing::{debug, error, info, warn};
 
 /// Compute a SHA256 hash of the content
 fn compute_hash(content: &str) -> String {
@@ -66,7 +65,7 @@ impl Daemon {
     /// Trigger an immediate scan (works anytime, ignores schedule)
     pub fn trigger_scan(&self) {
         self.trigger_scan.store(true, Ordering::SeqCst);
-        info!("Scan triggered manually");
+        tracing::info!("Scan triggered manually");
     }
 
     /// Update the schedule (called when config is reloaded)
@@ -91,7 +90,7 @@ impl Daemon {
 
     /// Run the daemon loop
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        info!(
+        tracing::info!(
             "Daemon started (scheduled window: {:02}:00 - {:02}:00)",
             self.config.schedule.start_hour, self.config.schedule.end_hour
         );
@@ -105,7 +104,7 @@ impl Daemon {
             // Check if a scan was triggered manually
             let scan_triggered = self.trigger_scan.swap(false, Ordering::SeqCst);
             if scan_triggered {
-                info!("Running manually triggered scan");
+                tracing::info!("Running manually triggered scan");
                 self.status = DaemonStatus::Processing;
                 self.process_tasks().await?;
                 self.status = DaemonStatus::Waiting;
@@ -117,7 +116,7 @@ impl Daemon {
 
             match (self.status, in_window) {
                 (DaemonStatus::Waiting, true) => {
-                    info!("Entering scheduled window, starting processing");
+                    tracing::info!("Entering scheduled window, starting processing");
                     self.status = DaemonStatus::Processing;
                     self.process_tasks().await?;
                 }
@@ -126,12 +125,12 @@ impl Daemon {
                     self.process_tasks().await?;
                 }
                 (DaemonStatus::Processing, false) => {
-                    info!("Exiting scheduled window, pausing");
+                    tracing::info!("Exiting scheduled window, pausing");
                     self.status = DaemonStatus::Waiting;
                 }
                 (DaemonStatus::Waiting, false) => {
                     // Normal state, waiting for window
-                    debug!("Outside scheduled window, waiting");
+                    tracing::debug!("Outside scheduled window, waiting");
                 }
                 (DaemonStatus::Stopping, _) => {
                     break;
@@ -140,13 +139,13 @@ impl Daemon {
         }
 
         self.status = DaemonStatus::Stopping;
-        info!("Daemon stopped");
+        tracing::info!("Daemon stopped");
         Ok(())
     }
 
     /// Process background analysis tasks
     async fn process_tasks(&mut self) -> anyhow::Result<()> {
-        debug!("Processing tasks");
+        tracing::debug!("Processing tasks");
 
         // Update daemon state in database
         self.db
@@ -163,7 +162,7 @@ impl Daemon {
             .collect();
 
         if endpoints.is_empty() {
-            debug!("No Ollama endpoints configured, waiting...");
+            tracing::debug!("No Ollama endpoints configured, waiting...");
             self.db
                 .update_daemon_status("idle", Some("no endpoints configured"))
                 .await?;
@@ -175,7 +174,7 @@ impl Daemon {
         let repositories = match self.db.get_repositories().await {
             Ok(repos) => repos,
             Err(e) => {
-                error!("Failed to fetch repositories: {}", e);
+                tracing::error!("Failed to fetch repositories: {}", e);
                 return Ok(());
             }
         };
@@ -183,7 +182,7 @@ impl Daemon {
         let enabled_repos: Vec<_> = repositories.into_iter().filter(|r| r.enabled).collect();
 
         if enabled_repos.is_empty() {
-            debug!("No enabled repositories to analyze");
+            tracing::debug!("No enabled repositories to analyze");
             self.db.update_daemon_status("idle", None).await?;
             tokio::time::sleep(Duration::from_secs(5)).await;
             return Ok(());
@@ -197,7 +196,7 @@ impl Daemon {
                 break;
             }
 
-            info!("Analyzing repository: {} ({})", repo.name, repo.path);
+            tracing::info!("Analyzing repository: {} ({})", repo.name, repo.path);
             self.db
                 .update_daemon_status("processing", Some(&format!("analyzing {}", repo.name)))
                 .await?;
@@ -209,7 +208,7 @@ impl Daemon {
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to analyze repository {}: {}", repo.name, e);
+                    tracing::warn!("Failed to analyze repository {}: {}", repo.name, e);
                 }
             }
         }
@@ -223,7 +222,7 @@ impl Daemon {
             Duration::from_secs(5)
         };
 
-        debug!("Sleeping for {:?} before next processing cycle", delay);
+        tracing::debug!("Sleeping for {:?} before next processing cycle", delay);
         tokio::time::sleep(delay).await;
 
         Ok(())
@@ -239,7 +238,7 @@ impl Daemon {
         let repo_path = std::path::Path::new(&repo.path);
 
         if !repo_path.exists() {
-            warn!("Repository path does not exist: {}", repo.path);
+            tracing::warn!("Repository path does not exist: {}", repo.path);
             return Ok(false);
         }
 
@@ -247,11 +246,11 @@ impl Daemon {
         let rust_files = self.find_rust_files(repo_path)?;
 
         if rust_files.is_empty() {
-            debug!("No Rust files found in repository: {}", repo.name);
+            tracing::debug!("No Rust files found in repository: {}", repo.name);
             return Ok(false);
         }
 
-        info!(
+        tracing::info!(
             "Found {} Rust files in {}, distributing across {} endpoint(s)",
             rust_files.len(),
             repo.name,
@@ -290,20 +289,20 @@ impl Daemon {
             let content = match tokio::fs::read_to_string(&file_path).await {
                 Ok(c) => c,
                 Err(e) => {
-                    warn!("Failed to read file {:?}: {}", file_path, e);
+                    tracing::warn!("Failed to read file {:?}: {}", file_path, e);
                     continue;
                 }
             };
 
             // Skip very large files (> 100KB)
             if content.len() > 100_000 {
-                debug!("Skipping large file: {:?}", file_path);
+                tracing::debug!("Skipping large file: {:?}", file_path);
                 continue;
             }
 
             // Skip very small files (< 50 bytes, likely just module declarations)
             if content.len() < 50 {
-                debug!("Skipping small file: {:?}", file_path);
+                tracing::debug!("Skipping small file: {:?}", file_path);
                 continue;
             }
 
@@ -323,7 +322,7 @@ impl Daemon {
                 .unwrap_or(None);
 
             if existing_hash.as_ref() == Some(&content_hash) {
-                debug!("Skipping unchanged file: {:?}", file_path);
+                tracing::debug!("Skipping unchanged file: {:?}", file_path);
                 continue;
             }
 
@@ -347,7 +346,7 @@ impl Daemon {
         // Wait for all workers to complete
         for handle in worker_handles {
             if let Err(e) = handle.await {
-                warn!("Worker task failed: {}", e);
+                tracing::warn!("Worker task failed: {}", e);
             }
         }
 
@@ -361,13 +360,13 @@ impl Daemon {
         // Only generate architecture summary if at least one file was analyzed
         if files_analyzed {
             if let Err(e) = self.generate_architecture_summary(repo, endpoints).await {
-                warn!(
+                tracing::warn!(
                     "Failed to generate architecture summary for {}: {}",
                     repo.name, e
                 );
             }
         } else {
-            debug!(
+            tracing::debug!(
                 "Skipping architecture summary for {} - no files changed",
                 repo.name
             );
@@ -376,7 +375,7 @@ impl Daemon {
         // Run mutation testing after architecture summary
         if !self.should_stop.load(Ordering::SeqCst) {
             if let Err(e) = self.run_mutation_testing(repo, endpoints).await {
-                warn!("Failed to run mutation testing for {}: {}", repo.name, e);
+                tracing::warn!("Failed to run mutation testing for {}: {}", repo.name, e);
             }
         }
 
@@ -389,7 +388,7 @@ impl Daemon {
         repo: &crate::db::Repository,
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<()> {
-        info!("Generating architecture summary for {}", repo.name);
+        tracing::info!("Generating architecture summary for {}", repo.name);
 
         self.db
             .update_daemon_status("processing", Some(&format!("summarizing {}", repo.name)))
@@ -402,7 +401,7 @@ impl Daemon {
             .await?;
 
         if results.is_empty() {
-            debug!("No file analyses to summarize for {}", repo.name);
+            tracing::debug!("No file analyses to summarize for {}", repo.name);
             return Ok(());
         }
 
@@ -413,7 +412,7 @@ impl Daemon {
             // Skip results for files that no longer exist
             let file_path = std::path::Path::new(&result.file_path);
             if !file_path.exists() {
-                debug!("Skipping deleted file in summary: {}", result.file_path);
+                tracing::debug!("Skipping deleted file in summary: {}", result.file_path);
                 continue;
             }
             file_summaries.push_str(&format!("\n## {}\n{}\n", result.file_path, result.result));
@@ -421,7 +420,7 @@ impl Daemon {
         }
 
         if included_count == 0 {
-            debug!("No existing files to summarize for {}", repo.name);
+            tracing::debug!("No existing files to summarize for {}", repo.name);
             return Ok(());
         }
 
@@ -455,7 +454,7 @@ impl Daemon {
         let endpoint = match endpoints.first() {
             Some(ep) => ep,
             None => {
-                warn!("No endpoints available for architecture summary");
+                tracing::warn!("No endpoints available for architecture summary");
                 return Ok(());
             }
         };
@@ -463,7 +462,7 @@ impl Daemon {
         let client = OllamaClient::new(&endpoint.url, &endpoint.model);
 
         if !client.is_available().await {
-            warn!(
+            tracing::warn!(
                 "Endpoint {} not available for architecture summary",
                 endpoint.name
             );
@@ -472,7 +471,7 @@ impl Daemon {
 
         match client.generate(&prompt).await {
             Ok(summary) => {
-                info!("Generated architecture summary for {}", repo.name);
+                tracing::info!("Generated architecture summary for {}", repo.name);
 
                 // Save the summary - use repo path as the "file_path" to identify it
                 self.db
@@ -487,7 +486,7 @@ impl Daemon {
                     .await?;
             }
             Err(e) => {
-                warn!("Failed to generate architecture summary: {}", e);
+                tracing::warn!("Failed to generate architecture summary: {}", e);
             }
         }
 
@@ -500,7 +499,7 @@ impl Daemon {
         repo: &crate::db::Repository,
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<()> {
-        info!("Starting mutation testing for {}", repo.name);
+        tracing::info!("Starting mutation testing for {}", repo.name);
 
         self.db
             .update_daemon_status(
@@ -516,7 +515,7 @@ impl Daemon {
         let endpoint = match endpoints.first() {
             Some(ep) => ep,
             None => {
-                warn!("No endpoints available for mutation testing");
+                tracing::warn!("No endpoints available for mutation testing");
                 return Ok(());
             }
         };
@@ -524,7 +523,7 @@ impl Daemon {
         let client = OllamaClient::new(&endpoint.url, &endpoint.model);
 
         if !client.is_available().await {
-            warn!(
+            tracing::warn!(
                 "Endpoint {} not available for mutation testing",
                 endpoint.name
             );
@@ -561,7 +560,7 @@ impl Daemon {
                 .await
                 .unwrap_or(false)
             {
-                debug!(
+                tracing::debug!(
                     "Skipping mutation testing for unchanged file: {}",
                     file_path_str
                 );
@@ -569,7 +568,7 @@ impl Daemon {
             }
 
             // Analyze and generate mutations in a single LLM call
-            debug!("Analyzing mutations for {}", file_path_str);
+            tracing::debug!("Analyzing mutations for {}", file_path_str);
             let mutations = match analyze_and_generate_mutations(
                 &client,
                 &file_path_str,
@@ -580,17 +579,17 @@ impl Daemon {
             {
                 Ok(m) => m,
                 Err(e) => {
-                    warn!("Failed to analyze mutations in {}: {}", file_path_str, e);
+                    tracing::warn!("Failed to analyze mutations in {}: {}", file_path_str, e);
                     continue;
                 }
             };
 
             if mutations.is_empty() {
-                debug!("No mutations generated for {}", file_path_str);
+                tracing::debug!("No mutations generated for {}", file_path_str);
                 continue;
             }
 
-            info!(
+            tracing::info!(
                 "Generated {} mutations for {}",
                 mutations.len(),
                 file_path_str
@@ -608,7 +607,7 @@ impl Daemon {
                 let result = match execute_mutation_test(repo_path, mutation, &config).await {
                     Ok(r) => r,
                     Err(e) => {
-                        warn!("Failed to execute mutation test: {}", e);
+                        tracing::warn!("Failed to execute mutation test: {}", e);
                         continue;
                     }
                 };
@@ -644,14 +643,14 @@ impl Daemon {
                     )
                     .await
                 {
-                    warn!("Failed to save mutation result: {}", e);
+                    tracing::warn!("Failed to save mutation result: {}", e);
                 }
 
                 total_mutations += 1;
             }
         }
 
-        info!(
+        tracing::info!(
             "Completed mutation testing for {} ({} mutations)",
             repo.name, total_mutations
         );
@@ -698,14 +697,14 @@ async fn endpoint_worker(
 
     // Check if endpoint is available
     if !client.is_available().await {
-        warn!(
+        tracing::warn!(
             "Ollama endpoint '{}' at {} is not available, skipping",
             endpoint.name, endpoint.url
         );
         return;
     }
 
-    info!(
+    tracing::info!(
         "Worker started for endpoint '{}' ({})",
         endpoint.name, endpoint.url
     );
@@ -713,7 +712,7 @@ async fn endpoint_worker(
     loop {
         // Check if we should stop
         if should_stop.load(Ordering::SeqCst) {
-            debug!(
+            tracing::debug!(
                 "Worker for '{}' stopping due to shutdown signal",
                 endpoint.name
             );
@@ -730,14 +729,14 @@ async fn endpoint_worker(
             Some(t) => t,
             None => {
                 // Channel closed, no more tasks
-                debug!("Worker for '{}' finished - no more tasks", endpoint.name);
+                tracing::debug!("Worker for '{}' finished - no more tasks", endpoint.name);
                 break;
             }
         };
 
         // Process the task
         let file_path_str = task.file_path.to_string_lossy().to_string();
-        debug!("Worker '{}' analyzing: {}", endpoint.name, file_path_str);
+        tracing::debug!("Worker '{}' analyzing: {}", endpoint.name, file_path_str);
 
         // Build the analysis prompt
         let prompt = format!(
@@ -756,7 +755,7 @@ async fn endpoint_worker(
         // Run code understanding analysis
         match client.generate(&prompt).await {
             Ok(result) => {
-                info!(
+                tracing::info!(
                     "Worker '{}' completed analysis of {}",
                     endpoint.name, file_path_str
                 );
@@ -776,11 +775,11 @@ async fn endpoint_worker(
                     )
                     .await
                 {
-                    warn!("Failed to save analysis result: {}", e);
+                    tracing::warn!("Failed to save analysis result: {}", e);
                 }
             }
             Err(e) => {
-                warn!(
+                tracing::warn!(
                     "Worker '{}' failed to analyze {}: {}",
                     endpoint.name, file_path_str, e
                 );
@@ -788,7 +787,7 @@ async fn endpoint_worker(
         }
     }
 
-    info!("Worker for endpoint '{}' stopped", endpoint.name);
+    tracing::info!("Worker for endpoint '{}' stopped", endpoint.name);
 }
 
 /// Determine severity based on analysis result content

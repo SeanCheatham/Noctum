@@ -7,7 +7,6 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Instant;
 use tokio::process::Command;
-use tracing::{debug, info, warn};
 
 /// Execute mutation testing for a single mutation.
 ///
@@ -43,7 +42,7 @@ pub async fn execute_mutation_test(
     // ALWAYS revert the file, even if test failed
     if let Err(e) = tokio::fs::write(file_path, &original_content).await {
         // Critical error - file may be left in mutated state
-        warn!(
+        tracing::warn!(
             "CRITICAL: Failed to revert file {}: {}",
             file_path.display(),
             e
@@ -63,14 +62,14 @@ pub async fn execute_mutation_test(
         ),
         TestResult::CompileError { output } => {
             // Log detailed info for compile errors to help debug
-            warn!(
+            tracing::warn!(
                 "Compile error for mutation in {}:{}\n  Description: {}\n  Find: '{}'\n  Replace: '{}'",
                 mutation.file_path, mutation.line_number, mutation.description,
                 mutation.find, mutation.replace
             );
             // Log first few lines of the error
             let error_preview: String = output.lines().take(10).collect::<Vec<_>>().join("\n");
-            warn!("  Error output:\n{}", error_preview);
+            tracing::warn!("  Error output:\n{}", error_preview);
 
             (
                 TestOutcome::CompileError,
@@ -81,7 +80,7 @@ pub async fn execute_mutation_test(
         TestResult::Timeout => (TestOutcome::Timeout, None, None),
     };
 
-    info!(
+    tracing::info!(
         "Mutation test complete: {}:{} ({}) = {:?} ({}ms)",
         mutation.file_path, mutation.line_number, mutation.description, outcome, execution_time_ms
     );
@@ -214,7 +213,7 @@ async fn run_cargo_test(repo_path: &Path, config: &MutationConfig) -> TestResult
             output: format!("Failed to run cargo test: {}", e),
         },
         Err(_) => {
-            debug!("Test timed out after {:?}", timeout);
+            tracing::debug!("Test timed out after {:?}", timeout);
             TestResult::Timeout
         }
     }
