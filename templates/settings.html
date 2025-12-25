@@ -1,49 +1,202 @@
-{% extends "base.html" %}
-{% block title %}Settings - Noctum{% endblock %}
-{% block content %}
+{% extends "base.html" %} {% block title %}Settings - Noctum{% endblock %} {%
+block content %}
 <h1>Settings</h1>
 
 <div class="card">
     <h3>Schedule Configuration</h3>
-    <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
-        Config file: <code style="background: var(--bg-tertiary); padding: 0.125rem 0.375rem; border-radius: 3px;">{{ config_path }}</code>
+    <p
+        style="
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        "
+    >
+        Config file:
+        <code
+            style="
+                background: var(--bg-tertiary);
+                padding: 0.125rem 0.375rem;
+                border-radius: 3px;
+            "
+            >{{ config_path }}</code
+        >
     </p>
 
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem;">
+    <div
+        style="
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 1rem;
+        "
+    >
         <div style="min-width: 120px">
-            <label for="start-hour" style="display: block; margin-bottom: 0.25rem; color: var(--text-secondary); font-size: 0.875rem;">Start Hour</label>
-            <select id="start-hour" style="width: 100%; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);"></select>
+            <label
+                for="start-hour"
+                style="
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    color: var(--text-secondary);
+                    font-size: 0.875rem;
+                "
+                >Start Hour</label
+            >
+            <select
+                id="start-hour"
+                style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    border-radius: 4px;
+                    color: var(--text-primary);
+                "
+            ></select>
         </div>
         <div style="min-width: 120px">
-            <label for="end-hour" style="display: block; margin-bottom: 0.25rem; color: var(--text-secondary); font-size: 0.875rem;">End Hour</label>
-            <select id="end-hour" style="width: 100%; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);"></select>
+            <label
+                for="end-hour"
+                style="
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    color: var(--text-secondary);
+                    font-size: 0.875rem;
+                "
+                >End Hour</label
+            >
+            <select
+                id="end-hour"
+                style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    border-radius: 4px;
+                    color: var(--text-primary);
+                "
+            ></select>
         </div>
-        <button type="button" id="apply-config-btn" class="btn" style="background: var(--success)">Apply</button>
+        <button
+            type="button"
+            id="apply-config-btn"
+            class="btn"
+            style="background: var(--success)"
+        >
+            Apply
+        </button>
     </div>
-    <p style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 1rem;">
-        Background processing runs during this time window. Overnight schedules (e.g., 22:00 - 06:00) are supported.
+    <p
+        style="
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-bottom: 1rem;
+        "
+    >
+        Background processing runs during this time window. Overnight schedules
+        (e.g., 22:00 - 06:00) are supported.
     </p>
 
-    <div style="display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-        <button type="button" id="save-config-btn" class="btn" style="background: var(--bg-tertiary); border: 1px solid var(--border);">Save Config to Disk</button>
-        <button type="button" id="reload-config-btn" class="btn" style="background: var(--bg-tertiary); border: 1px solid var(--border);">Reload Config from Disk</button>
+    <div
+        style="
+            display: flex;
+            gap: 0.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        "
+    >
+        <button type="button" id="save-config-btn" class="btn">
+            Save Config to Disk
+        </button>
+        <button type="button" id="reload-config-btn" class="btn">
+            Reload Config from Disk
+        </button>
     </div>
 </div>
 
 <div class="card">
     <h3>Add Ollama Endpoint</h3>
-    <form id="add-endpoint-form" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end">
+    <form
+        id="add-endpoint-form"
+        style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end"
+    >
         <div style="flex: 1; min-width: 150px">
-            <label for="endpoint-name" style="display: block; margin-bottom: 0.25rem; color: var(--text-secondary); font-size: 0.875rem;">Name</label>
-            <input type="text" id="endpoint-name" placeholder="My Ollama" required style="width: 100%; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);" />
+            <label
+                for="endpoint-name"
+                style="
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    color: var(--text-secondary);
+                    font-size: 0.875rem;
+                "
+                >Name</label
+            >
+            <input
+                type="text"
+                id="endpoint-name"
+                placeholder="My Ollama"
+                required
+                style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    border-radius: 4px;
+                    color: var(--text-primary);
+                "
+            />
         </div>
         <div style="flex: 2; min-width: 200px">
-            <label for="endpoint-url" style="display: block; margin-bottom: 0.25rem; color: var(--text-secondary); font-size: 0.875rem;">URL</label>
-            <input type="text" id="endpoint-url" placeholder="http://localhost:11434" required style="width: 100%; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);" />
+            <label
+                for="endpoint-url"
+                style="
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    color: var(--text-secondary);
+                    font-size: 0.875rem;
+                "
+                >URL</label
+            >
+            <input
+                type="text"
+                id="endpoint-url"
+                placeholder="http://localhost:11434"
+                required
+                style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    border-radius: 4px;
+                    color: var(--text-primary);
+                "
+            />
         </div>
         <div style="flex: 1; min-width: 150px">
-            <label for="endpoint-model" style="display: block; margin-bottom: 0.25rem; color: var(--text-secondary); font-size: 0.875rem;">Model</label>
-            <input type="text" id="endpoint-model" placeholder="qwen2.5-coder" required style="width: 100%; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);" />
+            <label
+                for="endpoint-model"
+                style="
+                    display: block;
+                    margin-bottom: 0.25rem;
+                    color: var(--text-secondary);
+                    font-size: 0.875rem;
+                "
+                >Model</label
+            >
+            <input
+                type="text"
+                id="endpoint-model"
+                placeholder="qwen2.5-coder"
+                required
+                style="
+                    width: 100%;
+                    padding: 0.5rem;
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    border-radius: 4px;
+                    color: var(--text-primary);
+                "
+            />
         </div>
         <button type="submit" class="btn">Add Endpoint</button>
     </form>
@@ -51,7 +204,16 @@
 
 <div class="card">
     <h3>Configured Endpoints</h3>
-    <p style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 1rem;">Changes are applied immediately. Use "Save Config to Disk" above to persist changes.</p>
+    <p
+        style="
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-bottom: 1rem;
+        "
+    >
+        Changes are applied immediately. Use "Save Config to Disk" above to
+        persist changes.
+    </p>
     {% if endpoints.is_empty() %}
     <div class="empty-state">
         <p>No Ollama endpoints configured yet.</p>
@@ -60,19 +222,59 @@
     {% else %}
     <table>
         <thead>
-            <tr><th>Name</th><th>URL</th><th>Model</th><th>Status</th><th>Actions</th></tr>
+            <tr>
+                <th>Name</th>
+                <th>URL</th>
+                <th>Model</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
         </thead>
         <tbody>
             {% for endpoint in endpoints %}
             <tr data-index="{{ loop.index0 }}">
                 <td>{{ endpoint.name }}</td>
-                <td style="color: var(--text-secondary); font-family: monospace">{{ endpoint.url }}</td>
+                <td
+                    style="color: var(--text-secondary); font-family: monospace"
+                >
+                    {{ endpoint.url }}
+                </td>
                 <td>{{ endpoint.model }}</td>
-                <td>{% if endpoint.enabled %}<span class="status-badge status-processing">Enabled</span>{% else %}<span class="status-badge status-idle">Disabled</span>{% endif %}</td>
+                <td>
+                    {% if endpoint.enabled %}<span
+                        class="status-badge status-processing"
+                        >Enabled</span
+                    >{% else %}<span class="status-badge status-idle"
+                        >Disabled</span
+                    >{% endif %}
+                </td>
                 <td style="white-space: nowrap">
-                    <button class="btn test-btn" data-url="{{ endpoint.url }}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border);">Test</button>
-                    <button class="btn toggle-btn" data-index="{{ loop.index0 }}" data-enabled="{{ endpoint.enabled }}" data-name="{{ endpoint.name }}" data-url="{{ endpoint.url }}" data-model="{{ endpoint.model }}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border);">{% if endpoint.enabled %}Disable{% else %}Enable{% endif %}</button>
-                    <button class="btn delete-btn" data-index="{{ loop.index0 }}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: rgba(248, 81, 73, 0.2); border: 1px solid var(--error); color: var(--error);">Delete</button>
+                    <button
+                        class="btn test-btn"
+                        data-url="{{ endpoint.url }}"
+                        style="padding: 0.25rem 0.5rem; font-size: 0.75rem"
+                    >
+                        Test
+                    </button>
+                    <button
+                        class="btn toggle-btn"
+                        data-index="{{ loop.index0 }}"
+                        data-enabled="{{ endpoint.enabled }}"
+                        data-name="{{ endpoint.name }}"
+                        data-url="{{ endpoint.url }}"
+                        data-model="{{ endpoint.model }}"
+                        style="padding: 0.25rem 0.5rem; font-size: 0.75rem"
+                    >
+                        {% if endpoint.enabled %}Disable{% else %}Enable{% endif
+                        %}
+                    </button>
+                    <button
+                        class="btn delete-btn"
+                        data-index="{{ loop.index0 }}"
+                        style="padding: 0.25rem 0.5rem; font-size: 0.75rem"
+                    >
+                        Delete
+                    </button>
                 </td>
             </tr>
             {% endfor %}
@@ -82,127 +284,127 @@
 </div>
 
 <script>
-(function() {
-    var startHour = {{ start_hour }};
-    var endHour = {{ end_hour }};
+    (function() {
+        var startHour = {{ start_hour }};
+        var endHour = {{ end_hour }};
 
-    var startSelect = document.getElementById("start-hour");
-    var endSelect = document.getElementById("end-hour");
+        var startSelect = document.getElementById("start-hour");
+        var endSelect = document.getElementById("end-hour");
 
-    for (var h = 0; h < 24; h++) {
-        var opt1 = document.createElement("option");
-        opt1.value = h;
-        opt1.textContent = h + ":00";
-        if (h === startHour) opt1.selected = true;
-        startSelect.appendChild(opt1);
+        for (var h = 0; h < 24; h++) {
+            var opt1 = document.createElement("option");
+            opt1.value = h;
+            opt1.textContent = h + ":00";
+            if (h === startHour) opt1.selected = true;
+            startSelect.appendChild(opt1);
 
-        var opt2 = document.createElement("option");
-        opt2.value = h;
-        opt2.textContent = h + ":00";
-        if (h === endHour) opt2.selected = true;
-        endSelect.appendChild(opt2);
-    }
+            var opt2 = document.createElement("option");
+            opt2.value = h;
+            opt2.textContent = h + ":00";
+            if (h === endHour) opt2.selected = true;
+            endSelect.appendChild(opt2);
+        }
 
-    function parseJsonResponse(response) {
-        return response.text().then(function(text) {
-            if (!text) return {};
-            try { return JSON.parse(text); } catch(e) { return { error: text }; }
-        });
-    }
+        function parseJsonResponse(response) {
+            return response.text().then(function(text) {
+                if (!text) return {};
+                try { return JSON.parse(text); } catch(e) { return { error: text }; }
+            });
+        }
 
-    document.getElementById("apply-config-btn").addEventListener("click", function() {
-        var s = parseInt(startSelect.value);
-        var e = parseInt(endSelect.value);
-        fetch("/api/config", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ start_hour: s, end_hour: e })
-        }).then(function(response) {
-            if (response.ok) {
-                alert("Schedule updated! Processing will run between " + s + ":00 and " + e + ":00");
-            } else {
-                parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
-            }
-        }).catch(function(err) { alert("Failed: " + err.message); });
-    });
-
-    document.getElementById("save-config-btn").addEventListener("click", function() {
-        fetch("/api/config/save", { method: "POST" }).then(function(response) {
-            if (response.ok) alert("Configuration saved to disk!");
-            else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
-        }).catch(function(err) { alert("Failed: " + err.message); });
-    });
-
-    document.getElementById("reload-config-btn").addEventListener("click", function() {
-        fetch("/api/config/reload", { method: "POST" }).then(function(response) {
-            if (response.ok) { alert("Configuration reloaded!"); window.location.reload(); }
-            else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
-        }).catch(function(err) { alert("Failed: " + err.message); });
-    });
-
-    document.getElementById("add-endpoint-form").addEventListener("submit", function(ev) {
-        ev.preventDefault();
-        var name = document.getElementById("endpoint-name").value;
-        var url = document.getElementById("endpoint-url").value;
-        var model = document.getElementById("endpoint-model").value;
-        fetch("/endpoints", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: name, url: url, model: model })
-        }).then(function(response) {
-            if (response.ok) window.location.reload();
-            else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
-        }).catch(function(err) { alert("Failed: " + err.message); });
-    });
-
-    document.querySelectorAll(".test-btn").forEach(function(btn) {
-        btn.addEventListener("click", function() {
-            var url = btn.dataset.url;
-            var orig = btn.textContent;
-            btn.textContent = "Testing...";
-            btn.disabled = true;
-            fetch("/api/test-ollama", {
+        document.getElementById("apply-config-btn").addEventListener("click", function() {
+            var s = parseInt(startSelect.value);
+            var e = parseInt(endSelect.value);
+            fetch("/api/config", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url: url })
+                body: JSON.stringify({ start_hour: s, end_hour: e })
             }).then(function(response) {
-                return parseJsonResponse(response);
-            }).then(function(result) {
-                if (result.success) alert("Connection successful! Found " + result.model_count + " model(s).");
-                else alert("Connection failed: " + (result.error || "Unknown"));
-            }).catch(function(err) {
-                alert("Test failed: " + err.message);
-            }).finally(function() {
-                btn.textContent = orig;
-                btn.disabled = false;
+                if (response.ok) {
+                    alert("Schedule updated! Processing will run between " + s + ":00 and " + e + ":00");
+                } else {
+                    parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
+                }
+            }).catch(function(err) { alert("Failed: " + err.message); });
+        });
+
+        document.getElementById("save-config-btn").addEventListener("click", function() {
+            fetch("/api/config/save", { method: "POST" }).then(function(response) {
+                if (response.ok) alert("Configuration saved to disk!");
+                else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
+            }).catch(function(err) { alert("Failed: " + err.message); });
+        });
+
+        document.getElementById("reload-config-btn").addEventListener("click", function() {
+            fetch("/api/config/reload", { method: "POST" }).then(function(response) {
+                if (response.ok) { alert("Configuration reloaded!"); window.location.reload(); }
+                else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
+            }).catch(function(err) { alert("Failed: " + err.message); });
+        });
+
+        document.getElementById("add-endpoint-form").addEventListener("submit", function(ev) {
+            ev.preventDefault();
+            var name = document.getElementById("endpoint-name").value;
+            var url = document.getElementById("endpoint-url").value;
+            var model = document.getElementById("endpoint-model").value;
+            fetch("/endpoints", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name, url: url, model: model })
+            }).then(function(response) {
+                if (response.ok) window.location.reload();
+                else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
+            }).catch(function(err) { alert("Failed: " + err.message); });
+        });
+
+        document.querySelectorAll(".test-btn").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+                var url = btn.dataset.url;
+                var orig = btn.textContent;
+                btn.textContent = "Testing...";
+                btn.disabled = true;
+                fetch("/api/test-ollama", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: url })
+                }).then(function(response) {
+                    return parseJsonResponse(response);
+                }).then(function(result) {
+                    if (result.success) alert("Connection successful! Found " + result.model_count + " model(s).");
+                    else alert("Connection failed: " + (result.error || "Unknown"));
+                }).catch(function(err) {
+                    alert("Test failed: " + err.message);
+                }).finally(function() {
+                    btn.textContent = orig;
+                    btn.disabled = false;
+                });
             });
         });
-    });
 
-    document.querySelectorAll(".toggle-btn").forEach(function(btn) {
-        btn.addEventListener("click", function() {
-            var index = btn.dataset.index;
-            var enabled = btn.dataset.enabled === "true";
-            fetch("/endpoints/" + index, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: btn.dataset.name, url: btn.dataset.url, model: btn.dataset.model, enabled: !enabled })
-            }).then(function(response) {
-                if (response.ok) window.location.reload();
-                else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
-            }).catch(function(err) { alert("Failed: " + err.message); });
+        document.querySelectorAll(".toggle-btn").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+                var index = btn.dataset.index;
+                var enabled = btn.dataset.enabled === "true";
+                fetch("/endpoints/" + index, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: btn.dataset.name, url: btn.dataset.url, model: btn.dataset.model, enabled: !enabled })
+                }).then(function(response) {
+                    if (response.ok) window.location.reload();
+                    else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
+                }).catch(function(err) { alert("Failed: " + err.message); });
+            });
         });
-    });
 
-    document.querySelectorAll(".delete-btn").forEach(function(btn) {
-        btn.addEventListener("click", function() {
-            if (!confirm("Delete this endpoint?")) return;
-            fetch("/endpoints/" + btn.dataset.index, { method: "DELETE" }).then(function(response) {
-                if (response.ok) window.location.reload();
-                else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
-            }).catch(function(err) { alert("Failed: " + err.message); });
+        document.querySelectorAll(".delete-btn").forEach(function(btn) {
+            btn.addEventListener("click", function() {
+                if (!confirm("Delete this endpoint?")) return;
+                fetch("/endpoints/" + btn.dataset.index, { method: "DELETE" }).then(function(response) {
+                    if (response.ok) window.location.reload();
+                    else parseJsonResponse(response).then(function(err) { alert("Error: " + (err.error || "Unknown")); });
+                }).catch(function(err) { alert("Failed: " + err.message); });
+            });
         });
-    });
-})();
+    })();
 </script>
 {% endblock %}

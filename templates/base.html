@@ -3,19 +3,37 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/static/apple-touch-icon.png"
+        />
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="32x32"
+            href="/static/favicon-32x32.png"
+        />
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="16x16"
+            href="/static/favicon-16x16.png"
+        />
+        <link rel="manifest" href="/static/site.webmanifest" />
         <title>{% block title %}Noctum{% endblock %}</title>
         <style>
             :root {
-                --bg-primary: #0d1117;
-                --bg-secondary: #161b22;
-                --bg-tertiary: #21262d;
-                --text-primary: #c9d1d9;
-                --text-secondary: #8b949e;
-                --accent: #58a6ff;
-                --success: #3fb950;
-                --warning: #d29922;
-                --error: #f85149;
-                --border: #30363d;
+                --bg-primary: #000000;
+                --bg-secondary: #111111;
+                --bg-tertiary: #222222;
+                --text-primary: #ffffff;
+                --text-secondary: #aaaaaa;
+                --accent: #ffffff;
+                --success: #ffffff;
+                --warning: #aaaaaa;
+                --error: #ffffff;
+                --border: #ffffff;
             }
 
             * {
@@ -52,10 +70,18 @@
             }
 
             .logo {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
                 font-size: 1.5rem;
                 font-weight: 600;
                 color: var(--text-primary);
                 text-decoration: none;
+            }
+
+            .logo img {
+                width: 32px;
+                height: 32px;
             }
 
             nav a {
@@ -105,12 +131,12 @@
                 color: var(--text-secondary);
             }
             .status-processing {
-                background-color: rgba(88, 166, 255, 0.2);
-                color: var(--accent);
+                background-color: var(--bg-tertiary);
+                color: var(--text-primary);
             }
             .status-paused {
-                background-color: rgba(210, 153, 34, 0.2);
-                color: var(--warning);
+                background-color: var(--bg-tertiary);
+                color: var(--text-secondary);
             }
 
             .grid {
@@ -140,7 +166,7 @@
                 display: inline-block;
                 padding: 0.5rem 1rem;
                 background-color: var(--accent);
-                color: white;
+                color: #000000;
                 border: none;
                 border-radius: 6px;
                 cursor: pointer;
@@ -162,7 +188,12 @@
     <body>
         <header>
             <div class="container">
-                <a href="/" class="logo">Noctum</a>
+                <a href="/" class="logo"
+                    ><img
+                        src="/static/android-chrome-192x192.png"
+                        alt="Noctum logo"
+                    />Noctum</a
+                >
                 <nav>
                     <a href="/">Repositories</a>
                     <a href="/settings">Settings</a>
