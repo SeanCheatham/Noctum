@@ -3,7 +3,7 @@
 [![CI](https://github.com/SeanCheatham/Noctum/workflows/CI/badge.svg)](https://github.com/SeanCheatham/Noctum/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 
-Noctum is a local-first, AI-powered code analyzer. It runs in the background, taking advantage of idle compute time to help improve your codebase.
+Noctum is a local-first, AI-powered code analyzer. It runs in the background on a configured schedule to help improve your codebase.
 
 You spent $2,000 on a high-performance laptop because you need it to be snappy and responsive while you're working. Unless you use it 24/7, that's a lot of value you're not getting out of it. Noctum helps you squeeze out a few more bits from your computer.
 
@@ -15,39 +15,21 @@ Noctum is different. Noctum doesn't work in realtime. It works asynchronously wh
 
 Before running Noctum, you'll need:
 
-1. **Rust Toolchain** (1.70+)
-   - Install via [rustup](https://rustup.rs/): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-   - Used for analyzing Rust codebases and running mutation tests
-
-2. **Ollama**
+1. **Ollama**
    - Install from [ollama.com](https://ollama.com/)
    - Pull a code analysis model: `ollama pull qwen2.5-coder` (or your preferred model)
    - Ollama must be running before starting Noctum
 
+### Rust Projects
+Mutation testing requires compiling and test execution.
+1. **Rust Toolchain** (1.70+)
+   - Install via [rustup](https://rustup.rs/): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+   - Used for analyzing Rust codebases and running mutation tests
+
+### Other Languages
+Coming "soon"
+
 ## Installation
-
-### From Source
-
-```bash
-git clone https://github.com/SeanCheatham/Noctum.git
-cd Noctum
-cargo install --path .
-```
-
-### Pre-built Binaries
-
-Download the latest release for your platform from [GitHub Releases](https://github.com/SeanCheatham/Noctum/releases):
-
-- **Linux (x86_64):** `noctum-x86_64-unknown-linux-gnu.tar.gz`
-- **macOS (Intel):** `noctum-x86_64-apple-darwin.tar.gz`
-- **macOS (Apple Silicon):** `noctum-aarch64-apple-darwin.tar.gz`
-
-Extract and place the binary in your PATH:
-
-```bash
-tar -xzf noctum-*.tar.gz
-sudo mv noctum /usr/local/bin/
-```
 
 ### Quick Install Script
 
@@ -69,6 +51,29 @@ To uninstall (removes binary and services, preserves config/data):
 curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh | sh -s -- --uninstall
 ```
 
+### Pre-built Binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/SeanCheatham/Noctum/releases):
+
+- **Linux (x86_64):** `noctum-x86_64-unknown-linux-gnu.tar.gz`
+- **macOS (Intel):** `noctum-x86_64-apple-darwin.tar.gz`
+- **macOS (Apple Silicon):** `noctum-aarch64-apple-darwin.tar.gz`
+
+Extract and place the binary in your PATH:
+
+```bash
+tar -xzf noctum-*.tar.gz
+sudo mv noctum /usr/local/bin/
+```
+
+### From Source
+
+```bash
+git clone https://github.com/SeanCheatham/Noctum.git
+cd Noctum
+cargo install --path .
+```
+
 ## Quickstart
 
 1. **Start Ollama** (if not already running):
@@ -79,8 +84,9 @@ curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh
 2. **Create a configuration file** (optional):
    ```bash
    mkdir -p ~/.config/noctum
-   cp config.example.toml ~/.config/noctum/config.toml
+   touch ~/.config/noctum/config.toml
    ```
+ (See [Configuration](#configuration) section)
 
 3. **Start Noctum**:
    ```bash
@@ -94,7 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh
 
 5. **Add a repository** to analyze via the dashboard UI
 
-Noctum will run in the background, analyzing your code during idle periods (by default, when the system has been idle for 5+ minutes).
+Noctum will run in the background, analyzing your code according to a configured schedule.
 
 ## Configuration
 
@@ -104,9 +110,9 @@ Noctum looks for a config file at `~/.config/noctum/config.toml`. See [`config.e
 |--------|---------|-------------|
 | `web.port` | `8420` | Web dashboard port |
 | `web.host` | `127.0.0.1` | Host to bind |
-| `ollama.url` | `http://localhost:11434` | Ollama API endpoint |
-| `ollama.model` | `qwen2.5-coder` | Model for analysis |
-| `idle.threshold_seconds` | `300` | Seconds of idle before starting work |
+| `schedule.start_hour` | `22` | Start hour (0-23) of the analysis window |
+| `schedule.end_hour` | `6` | End hour (0-23) of the analysis window |
+| `schedule.check_interval_seconds` | `60` | How often to check schedule (seconds) |
 
 ## Features
 
@@ -115,7 +121,7 @@ Noctum looks for a config file at `~/.config/noctum/config.toml`. See [`config.e
 - Rust-oriented code analysis with LLM-powered insights
 - LLM-driven mutation testing
 - Web dashboard for configuration and results
-- Idle detection and scheduled analysis
+- Scheduled analysis with configurable time windows
 - Multi-endpoint Ollama support
 - SQLite database for persistent storage
 
@@ -134,7 +140,7 @@ Noctum is a daemon-based application written in Rust. It features a web UI/dashb
 
 A SQLite database stores configurations, plans, internal notes, and results. From the dashboard, you configure repository directories for analysis.
 
-The daemon runs constantly in the background but monitors for user inactivity. When inactive, the daemon starts its background processing tasks. If the user comes back, the background processing is paused.
+The daemon runs constantly in the background but only performs analysis during the configured schedule window (default 10pm-6am). Outside of this window, analysis is paused.
 
 The background processing tasks evolve over time as the agent learns the codebase. It starts by working through the code file-by-file until it has a solid understanding of the system architecture. Once it has analyzed the codebase, it uses LLM-driven mutation testing, prioritizing areas of high importance. Results are captured and interpreted by the agent with the context of the codebase, surfacing reports and recommendations.
 

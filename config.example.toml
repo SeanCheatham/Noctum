@@ -2,7 +2,7 @@
 # Copy this to ~/.config/noctum/config.toml or specify with --config
 
 [general]
-# Log level: trace, debug, info, warn, error
+# How noisy do you want the logs?
 log_level = "info"
 
 [web]
@@ -11,17 +11,26 @@ port = 8420
 # Host to bind (use 0.0.0.0 to expose externally)
 host = "127.0.0.1"
 
-[ollama]
+# Defines the Ollama instances that are used for LLM inference
+[[endpoints]]
+# Name that is displayed in the Web UI
+name = "Laptop"
 # Ollama API URL
 url = "http://localhost:11434"
 # Model to use for analysis (must be available in Ollama)
 model = "qwen2.5-coder"
+# Flag to enable or disable this endpoint
+enabled = true
 
-[idle]
-# Minimum seconds of idle time before starting background work
-threshold_seconds = 300
-# How often to check for idle status (seconds)
-check_interval_seconds = 30
+# You can define more than one Ollama endpoint. Requests will be load-balanced between them.
+# [[endpoints]]
+# name = "Gaming Desktop"
+# url = "http://192.168.1.69:11434"
+# model = "qwen2.5-coder"
+# enabled = true
 
-# Optional: Override the data directory
-# data_dir = "/custom/path/to/noctum/data"
+[schedule]
+# Hour of the day at which background processing begins (24-hours)
+start_hour = 22
+# Hour of the day at which background processing stops (24-hours)
+end_hour = 4
