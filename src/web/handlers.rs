@@ -14,6 +14,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use super::templates::{
@@ -37,11 +38,10 @@ async fn get_repo_or_error(db: &Database, id: i64) -> Result<Repository, Respons
     match db.get_repository(id).await {
         Ok(Some(repo)) => Ok(repo),
         Ok(None) => Err((StatusCode::NOT_FOUND, "Repository not found").into_response()),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Database error: {}", e),
-        )
-            .into_response()),
+        Err(e) => {
+            tracing::error!("Database error fetching repository {}: {}", id, e);
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+        }
     }
 }
 
@@ -50,7 +50,6 @@ pub async fn list_repositories(State(state): State<Arc<AppState>>) -> impl IntoR
     render_template(RepositoriesTemplate { repositories })
 }
 
-/// Add a repository
 #[derive(Deserialize, Serialize)]
 pub struct AddRepositoryRequest {
     path: String,
@@ -61,13 +60,33 @@ pub async fn add_repository(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AddRepositoryRequest>,
 ) -> impl IntoResponse {
+    // Validate path exists and is a directory
+    let path = FilePath::new(&req.path);
+    if !path.exists() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Path does not exist" })),
+        )
+            .into_response();
+    }
+    if !path.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Path must be a directory" })),
+        )
+            .into_response();
+    }
+
     match state.db.add_repository(&req.path, &req.name).await {
         Ok(id) => (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::warn!("Failed to add repository: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "Failed to add repository" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -381,11 +400,14 @@ pub async fn api_save_config(State(state): State<Arc<AppState>>) -> impl IntoRes
             tracing::info!("Config saved to disk");
             (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Failed to save config: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to save configuration" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -395,13 +417,11 @@ pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoR
         Ok(new_config) => {
             let schedule = new_config.schedule.clone();
 
-            // Update in-memory config
             {
                 let mut config = state.config.write().await;
                 *config = new_config;
             }
 
-            // Update daemon's schedule
             {
                 let daemon = state.daemon.read().await;
                 daemon.set_schedule(schedule).await;
@@ -410,11 +430,14 @@ pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoR
             tracing::info!("Config reloaded from disk");
             (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Failed to reload config: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to reload configuration" })),
+            )
+                .into_response()
+        }
     }
 }
 

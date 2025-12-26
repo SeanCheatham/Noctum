@@ -353,7 +353,7 @@ Noctum{% endblock %} {% block content %}
 
             pathEl.textContent = file.dataset.path;
             dateEl.textContent = "Analyzed: " + file.dataset.date;
-            resultEl.innerHTML = renderMarkdown(file.dataset.result);
+            resultEl.innerHTML = DOMPurify.sanitize(renderMarkdown(file.dataset.result));
         });
     });
 </script>

@@ -409,7 +409,7 @@
             document
                 .querySelectorAll(".description-cell")
                 .forEach(function (cell) {
-                    cell.innerHTML = formatBackticks(cell.textContent);
+                    cell.innerHTML = DOMPurify.sanitize(formatBackticks(cell.textContent));
                 });
         });
     </script>

@@ -8,14 +8,52 @@ mod templates;
 
 use crate::AppState;
 use axum::{
+    extract::Request,
+    http::StatusCode,
+    middleware::{self, Next},
+    response::Response,
     routing::{delete, get, post},
     Router,
 };
 use std::sync::Arc;
 use tower_http::services::ServeDir;
 
+/// Middleware to validate Host header against DNS rebinding attacks.
+///
+/// Only allows requests where the Host header matches localhost variants
+/// or the configured bind address.
+async fn validate_host(
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let host = request
+        .headers()
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+
+    // Strip port if present
+    let host_without_port = host.split(':').next().unwrap_or(host);
+
+    // Allow localhost variants and 127.0.0.1
+    let allowed = matches!(
+        host_without_port,
+        "localhost" | "127.0.0.1" | "::1" | "[::1]"
+    );
+
+    if allowed {
+        Ok(next.run(request).await)
+    } else {
+        tracing::warn!("Rejected request with invalid Host header: {}", host);
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+
 /// Start the web server
-pub async fn start_server(state: Arc<AppState>, port: u16) -> anyhow::Result<()> {
+pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow::Result<()> {
+    // Only enforce host validation when binding to localhost
+    let is_localhost = matches!(host, "127.0.0.1" | "localhost" | "::1");
+
     let app = Router::new()
         // Repositories (default page)
         .route("/", get(handlers::list_repositories))
@@ -52,7 +90,14 @@ pub async fn start_server(state: Arc<AppState>, port: u16) -> anyhow::Result<()>
         // State
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{}", port);
+    // Apply host validation middleware only for localhost bindings
+    let app = if is_localhost {
+        app.layer(middleware::from_fn(validate_host))
+    } else {
+        app
+    };
+
+    let addr = format!("{}:{}", host, port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("Web server listening on http://{}", addr);

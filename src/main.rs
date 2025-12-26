@@ -98,8 +98,11 @@ async fn main() -> anyhow::Result<()> {
             };
 
             // Start the web server
+            let web_host = config.read().await.web.host.clone();
             let web_port = config.read().await.web.port;
-            let server_handle = tokio::spawn(start_server(state, web_port));
+            let server_handle = tokio::spawn(async move {
+                start_server(state, &web_host, web_port).await
+            });
 
             tracing::info!(
                 "Noctum is running. Dashboard available at http://localhost:{}",

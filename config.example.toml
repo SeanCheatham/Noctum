@@ -8,7 +8,9 @@ log_level = "info"
 [web]
 # Web dashboard port
 port = 8420
-# Host to bind (use 0.0.0.0 to expose externally)
+# Host to bind.
+# WARNING: Using 0.0.0.0 exposes the server without authentication.
+# Only use on trusted networks.
 host = "127.0.0.1"
 
 # Defines the Ollama instances that are used for LLM inference
@@ -33,4 +35,4 @@ enabled = true
 # Hour of the day at which background processing begins (24-hours)
 start_hour = 22
 # Hour of the day at which background processing stops (24-hours)
-end_hour = 4
+end_hour = 6
