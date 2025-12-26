@@ -332,19 +332,17 @@
                 const container = detailsRow.querySelector(".diff-container");
                 if (container && !container.dataset.rendered) {
                     try {
-                        const data = JSON.parse(container.dataset.replacements);
+                        const replacements = JSON.parse(container.dataset.replacements);
                         let html = "";
 
-                        // New format: { line_number, find, replace, original_line }
-                        if (
-                            data.line_number !== undefined &&
-                            data.find !== undefined
-                        ) {
-                            const lineNum = data.line_number;
-                            const originalLine = data.original_line || "";
+                        // Sort by line number ascending for display
+                        const sorted = [...replacements].sort((a, b) => a.line_number - b.line_number);
+                        for (const repl of sorted) {
+                            const lineNum = repl.line_number;
+                            const originalLine = repl.original_line || "";
                             const mutatedLine = originalLine.replace(
-                                data.find,
-                                data.replace,
+                                repl.find,
+                                repl.replace,
                             );
 
                             html += `<div class="diff-line diff-original">
@@ -357,28 +355,8 @@
                                 <span class="diff-prefix">+</span>
                                 <span>${escapeHtml(mutatedLine)}</span>
                             </div>`;
-                        } else {
-                            // Old format fallback: { "line_num": { original, replacement } }
-                            for (const [lineNum, change] of Object.entries(
-                                data,
-                            ).sort((a, b) => parseInt(a[0]) - parseInt(b[0]))) {
-                                if (
-                                    change.original !== undefined &&
-                                    change.replacement !== undefined
-                                ) {
-                                    html += `<div class="diff-line diff-original">
-                                        <span class="diff-line-num">${lineNum}</span>
-                                        <span class="diff-prefix">-</span>
-                                        <span>${escapeHtml(change.original)}</span>
-                                    </div>`;
-                                    html += `<div class="diff-line diff-replacement">
-                                        <span class="diff-line-num">${lineNum}</span>
-                                        <span class="diff-prefix">+</span>
-                                        <span>${escapeHtml(change.replacement)}</span>
-                                    </div>`;
-                                }
-                            }
                         }
+
                         container.innerHTML =
                             html || "<em>No changes recorded</em>";
                         container.dataset.rendered = "true";

@@ -2,6 +2,11 @@
 //!
 //! This module defines traits and implementations for language-specific operations
 //! like finding source files, running tests, and generating analysis prompts.
+//!
+//! Note: This module is scaffolding for future multi-language support and is not
+//! yet integrated into the main codebase.
+
+#![allow(dead_code)]
 
 mod rust;
 

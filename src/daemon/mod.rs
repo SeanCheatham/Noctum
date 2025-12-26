@@ -6,7 +6,7 @@ use crate::mutation::{
 };
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
@@ -47,6 +47,24 @@ pub enum DaemonStatus {
     Stopping,
 }
 
+impl DaemonStatus {
+    fn as_u8(self) -> u8 {
+        match self {
+            DaemonStatus::Waiting => 0,
+            DaemonStatus::Processing => 1,
+            DaemonStatus::Stopping => 2,
+        }
+    }
+
+    fn from_u8(v: u8) -> Self {
+        match v {
+            0 => DaemonStatus::Waiting,
+            1 => DaemonStatus::Processing,
+            _ => DaemonStatus::Stopping,
+        }
+    }
+}
+
 /// A task to be processed by an endpoint worker
 struct AnalysisTask {
     repository_id: i64,
@@ -55,10 +73,38 @@ struct AnalysisTask {
     content_hash: String,
 }
 
+/// Handle for controlling the daemon from outside (e.g., web handlers).
+/// This is cheap to clone and doesn't require any locks.
+#[derive(Clone)]
+pub struct DaemonHandle {
+    should_stop: Arc<AtomicBool>,
+    trigger_scan: Arc<AtomicBool>,
+    status: Arc<AtomicU8>,
+}
+
+impl DaemonHandle {
+    /// Trigger an immediate scan (works anytime, ignores schedule)
+    pub fn trigger_scan(&self) {
+        self.trigger_scan.store(true, Ordering::SeqCst);
+        tracing::info!("Scan triggered manually");
+    }
+
+    /// Signal the daemon to stop gracefully
+    pub fn stop(&self) {
+        tracing::info!("Shutdown requested, stopping daemon...");
+        self.should_stop.store(true, Ordering::SeqCst);
+    }
+
+    /// Get current daemon status
+    pub fn status(&self) -> DaemonStatus {
+        DaemonStatus::from_u8(self.status.load(Ordering::SeqCst))
+    }
+}
+
 /// The background daemon that manages analysis tasks
 pub struct Daemon {
     config: Arc<RwLock<Config>>,
-    status: DaemonStatus,
+    status: Arc<AtomicU8>,
     should_stop: Arc<AtomicBool>,
     trigger_scan: Arc<AtomicBool>,
     db: Database,
@@ -69,17 +115,21 @@ impl Daemon {
     pub fn new(config: Arc<RwLock<Config>>, db: Database) -> Self {
         Self {
             config,
-            status: DaemonStatus::Waiting,
+            status: Arc::new(AtomicU8::new(DaemonStatus::Waiting.as_u8())),
             should_stop: Arc::new(AtomicBool::new(false)),
             trigger_scan: Arc::new(AtomicBool::new(false)),
             db,
         }
     }
 
-    /// Trigger an immediate scan (works anytime, ignores schedule)
-    pub fn trigger_scan(&self) {
-        self.trigger_scan.store(true, Ordering::SeqCst);
-        tracing::info!("Scan triggered manually");
+    /// Get a handle for controlling the daemon from outside.
+    /// The handle is cheap to clone and doesn't require locks.
+    pub fn handle(&self) -> DaemonHandle {
+        DaemonHandle {
+            should_stop: Arc::clone(&self.should_stop),
+            trigger_scan: Arc::clone(&self.trigger_scan),
+            status: Arc::clone(&self.status),
+        }
     }
 
     /// Check if we're in the scheduled window
@@ -89,18 +139,12 @@ impl Daemon {
 
     /// Get current daemon status
     pub fn status(&self) -> DaemonStatus {
-        self.status
+        DaemonStatus::from_u8(self.status.load(Ordering::SeqCst))
     }
 
-    /// Signal the daemon to stop gracefully
-    pub fn stop(&self) {
-        tracing::info!("Shutdown requested, stopping daemon...");
-        self.should_stop.store(true, Ordering::SeqCst);
-    }
-
-    /// Check if shutdown has been requested
-    pub fn should_stop(&self) -> bool {
-        self.should_stop.load(Ordering::SeqCst)
+    /// Set daemon status
+    fn set_status(&self, status: DaemonStatus) {
+        self.status.store(status.as_u8(), Ordering::SeqCst);
     }
 
     /// Run the daemon loop
@@ -116,26 +160,37 @@ impl Daemon {
 
         let mut ticker = interval(check_interval);
 
-        while !self.should_stop.load(Ordering::SeqCst) {
-            ticker.tick().await;
+        loop {
+            // Wait for either the next tick or a stop signal
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = self.wait_for_stop() => {
+                    break;
+                }
+            }
+
+            // Check stop flag after waking up
+            if self.should_stop.load(Ordering::SeqCst) {
+                break;
+            }
 
             // Check if a scan was triggered manually
             let scan_triggered = self.trigger_scan.swap(false, Ordering::SeqCst);
             if scan_triggered {
                 tracing::info!("Running manually triggered scan");
-                self.status = DaemonStatus::Processing;
+                self.set_status(DaemonStatus::Processing);
                 self.process_tasks().await?;
-                self.status = DaemonStatus::Waiting;
+                self.set_status(DaemonStatus::Waiting);
                 continue;
             }
 
             // Check if we're in the scheduled window
             let in_window = self.is_in_schedule().await;
 
-            match (self.status, in_window) {
+            match (self.status(), in_window) {
                 (DaemonStatus::Waiting, true) => {
                     tracing::info!("Entering scheduled window, starting processing");
-                    self.status = DaemonStatus::Processing;
+self.set_status(DaemonStatus::Processing);
                     self.process_tasks().await?;
                 }
                 (DaemonStatus::Processing, true) => {
@@ -144,7 +199,7 @@ impl Daemon {
                 }
                 (DaemonStatus::Processing, false) => {
                     tracing::info!("Exiting scheduled window, pausing");
-                    self.status = DaemonStatus::Waiting;
+                    self.set_status(DaemonStatus::Waiting);
                 }
                 (DaemonStatus::Waiting, false) => {
                     // Normal state, waiting for window
@@ -156,9 +211,28 @@ impl Daemon {
             }
         }
 
-        self.status = DaemonStatus::Stopping;
+        self.set_status(DaemonStatus::Stopping);
         tracing::info!("Daemon stopped");
         Ok(())
+    }
+
+    /// Wait until the stop flag is set (used for select!)
+    async fn wait_for_stop(&self) {
+        // Poll the stop flag periodically
+        while !self.should_stop.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Sleep for a duration, but wake up early if shutdown is requested.
+    /// Checks the stop flag every second.
+    async fn interruptible_sleep(&self, seconds: u64) {
+        for _ in 0..seconds {
+            if self.should_stop.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
 
     /// Process background analysis tasks
@@ -236,14 +310,18 @@ impl Daemon {
         self.db.update_daemon_status("idle", None).await?;
 
         // If we generated architecture summaries, wait longer before next cycle
-        let delay = if any_files_analyzed {
-            Duration::from_secs(20 * 60) // 20 minutes
+        // Use interruptible sleep so we can respond to shutdown signals
+        let delay_secs = if any_files_analyzed {
+            20 * 60 // 20 minutes
         } else {
-            Duration::from_secs(5)
+            5
         };
 
-        tracing::debug!("Sleeping for {:?} before next processing cycle", delay);
-        tokio::time::sleep(delay).await;
+        tracing::debug!(
+            "Sleeping for {} seconds before next processing cycle",
+            delay_secs
+        );
+        self.interruptible_sleep(delay_secs).await;
 
         Ok(())
     }
@@ -627,11 +705,7 @@ impl Daemon {
                         {
                             Ok(m) => m,
                             Err(e2) => {
-                                tracing::warn!(
-                                    "Retry also failed for {}: {}",
-                                    file_path_str,
-                                    e2
-                                );
+                                tracing::warn!("Retry also failed for {}: {}", file_path_str, e2);
                                 continue;
                             }
                         }
@@ -660,8 +734,16 @@ impl Daemon {
                     break;
                 }
 
-                // Execute the mutation test
-                let result = match execute_mutation_test(repo_path, mutation, &config).await {
+                // Execute the mutation test (with retry logic for compile errors)
+                let result = match execute_mutation_test(
+                    &current_client,
+                    repo_path,
+                    mutation,
+                    &content,
+                    &config,
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(e) => {
                         tracing::warn!("Failed to execute mutation test: {}", e);
@@ -669,20 +751,29 @@ impl Daemon {
                     }
                 };
 
-                // Build replacements JSON with find/replace info
-                // Format: { "line_number": N, "find": "...", "replace": "...", "original_line": "..." }
-                let original_line = original_lines
-                    .get(result.mutation.line_number.saturating_sub(1))
-                    .unwrap_or(&"")
-                    .to_string();
+                // Build replacements JSON with all replacement info
+                // Each replacement has: line_number, find, replace
+                // We also include the original lines for context
+                let replacements_with_context: Vec<serde_json::Value> = result
+                    .mutation
+                    .replacements
+                    .iter()
+                    .map(|r| {
+                        let original_line = original_lines
+                            .get(r.line_number.saturating_sub(1))
+                            .unwrap_or(&"")
+                            .to_string();
+                        serde_json::json!({
+                            "line_number": r.line_number,
+                            "find": r.find,
+                            "replace": r.replace,
+                            "original_line": original_line
+                        })
+                    })
+                    .collect();
 
-                let replacements_json = serde_json::json!({
-                    "line_number": result.mutation.line_number,
-                    "find": result.mutation.find,
-                    "replace": result.mutation.replace,
-                    "original_line": original_line
-                })
-                .to_string();
+                let replacements_json = serde_json::to_string(&replacements_with_context)
+                    .unwrap_or_else(|_| "[]".to_string());
 
                 if let Err(e) = self
                     .db
@@ -781,10 +872,19 @@ async fn endpoint_worker(
             break;
         }
 
-        // Try to get a task from the queue
+        // Try to get a task from the queue, with shutdown check
         let task = {
             let mut rx = receiver.lock().await;
-            rx.recv().await
+            tokio::select! {
+                task = rx.recv() => task,
+                _ = wait_for_stop_signal(&should_stop) => {
+                    tracing::debug!(
+                        "Worker for '{}' stopping due to shutdown signal",
+                        endpoint.name
+                    );
+                    break;
+                }
+            }
         };
 
         let task = match task {
@@ -883,6 +983,13 @@ fn determine_severity(result: &str) -> Option<String> {
     } else {
         // Default to info for improvements, suggestions, or any other content
         Some("info".to_string())
+    }
+}
+
+/// Helper function to wait for shutdown signal (for use in tokio::select!)
+async fn wait_for_stop_signal(should_stop: &AtomicBool) {
+    while !should_stop.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -1029,11 +1136,13 @@ mod tests {
     #[test]
     fn test_daemon_trigger_scan() {
         let (daemon, _temp_dir) = create_test_daemon();
+        let handle = daemon.handle();
+
         assert!(!daemon
             .trigger_scan
             .load(std::sync::atomic::Ordering::SeqCst));
 
-        daemon.trigger_scan();
+        handle.trigger_scan();
         assert!(daemon
             .trigger_scan
             .load(std::sync::atomic::Ordering::SeqCst));
@@ -1042,10 +1151,12 @@ mod tests {
     #[test]
     fn test_daemon_stop() {
         let (daemon, _temp_dir) = create_test_daemon();
-        assert!(!daemon.should_stop());
+        let handle = daemon.handle();
 
-        daemon.stop();
-        assert!(daemon.should_stop());
+        assert!(!daemon.should_stop.load(std::sync::atomic::Ordering::SeqCst));
+
+        handle.stop();
+        assert!(daemon.should_stop.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test]

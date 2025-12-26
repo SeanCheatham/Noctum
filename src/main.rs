@@ -14,7 +14,7 @@ use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 use crate::config::Config;
-use crate::daemon::Daemon;
+use crate::daemon::{Daemon, DaemonHandle};
 use crate::db::Database;
 use crate::web::start_server;
 
@@ -41,7 +41,7 @@ enum Commands {
 pub struct AppState {
     pub db: Database,
     pub config: Arc<RwLock<Config>>,
-    pub daemon: Arc<RwLock<Daemon>>,
+    pub daemon: DaemonHandle,
 }
 
 #[tokio::main]
@@ -78,28 +78,24 @@ async fn main() -> anyhow::Result<()> {
 
             // Initialize daemon with shared config
             let config = Arc::new(RwLock::new(config));
-            let daemon = Arc::new(RwLock::new(Daemon::new(config.clone(), db.clone())));
+            let mut daemon = Daemon::new(config.clone(), db.clone());
+            let daemon_handle = daemon.handle();
 
             // Create shared state
             let state = Arc::new(AppState {
                 db,
                 config: config.clone(),
-                daemon: daemon.clone(),
+                daemon: daemon_handle.clone(),
             });
 
             // Start the daemon in a background task
-            let daemon_for_task = daemon.clone();
-            let daemon_handle = tokio::spawn(async move {
-                let mut daemon = daemon_for_task.write().await;
-                daemon.run().await
-            });
+            let mut daemon_task = tokio::spawn(async move { daemon.run().await });
 
             // Start the web server
             let web_host = config.read().await.web.host.clone();
             let web_port = config.read().await.web.port;
-            let server_handle = tokio::spawn(async move {
-                start_server(state, &web_host, web_port).await
-            });
+            let mut server_handle =
+                tokio::spawn(async move { start_server(state, &web_host, web_port).await });
 
             tracing::info!(
                 "Noctum is running. Dashboard available at http://localhost:{}",
@@ -107,21 +103,39 @@ async fn main() -> anyhow::Result<()> {
             );
             tracing::info!("Press Ctrl+C to stop");
 
-            // Wait for shutdown signal or task completion
+            // Wait for shutdown signal or task failure
             tokio::select! {
                 _ = shutdown_signal() => {
                     tracing::info!("Shutdown signal received");
-                    daemon.read().await.stop();
                 }
-                result = daemon_handle => {
-                    if let Err(e) = result {
-                        tracing::error!("Daemon task failed: {}", e);
+                result = &mut daemon_task => {
+                    match result {
+                        Ok(Ok(())) => tracing::info!("Daemon stopped unexpectedly"),
+                        Ok(Err(e)) => tracing::error!("Daemon error: {}", e),
+                        Err(e) => tracing::error!("Daemon task panicked: {}", e),
                     }
                 }
-                result = server_handle => {
-                    if let Err(e) = result {
-                        tracing::error!("Server task failed: {}", e);
+                result = &mut server_handle => {
+                    match result {
+                        Ok(Ok(())) => tracing::info!("Server stopped unexpectedly"),
+                        Ok(Err(e)) => tracing::error!("Server error: {}", e),
+                        Err(e) => tracing::error!("Server task panicked: {}", e),
                     }
+                }
+            }
+
+            // Signal daemon to stop
+            tracing::info!("Stopping daemon...");
+            daemon_handle.stop();
+
+            // Give the daemon a moment to finish current work, then exit
+            // The web server will be terminated when we exit
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                    tracing::debug!("Shutdown timeout reached");
+                }
+                _ = &mut daemon_task => {
+                    tracing::debug!("Daemon task completed");
                 }
             }
 
@@ -195,13 +209,8 @@ mod tests {
 
     #[test]
     fn test_cli_parse_start_with_config() {
-        let cli = Cli::try_parse_from([
-            "noctum",
-            "--config",
-            "/path/config.toml",
-            "start",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["noctum", "--config", "/path/config.toml", "start"]).unwrap();
         assert_eq!(cli.command, Some(Commands::Start));
         assert_eq!(
             cli.config,

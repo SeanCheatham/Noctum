@@ -1,124 +1,262 @@
 //! Mutation test executor.
 //!
 //! Handles applying mutations, running tests, and reverting changes.
+//! Includes retry logic for compile errors - re-prompts the LLM up to 3 times.
 
-use crate::mutation::{GeneratedMutation, MutationConfig, MutationTestResult, TestOutcome};
+use crate::analyzer::OllamaClient;
+use crate::mutation::analyzer::fix_mutation_with_error;
+use crate::mutation::{
+    GeneratedMutation, MutationConfig, MutationTestResult, Replacement, TestOutcome,
+};
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Instant;
 use tokio::process::Command;
 
+/// Maximum number of times to retry a mutation that fails to compile.
+const MAX_COMPILE_RETRIES: u8 = 3;
+
 /// Execute mutation testing for a single mutation.
 ///
 /// This function:
 /// 1. Applies the mutation to the source file
-/// 2. Runs `cargo test`
-/// 3. Reverts the file (always, even on error)
-/// 4. Returns the test result
+/// 2. Runs `cargo check` to verify compilation
+/// 3. If compilation fails, re-prompts the LLM to fix the mutation (up to 3 times)
+/// 4. Runs `cargo test` if compilation succeeds
+/// 5. Reverts the file (always, even on error)
+/// 6. Returns the test result
 pub async fn execute_mutation_test(
+    client: &OllamaClient,
     repo_path: &Path,
     mutation: GeneratedMutation,
+    original_code: &str,
     config: &MutationConfig,
 ) -> Result<MutationTestResult> {
-    let file_path = Path::new(&mutation.file_path);
     let start_time = Instant::now();
+
+    // Clone the file path before moving mutation
+    let file_path_str = mutation.file_path.clone();
+    let file_path = Path::new(&file_path_str);
 
     // Read original file content
     let original_content = tokio::fs::read_to_string(file_path)
         .await
         .context("Failed to read file for mutation")?;
 
-    // Apply mutation
-    let mutated_content = apply_mutation(&original_content, &mutation)?;
+    let mut current_mutation = mutation;
+    let mut last_compile_error: Option<String> = None;
 
-    // Write mutated file
-    tokio::fs::write(file_path, &mutated_content)
-        .await
-        .context("Failed to write mutated file")?;
+    // Retry loop for compile errors
+    for attempt in 1..=MAX_COMPILE_RETRIES {
+        // Apply mutation
+        let mutated_content =
+            match apply_replacements(&original_content, &current_mutation.replacements) {
+                Ok(content) => content,
+                Err(e) => {
+                    // Failed to apply mutation - can't retry this
+                    tracing::warn!("Failed to apply mutation: {}", e);
+                    return Ok(MutationTestResult {
+                        mutation: current_mutation,
+                        outcome: TestOutcome::CompileError,
+                        killing_test: None,
+                        test_output: Some(format!("Failed to apply mutation: {}", e)),
+                        execution_time_ms: start_time.elapsed().as_millis() as u64,
+                    });
+                }
+            };
 
-    // Run cargo test with timeout
-    let test_result = run_cargo_test(repo_path, config).await;
+        // Write mutated file
+        tokio::fs::write(file_path, &mutated_content)
+            .await
+            .context("Failed to write mutated file")?;
 
-    // ALWAYS revert the file, even if test failed
-    if let Err(e) = tokio::fs::write(file_path, &original_content).await {
-        // Critical error - file may be left in mutated state
+        // Fast compile check first
+        match run_cargo_check(repo_path, config.test_timeout_seconds).await {
+            Ok(()) => {
+                // Compilation succeeded! Run the full test suite
+                let test_result = run_cargo_test(repo_path, config).await;
+
+                // Revert file before returning
+                revert_file(file_path, &original_content).await;
+
+                let execution_time_ms = start_time.elapsed().as_millis() as u64;
+
+                let (outcome, killing_test, test_output) = match test_result {
+                    TestResult::Passed => (TestOutcome::Survived, None, None),
+                    TestResult::Failed { test_name, output } => (
+                        TestOutcome::Killed,
+                        Some(test_name),
+                        Some(truncate_output(&output, config.max_test_output_bytes)),
+                    ),
+                    TestResult::CompileError { output } => {
+                        // This shouldn't happen since cargo check passed, but handle it
+                        (
+                            TestOutcome::CompileError,
+                            None,
+                            Some(truncate_output(&output, config.max_test_output_bytes)),
+                        )
+                    }
+                    TestResult::Timeout => (TestOutcome::Timeout, None, None),
+                };
+
+                tracing::info!(
+                    "Mutation test complete: {} ({}) = {:?} ({}ms)",
+                    current_mutation.file_path,
+                    current_mutation.description,
+                    outcome,
+                    execution_time_ms
+                );
+
+                return Ok(MutationTestResult {
+                    mutation: current_mutation,
+                    outcome,
+                    killing_test,
+                    test_output,
+                    execution_time_ms,
+                });
+            }
+            Err(compile_error) => {
+                // Revert file before retrying or returning
+                revert_file(file_path, &original_content).await;
+
+                last_compile_error = Some(compile_error.clone());
+
+                if attempt < MAX_COMPILE_RETRIES {
+                    tracing::info!(
+                        "Mutation compile error (attempt {}/{}), re-prompting LLM: {}",
+                        attempt,
+                        MAX_COMPILE_RETRIES,
+                        current_mutation.description
+                    );
+
+                    // Log first few lines of the error
+                    let error_preview: String = compile_error
+                        .lines()
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    tracing::debug!("Compile error preview:\n{}", error_preview);
+
+                    // Re-prompt LLM to fix the mutation
+                    match fix_mutation_with_error(
+                        client,
+                        &current_mutation.file_path,
+                        original_code,
+                        &current_mutation,
+                        &compile_error,
+                        attempt,
+                    )
+                    .await
+                    {
+                        Ok(fixed_mutation) => {
+                            tracing::debug!(
+                                "LLM provided fixed mutation: {}",
+                                fixed_mutation.description
+                            );
+                            current_mutation = fixed_mutation;
+                            // Continue to next iteration of retry loop
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to get fixed mutation from LLM: {}", e);
+                            // Can't retry further, break out
+                            break;
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "Mutation failed to compile after {} attempts: {}",
+                        MAX_COMPILE_RETRIES,
+                        current_mutation.description
+                    );
+                }
+            }
+        }
+    }
+
+    // All retries exhausted or LLM fix failed
+    let execution_time_ms = start_time.elapsed().as_millis() as u64;
+
+    // Log detailed info for the final compile error
+    tracing::warn!(
+        "Compile error for mutation in {}\n  Description: {}",
+        current_mutation.file_path,
+        current_mutation.description
+    );
+
+    Ok(MutationTestResult {
+        mutation: current_mutation,
+        outcome: TestOutcome::CompileError,
+        killing_test: None,
+        test_output: last_compile_error.map(|e| truncate_output(&e, config.max_test_output_bytes)),
+        execution_time_ms,
+    })
+}
+
+/// Revert a file to its original content, with retry on failure.
+async fn revert_file(file_path: &Path, original_content: &str) {
+    if let Err(e) = tokio::fs::write(file_path, original_content).await {
         tracing::warn!(
             "CRITICAL: Failed to revert file {}: {}",
             file_path.display(),
             e
         );
         // Try once more
-        let _ = tokio::fs::write(file_path, &original_content).await;
+        let _ = tokio::fs::write(file_path, original_content).await;
     }
-
-    let execution_time_ms = start_time.elapsed().as_millis() as u64;
-
-    let (outcome, killing_test, test_output) = match test_result {
-        TestResult::Passed => (TestOutcome::Survived, None, None),
-        TestResult::Failed { test_name, output } => (
-            TestOutcome::Killed,
-            Some(test_name),
-            Some(truncate_output(&output, config.max_test_output_bytes)),
-        ),
-        TestResult::CompileError { output } => {
-            // Log detailed info for compile errors to help debug
-            tracing::warn!(
-                "Compile error for mutation in {}:{}\n  Description: {}\n  Find: '{}'\n  Replace: '{}'",
-                mutation.file_path, mutation.line_number, mutation.description,
-                mutation.find, mutation.replace
-            );
-            // Log first few lines of the error
-            let error_preview: String = output.lines().take(10).collect::<Vec<_>>().join("\n");
-            tracing::warn!("  Error output:\n{}", error_preview);
-
-            (
-                TestOutcome::CompileError,
-                None,
-                Some(truncate_output(&output, config.max_test_output_bytes)),
-            )
-        }
-        TestResult::Timeout => (TestOutcome::Timeout, None, None),
-    };
-
-    tracing::info!(
-        "Mutation test complete: {}:{} ({}) = {:?} ({}ms)",
-        mutation.file_path, mutation.line_number, mutation.description, outcome, execution_time_ms
-    );
-
-    Ok(MutationTestResult {
-        mutation,
-        outcome,
-        killing_test,
-        test_output,
-        execution_time_ms,
-    })
 }
 
-/// Line tolerance when applying the mutation (search nearby lines).
+/// Line tolerance when applying replacements (search nearby lines).
 const LINE_TOLERANCE: usize = 3;
 
-/// Apply a mutation to file content using search/replace.
-/// Searches for `mutation.find` within a window around `mutation.line_number`
-/// and replaces the first occurrence with `mutation.replace`.
-fn apply_mutation(content: &str, mutation: &GeneratedMutation) -> Result<String> {
+/// Apply multiple replacements to file content.
+///
+/// Replacements are applied in descending line order to prevent line number
+/// shifts from affecting subsequent replacements (important when a replacement
+/// adds or removes lines, like adding an import).
+fn apply_replacements(content: &str, replacements: &[Replacement]) -> Result<String> {
+    if replacements.is_empty() {
+        anyhow::bail!("No replacements to apply");
+    }
+
+    // Sort replacements by line number descending
+    let mut sorted_replacements: Vec<&Replacement> = replacements.iter().collect();
+    sorted_replacements.sort_by(|a, b| b.line_number.cmp(&a.line_number));
+
+    let mut current_content = content.to_string();
+
+    for replacement in sorted_replacements {
+        current_content = apply_single_replacement(&current_content, replacement)?;
+    }
+
+    Ok(current_content)
+}
+
+/// Apply a single replacement to file content.
+///
+/// Searches for `replacement.find` within a window around `replacement.line_number`
+/// and replaces the first occurrence with `replacement.replace`.
+fn apply_single_replacement(content: &str, replacement: &Replacement) -> Result<String> {
     let lines: Vec<&str> = content.lines().collect();
     let line_count = lines.len();
 
-    if mutation.line_number == 0 || mutation.line_number > line_count + LINE_TOLERANCE {
+    if replacement.line_number == 0 || replacement.line_number > line_count + LINE_TOLERANCE {
         anyhow::bail!(
             "Line number {} out of range (file has {} lines)",
-            mutation.line_number,
+            replacement.line_number,
             line_count
         );
     }
 
     // Search for the "find" text within the line window
-    let start_line = mutation.line_number.saturating_sub(LINE_TOLERANCE).max(1);
-    let end_line = (mutation.line_number + LINE_TOLERANCE).min(line_count);
+    let start_line = replacement
+        .line_number
+        .saturating_sub(LINE_TOLERANCE)
+        .max(1);
+    let end_line = (replacement.line_number + LINE_TOLERANCE).min(line_count);
 
     let mut target_line = None;
     for line_num in start_line..=end_line {
-        if lines[line_num - 1].contains(&mutation.find) {
+        if lines[line_num - 1].contains(&replacement.find) {
             target_line = Some(line_num);
             break;
         }
@@ -129,13 +267,13 @@ fn apply_mutation(content: &str, mutation: &GeneratedMutation) -> Result<String>
         Some(ln) => ln,
         None => lines
             .iter()
-            .position(|l| l.contains(&mutation.find))
+            .position(|l| l.contains(&replacement.find))
             .map(|idx| idx + 1)
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "Could not find '{}' in file (searched around line {})",
-                    mutation.find,
-                    mutation.line_number
+                    replacement.find,
+                    replacement.line_number
                 )
             })?,
     };
@@ -147,7 +285,7 @@ fn apply_mutation(content: &str, mutation: &GeneratedMutation) -> Result<String>
         let line_num = idx + 1;
         if line_num == target_line {
             // Replace only the first occurrence on this line
-            let new_line = line.replacen(&mutation.find, &mutation.replace, 1);
+            let new_line = line.replacen(&replacement.find, &replacement.replace, 1);
             new_lines.push(new_line);
         } else {
             new_lines.push(line.to_string());
@@ -169,6 +307,34 @@ enum TestResult {
     Failed { test_name: String, output: String },
     CompileError { output: String },
     Timeout,
+}
+
+/// Run `cargo check` to quickly verify compilation without running tests.
+///
+/// Returns `Ok(())` if compilation succeeds, `Err(error_output)` if it fails.
+async fn run_cargo_check(repo_path: &Path, timeout_secs: u64) -> Result<(), String> {
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+
+    let check_future = async {
+        Command::new("cargo")
+            .arg("check")
+            .current_dir(repo_path)
+            .output()
+            .await
+    };
+
+    match tokio::time::timeout(timeout, check_future).await {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(stderr.to_string())
+            }
+        }
+        Ok(Err(e)) => Err(format!("Failed to run cargo check: {}", e)),
+        Err(_) => Err("Cargo check timed out".to_string()),
+    }
 }
 
 async fn run_cargo_test(repo_path: &Path, config: &MutationConfig) -> TestResult {
@@ -330,82 +496,78 @@ test third_test ... ok
     }
 
     // =========================================================================
-    // apply_mutation tests
+    // Helper for creating test replacements
     // =========================================================================
 
-    fn make_test_mutation(
-        line_number: usize,
-        find: &str,
-        replace: &str,
-        description: &str,
-    ) -> GeneratedMutation {
-        GeneratedMutation {
-            file_path: "test.rs".to_string(),
+    fn make_replacement(line_number: usize, find: &str, replace: &str) -> Replacement {
+        Replacement {
             line_number,
             find: find.to_string(),
             replace: replace.to_string(),
-            reasoning: "test reasoning".to_string(),
-            description: description.to_string(),
         }
     }
 
-    #[test]
-    fn test_apply_mutation_simple_replace() {
-        let content = "fn foo() {\n    if x > 0 {\n    }\n}";
-        let mutation = make_test_mutation(2, "x > 0", "x >= 0", "Changed > to >=");
+    // =========================================================================
+    // apply_single_replacement tests
+    // =========================================================================
 
-        let result = apply_mutation(content, &mutation).unwrap();
+    #[test]
+    fn test_apply_single_replacement_simple() {
+        let content = "fn foo() {\n    if x > 0 {\n    }\n}";
+        let replacement = make_replacement(2, "x > 0", "x >= 0");
+
+        let result = apply_single_replacement(content, &replacement).unwrap();
         assert!(result.contains("if x >= 0 {"));
         assert!(!result.contains("if x > 0 {"));
     }
 
     #[test]
-    fn test_apply_mutation_with_tolerance() {
+    fn test_apply_single_replacement_with_tolerance() {
         // Line number is off by 1, but should still find the text
         let content = "line 1\nline 2\nif count > 0 {\nline 4";
-        let mutation = make_test_mutation(2, "count > 0", "count >= 0", "Changed > to >=");
+        let replacement = make_replacement(2, "count > 0", "count >= 0");
 
-        let result = apply_mutation(content, &mutation).unwrap();
+        let result = apply_single_replacement(content, &replacement).unwrap();
         assert!(result.contains("count >= 0"));
         assert!(!result.contains("count > 0"));
     }
 
     #[test]
-    fn test_apply_mutation_not_found() {
+    fn test_apply_single_replacement_not_found() {
         let content = "line 1\nline 2";
-        let mutation = make_test_mutation(1, "nonexistent", "replacement", "Invalid");
+        let replacement = make_replacement(1, "nonexistent", "replacement");
 
-        let result = apply_mutation(content, &mutation);
+        let result = apply_single_replacement(content, &replacement);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Could not find"));
     }
 
     #[test]
-    fn test_apply_mutation_line_out_of_bounds() {
+    fn test_apply_single_replacement_line_out_of_bounds() {
         let content = "line 1\nline 2";
-        let mutation = make_test_mutation(100, "line 1", "changed", "Out of bounds");
+        let replacement = make_replacement(100, "line 1", "changed");
 
-        let result = apply_mutation(content, &mutation);
+        let result = apply_single_replacement(content, &replacement);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("out of range"));
     }
 
     #[test]
-    fn test_apply_mutation_line_zero() {
+    fn test_apply_single_replacement_line_zero() {
         let content = "line 1\nline 2";
-        let mutation = make_test_mutation(0, "line 1", "changed", "Line zero");
+        let replacement = make_replacement(0, "line 1", "changed");
 
-        let result = apply_mutation(content, &mutation);
+        let result = apply_single_replacement(content, &replacement);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("out of range"));
     }
 
     #[test]
-    fn test_apply_mutation_preserves_other_lines() {
+    fn test_apply_single_replacement_preserves_other_lines() {
         let content = "line 1\nline 2 has target\nline 3\nline 4";
-        let mutation = make_test_mutation(2, "target", "REPLACED", "Replace target");
+        let replacement = make_replacement(2, "target", "REPLACED");
 
-        let result = apply_mutation(content, &mutation).unwrap();
+        let result = apply_single_replacement(content, &replacement).unwrap();
         let lines: Vec<&str> = result.lines().collect();
 
         assert_eq!(lines[0], "line 1");
@@ -415,31 +577,112 @@ test third_test ... ok
     }
 
     #[test]
-    fn test_apply_mutation_first_line() {
+    fn test_apply_single_replacement_first_line() {
         let content = "first > line\nsecond line";
-        let mutation = make_test_mutation(1, ">", ">=", "Changed operator");
+        let replacement = make_replacement(1, ">", ">=");
 
-        let result = apply_mutation(content, &mutation).unwrap();
+        let result = apply_single_replacement(content, &replacement).unwrap();
         assert!(result.starts_with("first >= line"));
     }
 
     #[test]
-    fn test_apply_mutation_boolean() {
+    fn test_apply_single_replacement_boolean() {
         let content = "fn test() {\n    return true;\n}";
-        let mutation = make_test_mutation(2, "true", "false", "Changed true to false");
+        let replacement = make_replacement(2, "true", "false");
 
-        let result = apply_mutation(content, &mutation).unwrap();
+        let result = apply_single_replacement(content, &replacement).unwrap();
         assert!(result.contains("return false;"));
         assert!(!result.contains("return true;"));
     }
 
     #[test]
-    fn test_apply_mutation_only_first_occurrence_on_line() {
+    fn test_apply_single_replacement_only_first_occurrence_on_line() {
         // If "true" appears twice on the same line, only replace the first
         let content = "let x = true && true;";
-        let mutation = make_test_mutation(1, "true", "false", "Changed true to false");
+        let replacement = make_replacement(1, "true", "false");
 
-        let result = apply_mutation(content, &mutation).unwrap();
+        let result = apply_single_replacement(content, &replacement).unwrap();
         assert_eq!(result.trim(), "let x = false && true;");
+    }
+
+    // =========================================================================
+    // apply_replacements tests (multiple replacements)
+    // =========================================================================
+
+    #[test]
+    fn test_apply_replacements_single() {
+        let content = "fn foo() {\n    if x > 0 {\n    }\n}";
+        let replacements = vec![make_replacement(2, "x > 0", "x >= 0")];
+
+        let result = apply_replacements(content, &replacements).unwrap();
+        assert!(result.contains("if x >= 0 {"));
+    }
+
+    #[test]
+    fn test_apply_replacements_multiple_different_lines() {
+        let content = "use std::io;\n\nfn main() {\n    let x = true;\n}";
+        let replacements = vec![
+            make_replacement(1, "use std::io;", "use std::io;\nuse std::fs;"),
+            make_replacement(4, "true", "false"),
+        ];
+
+        let result = apply_replacements(content, &replacements).unwrap();
+        assert!(result.contains("use std::fs;"));
+        assert!(result.contains("let x = false;"));
+    }
+
+    #[test]
+    fn test_apply_replacements_descending_order() {
+        // Verify that replacements are applied in descending line order
+        // This is important when a replacement adds lines (like an import)
+        let content = "line 1\nline 2\nline 3";
+        let replacements = vec![
+            make_replacement(1, "line 1", "modified 1"),
+            make_replacement(3, "line 3", "modified 3"),
+        ];
+
+        let result = apply_replacements(content, &replacements).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+
+        assert_eq!(lines[0], "modified 1");
+        assert_eq!(lines[1], "line 2");
+        assert_eq!(lines[2], "modified 3");
+    }
+
+    #[test]
+    fn test_apply_replacements_with_newlines_in_replace() {
+        // Test adding an import (which adds a new line)
+        let content = "use std::io;\n\nfn main() {}";
+        let replacements = vec![make_replacement(
+            1,
+            "use std::io;",
+            "use std::io;\nuse std::fs;",
+        )];
+
+        let result = apply_replacements(content, &replacements).unwrap();
+        assert!(result.contains("use std::io;\nuse std::fs;"));
+    }
+
+    #[test]
+    fn test_apply_replacements_empty() {
+        let content = "fn foo() {}";
+        let replacements: Vec<Replacement> = vec![];
+
+        let result = apply_replacements(content, &replacements);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No replacements"));
+    }
+
+    #[test]
+    fn test_apply_replacements_one_fails() {
+        // If any replacement fails, the whole operation should fail
+        let content = "line 1\nline 2";
+        let replacements = vec![
+            make_replacement(1, "line 1", "modified"),
+            make_replacement(1, "nonexistent", "replacement"),
+        ];
+
+        let result = apply_replacements(content, &replacements);
+        assert!(result.is_err());
     }
 }

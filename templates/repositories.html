@@ -93,21 +93,23 @@
                 <td style="color: var(--text-secondary)">
                     {{ repo.created_at }}
                 </td>
-                <td style="display: flex; gap: 0.5rem">
-                    <a
-                        href="/repositories/{{ repo.id }}/results"
-                        class="btn"
-                        style="font-size: 0.75rem; padding: 0.25rem 0.75rem"
-                    >
-                        View Results
-                    </a>
-                    <button
-                        class="btn btn-danger"
-                        style="font-size: 0.75rem; padding: 0.25rem 0.75rem"
-                        onclick="deleteRepository({{ repo.id }}, '{{ repo.name }}')"
-                    >
-                        Delete
-                    </button>
+                <td>
+                    <div style="display: flex; gap: 0.5rem">
+                        <a
+                            href="/repositories/{{ repo.id }}/results"
+                            class="btn"
+                            style="font-size: 0.75rem; padding: 0.25rem 0.75rem"
+                        >
+                            View Results
+                        </a>
+                        <button
+                            class="btn btn-danger"
+                            style="font-size: 0.75rem; padding: 0.25rem 0.75rem"
+                            onclick="deleteRepository({{ repo.id }}, '{{ repo.name }}')"
+                        >
+                            Delete
+                        </button>
+                    </div>
                 </td>
             </tr>
             {% endfor %}
@@ -121,8 +123,18 @@
         .getElementById("add-repo-form")
         .addEventListener("submit", async (e) => {
             e.preventDefault();
-            const name = document.getElementById("repo-name").value;
-            const path = document.getElementById("repo-path").value;
+            const name = document.getElementById("repo-name").value.trim();
+            const path = document.getElementById("repo-path").value.trim();
+
+            if (!name || !path) {
+                alert("Please enter both name and path");
+                return;
+            }
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.textContent;
+            btn.textContent = "Adding...";
+            btn.disabled = true;
 
             try {
                 const response = await fetch("/repositories", {
@@ -131,14 +143,21 @@
                     body: JSON.stringify({ name, path }),
                 });
 
+                const data = await response.json();
+
                 if (response.ok) {
-                    window.location.reload();
+                    // Force reload
+                    window.location.href = window.location.href;
                 } else {
-                    const error = await response.json();
-                    alert("Error: " + error.error);
+                    alert("Error: " + (data.error || "Failed to add repository"));
+                    btn.textContent = originalText;
+                    btn.disabled = false;
                 }
             } catch (err) {
+                console.error("Add repository error:", err);
                 alert("Failed to add repository: " + err.message);
+                btn.textContent = originalText;
+                btn.disabled = false;
             }
         });
 

@@ -852,16 +852,7 @@ mod tests {
 
         // Add some mutation results
         db.save_mutation_result(
-            repo_id,
-            "file.rs",
-            "desc",
-            "reason",
-            "{}",
-            "killed",
-            None,
-            None,
-            None,
-            None,
+            repo_id, "file.rs", "desc", "reason", "{}", "killed", None, None, None, None,
         )
         .await
         .unwrap();
@@ -888,6 +879,9 @@ mod tests {
         let (db, _temp_dir) = create_test_db().await;
 
         let deleted = db.delete_repository(999).await.unwrap();
-        assert!(!deleted, "Deleting non-existent repository should return false");
+        assert!(
+            !deleted,
+            "Deleting non-existent repository should return false"
+        );
     }
 }

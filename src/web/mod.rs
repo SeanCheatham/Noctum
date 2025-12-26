@@ -47,10 +47,7 @@ async fn serve_static(axum::extract::Path(path): axum::extract::Path<String>) ->
 ///
 /// Only allows requests where the Host header matches localhost variants
 /// or the configured bind address.
-async fn validate_host(
-    request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+async fn validate_host(request: Request, next: Next) -> Result<Response, StatusCode> {
     let host = request
         .headers()
         .get("host")
@@ -112,7 +109,7 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow
         // Scan API
         .route("/api/scan/trigger", post(handlers::api_trigger_scan))
         // Static files (embedded in binary)
-        .route("/static/{*path}", get(serve_static))
+        .route("/static/*path", get(serve_static))
         // State
         .with_state(state);
 

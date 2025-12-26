@@ -12,17 +12,28 @@ pub use analyzer::analyze_and_generate_mutations;
 
 use serde::{Deserialize, Serialize};
 
-/// A generated mutation ready for testing (search/replace based).
+/// A single text replacement operation within a mutation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeneratedMutation {
-    /// Path to the file containing this mutation
-    pub file_path: String,
-    /// Approximate line number (1-indexed) where the mutation is located
+pub struct Replacement {
+    /// Approximate line number (1-indexed) where this replacement occurs
     pub line_number: usize,
     /// The exact text to find
     pub find: String,
     /// The replacement text
     pub replace: String,
+}
+
+/// A generated mutation ready for testing.
+///
+/// A mutation may consist of multiple replacements - for example, adding an import
+/// statement and modifying a function call. All replacements are applied together
+/// as a single atomic mutation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedMutation {
+    /// Path to the file containing this mutation
+    pub file_path: String,
+    /// All replacements to apply for this mutation (may include imports + main change)
+    pub replacements: Vec<Replacement>,
     /// Why this is a high-value mutation point
     pub reasoning: String,
     /// Human-readable description of the mutation (e.g., "Changed > to >=")

@@ -5,7 +5,7 @@
 
 use crate::analyzer::OllamaClient;
 use crate::config::{Config, OllamaEndpoint};
-use crate::db::{AnalysisResult, Database, DaemonState, Repository};
+use crate::db::{AnalysisResult, DaemonState, Database, Repository};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -77,16 +77,16 @@ pub async fn add_repository(
             .into_response();
     }
 
+    tracing::info!("Adding repository: name={}, path={}", req.name, req.path);
+
     match state.db.add_repository(&req.path, &req.name).await {
         Ok(id) => {
+            tracing::info!("Repository added successfully: id={}", id);
             // If we're in the scheduled window, trigger a scan so the new repo is processed immediately
             let in_window = state.config.read().await.schedule.is_in_window();
             if in_window {
-                let daemon = state.daemon.read().await;
-                daemon.trigger_scan();
-                tracing::info!(
-                    "Triggered scan for newly added repository (in scheduled window)"
-                );
+                state.daemon.trigger_scan();
+                tracing::info!("Triggered scan for newly added repository (in scheduled window)");
             }
             (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
         }
@@ -466,8 +466,7 @@ pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoR
 
 /// API: Trigger an immediate scan
 pub async fn api_trigger_scan(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let daemon = state.daemon.read().await;
-    daemon.trigger_scan();
+    state.daemon.trigger_scan();
     tracing::info!("Scan triggered via API");
     (
         StatusCode::OK,
