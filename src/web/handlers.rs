@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use super::templates::{
     render_markdown, AnalysisResultView, MutationResultView, MutationResultsTemplate,
-    RepositoriesTemplate, RepositoryArchitectureTemplate, RepositoryFilesTemplate, SettingsTemplate,
+    RepositoriesTemplate, RepositoryArchitectureTemplate, RepositoryFilesTemplate,
+    SettingsTemplate,
 };
 use askama::Template;
 

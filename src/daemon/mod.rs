@@ -45,7 +45,7 @@ async fn copy_repo_to_temp(repo_path: &Path) -> anyhow::Result<tempfile::TempDir
 
     // Use spawn_blocking since fs_extra::dir::copy is synchronous
     let temp_dir = tokio::task::spawn_blocking(move || -> anyhow::Result<tempfile::TempDir> {
-        let temp_dir = tempfile::TempDir::new()?;
+        let temp_dir = tempfile::TempDir::with_prefix("noctum-")?;
 
         let options = fs_extra::dir::CopyOptions {
             overwrite: false,
@@ -239,7 +239,7 @@ impl Daemon {
             match (self.status(), in_window) {
                 (DaemonStatus::Waiting, true) => {
                     tracing::info!("Entering scheduled window, starting processing");
-self.set_status(DaemonStatus::Processing);
+                    self.set_status(DaemonStatus::Processing);
                     self.process_tasks().await?;
                 }
                 (DaemonStatus::Processing, true) => {
@@ -332,7 +332,6 @@ self.set_status(DaemonStatus::Processing);
         }
 
         // Process each repository with parallel workers
-        let mut any_files_analyzed = false;
         for repo in enabled_repos {
             // Check if we should stop before processing each repo
             if self.should_stop.load(Ordering::SeqCst) {
@@ -344,27 +343,16 @@ self.set_status(DaemonStatus::Processing);
                 .update_daemon_status("processing", Some(&format!("analyzing {}", repo.name)))
                 .await?;
 
-            match self.analyze_repository_parallel(&repo, &endpoints).await {
-                Ok(files_analyzed) => {
-                    if files_analyzed {
-                        any_files_analyzed = true;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to analyze repository {}: {}", repo.name, e);
-                }
+            if let Err(e) = self.analyze_repository_parallel(&repo, &endpoints).await {
+                tracing::warn!("Failed to analyze repository {}: {}", repo.name, e);
             }
         }
 
         self.db.update_daemon_status("idle", None).await?;
 
-        // If we generated architecture summaries, wait longer before next cycle
-        // Use interruptible sleep so we can respond to shutdown signals
-        let delay_secs = if any_files_analyzed {
-            20 * 60 // 20 minutes
-        } else {
-            5
-        };
+        // Wait before next cycle to avoid excessive resource usage
+        // (especially since we copy the entire repo to temp each cycle)
+        let delay_secs = 60 * 60; // 60 minutes
 
         tracing::debug!(
             "Sleeping for {} seconds before next processing cycle",
@@ -552,10 +540,7 @@ self.set_status(DaemonStatus::Processing);
         }
 
         // temp_dir is dropped here, cleaning up the temp copy
-        tracing::debug!(
-            "Cleaning up temp directory for {}",
-            repo.name
-        );
+        tracing::debug!("Cleaning up temp directory for {}", repo.name);
         drop(temp_dir);
 
         Ok(files_analyzed)
@@ -915,10 +900,16 @@ self.set_status(DaemonStatus::Processing);
             return Ok(files);
         }
 
+        let root_dir = dir.to_path_buf();
+
         for entry in walkdir::WalkDir::new(dir)
             .follow_links(false)
             .into_iter()
             .filter_entry(|e| {
+                // Don't filter the root directory itself (may be a temp dir starting with .)
+                if e.path() == root_dir {
+                    return true;
+                }
                 // Skip hidden directories and common non-source directories
                 let name = e.file_name().to_string_lossy();
                 !name.starts_with('.') && name != "target" && name != "node_modules"
