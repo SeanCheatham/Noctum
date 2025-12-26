@@ -44,6 +44,16 @@ Noctum{% endblock %} {% block content %}
     .markdown-content h3 {
         font-size: 1.1rem;
     }
+    .markdown-content h4 {
+        font-size: 1rem;
+    }
+    .markdown-content h5 {
+        font-size: 0.95rem;
+    }
+    .markdown-content h6 {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+    }
     .markdown-content p {
         margin-bottom: 1rem;
     }
@@ -243,12 +253,32 @@ Noctum{% endblock %} {% block content %}
 <script>
     // Simple markdown to HTML conversion for dynamic content
     function renderMarkdown(text) {
-        // Convert headers
-        text = text.replace(/^### (.*$)/gm, "<h3>$1</h3>");
-        text = text.replace(/^## (.*$)/gm, "<h2>$1</h2>");
-        text = text.replace(/^# (.*$)/gm, "<h1>$1</h1>");
+        // Extract code blocks first to protect them from other transformations
+        const codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+            const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+            // Escape HTML in code blocks
+            const escaped = code
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+            codeBlocks.push(`<pre><code>${escaped}</code></pre>`);
+            return placeholder;
+        });
 
-        // Convert bold and italic
+        // Extract inline code to protect from other transformations
+        const inlineCode = [];
+        text = text.replace(/`([^`]+)`/g, (match, code) => {
+            const placeholder = `__INLINE_CODE_${inlineCode.length}__`;
+            const escaped = code
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+            inlineCode.push(`<code>${escaped}</code>`);
+            return placeholder;
+        });
+
+        // Convert bold and italic (before headers so they work inside headers)
         text = text.replace(
             /\*\*\*(.*?)\*\*\*/g,
             "<strong><em>$1</em></strong>",
@@ -256,14 +286,13 @@ Noctum{% endblock %} {% block content %}
         text = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
         text = text.replace(/\*(.*?)\*/g, "<em>$1</em>");
 
-        // Convert inline code
-        text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-        // Convert code blocks
-        text = text.replace(
-            /```(\w*)\n([\s\S]*?)```/g,
-            "<pre><code>$2</code></pre>",
-        );
+        // Convert headers (from most # to least to avoid partial matches)
+        text = text.replace(/^###### (.*$)/gm, "<h6>$1</h6>");
+        text = text.replace(/^##### (.*$)/gm, "<h5>$1</h5>");
+        text = text.replace(/^#### (.*$)/gm, "<h4>$1</h4>");
+        text = text.replace(/^### (.*$)/gm, "<h3>$1</h3>");
+        text = text.replace(/^## (.*$)/gm, "<h2>$1</h2>");
+        text = text.replace(/^# (.*$)/gm, "<h1>$1</h1>");
 
         // Convert unordered lists
         text = text.replace(/^\s*[-*]\s+(.*)$/gm, "<li>$1</li>");
@@ -291,7 +320,8 @@ Noctum{% endblock %} {% block content %}
                 trimmed.startsWith("<ol") ||
                 trimmed.startsWith("<li") ||
                 trimmed.startsWith("<pre") ||
-                trimmed.startsWith("</")
+                trimmed.startsWith("</") ||
+                trimmed.startsWith("__CODE_BLOCK_")
             ) {
                 if (inParagraph) {
                     result.push("</p>");
@@ -310,7 +340,19 @@ Noctum{% endblock %} {% block content %}
             result.push("</p>");
         }
 
-        return result.join("\n");
+        text = result.join("\n");
+
+        // Restore code blocks
+        codeBlocks.forEach((block, i) => {
+            text = text.replace(`__CODE_BLOCK_${i}__`, block);
+        });
+
+        // Restore inline code
+        inlineCode.forEach((code, i) => {
+            text = text.replace(`__INLINE_CODE_${i}__`, code);
+        });
+
+        return text;
     }
 
     // Handle file selection
