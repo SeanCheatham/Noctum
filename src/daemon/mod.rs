@@ -12,6 +12,22 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::{interval, Duration};
 
+/// Minimum file size (bytes) for code analysis. Smaller files are typically
+/// just module declarations (`mod foo;`) with no meaningful content.
+const ANALYSIS_MIN_FILE_SIZE: usize = 50;
+
+/// Maximum file size (bytes) for code analysis. Larger files are likely
+/// generated code or vendored dependencies.
+const ANALYSIS_MAX_FILE_SIZE: usize = 100_000;
+
+/// Minimum file size (bytes) for mutation testing. We need enough code
+/// to have meaningful mutation targets.
+const MUTATION_MIN_FILE_SIZE: usize = 100;
+
+/// Maximum file size (bytes) for mutation testing. More conservative than
+/// analysis since we need to compile and run tests.
+const MUTATION_MAX_FILE_SIZE: usize = 50_000;
+
 /// Compute a SHA256 hash of the content
 fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -295,14 +311,12 @@ impl Daemon {
                 }
             };
 
-            // Skip very large files (> 100KB)
-            if content.len() > 100_000 {
+            if content.len() > ANALYSIS_MAX_FILE_SIZE {
                 tracing::debug!("Skipping large file: {:?}", file_path);
                 continue;
             }
 
-            // Skip very small files (< 50 bytes, likely just module declarations)
-            if content.len() < 50 {
+            if content.len() < ANALYSIS_MIN_FILE_SIZE {
                 tracing::debug!("Skipping small file: {:?}", file_path);
                 continue;
             }
@@ -547,8 +561,7 @@ impl Daemon {
                 Err(_) => continue,
             };
 
-            // Skip small/large files
-            if content.len() < 100 || content.len() > 50_000 {
+            if content.len() < MUTATION_MIN_FILE_SIZE || content.len() > MUTATION_MAX_FILE_SIZE {
                 continue;
             }
 
@@ -660,7 +673,9 @@ impl Daemon {
         Ok(())
     }
 
-    /// Find all Rust files in a directory recursively
+    /// Find all Rust files in a directory recursively.
+    ///
+    /// Skips hidden directories (`.git`, etc.), `target/`, and `node_modules/`.
     fn find_rust_files(&self, dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
         let mut files = Vec::new();
 
@@ -798,7 +813,11 @@ async fn endpoint_worker(
     tracing::info!("Worker for endpoint '{}' stopped", endpoint.name);
 }
 
-/// Determine severity based on analysis result content
+/// Map keywords in analysis results to severity levels.
+///
+/// - "critical", "vulnerability", "unsafe" → "warning"
+/// - "error", "bug" → "error"
+/// - Everything else → "info"
 fn determine_severity(result: &str) -> Option<String> {
     let lower = result.to_lowercase();
 

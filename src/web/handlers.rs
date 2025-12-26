@@ -1,11 +1,16 @@
+//! HTTP request handlers for the web dashboard and API.
+//!
+//! HTML handlers render Askama templates for the browser UI.
+//! API handlers return JSON for programmatic access and AJAX requests.
+
 use crate::analyzer::OllamaClient;
 use crate::config::{Config, OllamaEndpoint};
-use crate::db::{AnalysisResult, DaemonState, Repository};
+use crate::db::{AnalysisResult, Database, DaemonState, Repository};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -17,16 +22,7 @@ use super::templates::{
 };
 use askama::Template;
 
-// ============================================================================
-// HTML Handlers
-// ============================================================================
-
-/// Repositories page
-pub async fn list_repositories(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let repositories = state.db.get_repositories().await.unwrap_or_default();
-
-    let template = RepositoriesTemplate { repositories };
-
+fn render_template<T: Template>(template: T) -> Response {
     match template.render() {
         Ok(html) => Html(html).into_response(),
         Err(e) => (
@@ -35,6 +31,23 @@ pub async fn list_repositories(State(state): State<Arc<AppState>>) -> impl IntoR
         )
             .into_response(),
     }
+}
+
+async fn get_repo_or_error(db: &Database, id: i64) -> Result<Repository, Response> {
+    match db.get_repository(id).await {
+        Ok(Some(repo)) => Ok(repo),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "Repository not found").into_response()),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error: {}", e),
+        )
+            .into_response()),
+    }
+}
+
+pub async fn list_repositories(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let repositories = state.db.get_repositories().await.unwrap_or_default();
+    render_template(RepositoriesTemplate { repositories })
 }
 
 /// Add a repository
@@ -58,34 +71,21 @@ pub async fn add_repository(
     }
 }
 
-/// Repository results page
 pub async fn repository_results(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    // Get the repository
-    let repository = match state.db.get_repository(id).await {
-        Ok(Some(repo)) => repo,
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, "Repository not found").into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", e),
-            )
-                .into_response();
-        }
+    let repository = match get_repo_or_error(&state.db, id).await {
+        Ok(repo) => repo,
+        Err(response) => return response,
     };
 
-    // Get all results for this repository
     let all_results = state
         .db
         .get_all_repository_results(id)
         .await
         .unwrap_or_default();
 
-    // Separate architecture summary from file results
     let mut architecture_summary = None;
     let mut file_results = Vec::new();
 
@@ -97,86 +97,51 @@ pub async fn repository_results(
         }
     }
 
-    // Convert file results to view models with relative paths
     let file_results: Vec<AnalysisResultView> = file_results
         .into_iter()
         .map(|r| AnalysisResultView::from_result(r, &repository.path))
         .collect();
 
-    // Pre-render architecture summary markdown
     let architecture_summary_html = architecture_summary
         .as_ref()
         .map(|s| render_markdown(&s.result))
         .unwrap_or_default();
 
-    let template = RepositoryResultsTemplate {
+    render_template(RepositoryResultsTemplate {
         repository,
         architecture_summary,
         file_results,
         architecture_summary_html,
-    };
-
-    match template.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Template error: {}", e),
-        )
-            .into_response(),
-    }
+    })
 }
 
-/// Mutation testing results page
 pub async fn mutation_results(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    // Get the repository
-    let repository = match state.db.get_repository(id).await {
-        Ok(Some(repo)) => repo,
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, "Repository not found").into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", e),
-            )
-                .into_response();
-        }
+    let repository = match get_repo_or_error(&state.db, id).await {
+        Ok(repo) => repo,
+        Err(response) => return response,
     };
 
-    // Get mutation results and summary
     let raw_results = state.db.get_mutation_results(id).await.unwrap_or_default();
     let summary = state.db.get_mutation_summary(id).await.unwrap_or_default();
 
-    // Convert to view models with relative paths
     let results: Vec<MutationResultView> = raw_results
         .into_iter()
         .map(|r| MutationResultView::from_result(r, &repository.path))
         .collect();
 
-    // Pre-compute the mutation score as a formatted string
     let mutation_score_percent = format!("{:.1}", summary.mutation_score() * 100.0);
 
-    let template = MutationResultsTemplate {
+    render_template(MutationResultsTemplate {
         repository,
         results,
         summary,
         mutation_score_percent,
-    };
-
-    match template.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Template error: {}", e),
-        )
-            .into_response(),
-    }
+    })
 }
 
-/// Settings page - shows all Ollama endpoints and config
 pub async fn settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let config = state.config.read().await;
     let endpoints = config.endpoints.clone();
@@ -186,21 +151,12 @@ pub async fn settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "(unknown)".to_string());
 
-    let template = SettingsTemplate {
+    render_template(SettingsTemplate {
         endpoints,
         start_hour,
         end_hour,
         config_path,
-    };
-
-    match template.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Template error: {}", e),
-        )
-            .into_response(),
-    }
+    })
 }
 
 /// Add a new Ollama endpoint
@@ -296,10 +252,6 @@ pub async fn api_endpoints(State(state): State<Arc<AppState>>) -> Json<Vec<Ollam
     Json(config.endpoints.clone())
 }
 
-// ============================================================================
-// API Handlers
-// ============================================================================
-
 #[derive(Serialize)]
 pub struct StatusResponse {
     pub daemon_status: Option<DaemonState>,
@@ -365,10 +317,6 @@ pub async fn api_test_ollama(Json(req): Json<TestOllamaRequest>) -> Json<TestOll
         }),
     }
 }
-
-// ============================================================================
-// Config Handlers
-// ============================================================================
 
 /// Get current config as JSON
 #[derive(Serialize)]
@@ -469,10 +417,6 @@ pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoR
             .into_response(),
     }
 }
-
-// ============================================================================
-// Scan Trigger Handler
-// ============================================================================
 
 /// API: Trigger an immediate scan
 pub async fn api_trigger_scan(State(state): State<Arc<AppState>>) -> impl IntoResponse {

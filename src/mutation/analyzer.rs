@@ -9,7 +9,8 @@ use serde_json::json;
 /// A mutation as returned by the LLM (line number + search/replace)
 #[derive(Debug, Deserialize)]
 struct RawMutation {
-    /// Approximate line number (1-based) where the mutation is located
+    /// Line number (1-based) where the mutation is located.
+    /// May be adjusted ±3 lines to find the actual match in the source.
     line_number: usize,
     /// The exact text to find (a small expression or fragment)
     find: String,

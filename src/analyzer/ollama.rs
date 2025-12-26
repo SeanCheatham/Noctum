@@ -25,7 +25,7 @@ struct GenerateResponse {
 }
 
 impl OllamaClient {
-    /// Create a new Ollama client
+    /// Creates a new client, normalizing the base URL by stripping trailing slashes.
     pub fn new(base_url: &str, model: &str) -> Self {
         Self {
             client: Client::new(),
@@ -34,7 +34,6 @@ impl OllamaClient {
         }
     }
 
-    /// Generate a response from Ollama
     pub async fn generate(&self, prompt: &str) -> Result<String> {
         self.generate_internal(prompt, None).await
     }
@@ -85,13 +84,11 @@ impl OllamaClient {
         Ok(result.response)
     }
 
-    /// Check if Ollama is available
     pub async fn is_available(&self) -> bool {
         let url = format!("{}/api/tags", self.base_url);
         self.client.get(&url).send().await.is_ok()
     }
 
-    /// List available models
     pub async fn list_models(&self) -> Result<Vec<String>> {
         let url = format!("{}/api/tags", self.base_url);
 

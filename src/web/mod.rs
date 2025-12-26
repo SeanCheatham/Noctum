@@ -1,3 +1,8 @@
+//! Web server and dashboard for Noctum.
+//!
+//! Provides an Axum-based HTTP server with HTML pages for viewing results
+//! and a JSON API for configuration and triggering scans.
+
 mod handlers;
 mod templates;
 

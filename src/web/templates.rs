@@ -1,3 +1,8 @@
+//! Askama templates and view models for HTML rendering.
+//!
+//! Contains template structs for each page and view wrappers that transform
+//! database models for display (e.g., converting absolute paths to relative).
+
 use crate::config::OllamaEndpoint;
 use crate::db::{AnalysisResult, MutationResult, MutationSummary, Repository};
 use askama::Template;

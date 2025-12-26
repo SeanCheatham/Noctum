@@ -1,3 +1,8 @@
+//! Configuration management for Noctum.
+//!
+//! Handles loading, saving, and validating application configuration from TOML files.
+//! Supports schedule windows, multiple Ollama endpoints, and web server settings.
+
 use anyhow::{Context, Result};
 use chrono::Timelike;
 use directories::ProjectDirs;
@@ -103,7 +108,6 @@ impl ScheduleConfig {
     }
 }
 
-// Default value functions
 fn default_log_level() -> String {
     "info".to_string()
 }

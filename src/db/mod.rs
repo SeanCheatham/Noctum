@@ -1,3 +1,8 @@
+//! SQLite database layer for persistent storage.
+//!
+//! Manages repositories, analysis results, mutation testing results, and daemon state.
+//! Handles migrations and provides async CRUD operations via sqlx.
+
 mod models;
 
 pub use models::*;
