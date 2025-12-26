@@ -78,7 +78,18 @@ pub async fn add_repository(
     }
 
     match state.db.add_repository(&req.path, &req.name).await {
-        Ok(id) => (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response(),
+        Ok(id) => {
+            // If we're in the scheduled window, trigger a scan so the new repo is processed immediately
+            let in_window = state.config.read().await.schedule.is_in_window();
+            if in_window {
+                let daemon = state.daemon.read().await;
+                daemon.trigger_scan();
+                tracing::info!(
+                    "Triggered scan for newly added repository (in scheduled window)"
+                );
+            }
+            (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
+        }
         Err(e) => {
             tracing::warn!("Failed to add repository: {}", e);
             (
