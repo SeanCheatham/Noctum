@@ -13,6 +13,15 @@
         text-decoration: underline;
     }
 
+    .repo-header {
+        margin-bottom: 1.5rem;
+    }
+    .repo-path {
+        color: var(--text-secondary);
+        font-family: monospace;
+        margin-bottom: 0;
+    }
+
     .summary-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -133,16 +142,6 @@
         overflow-x: auto;
     }
 
-    .back-link {
-        display: inline-block;
-        margin-bottom: 1.5rem;
-        color: var(--accent);
-        text-decoration: none;
-    }
-    .back-link:hover {
-        text-decoration: underline;
-    }
-
     /* Expandable details */
     .mutation-row {
         cursor: pointer;
@@ -205,27 +204,19 @@
 </style>
 
 <div class="breadcrumb">
-    <a href="/repositories">Repositories</a> /
-    <a href="/repositories/{{ repository.id }}/results"
-        >{{ repository.name }}</a
-    >
-    / Mutation Testing
+    <a href="/repositories">Repositories</a> / {{ repository.name }}
 </div>
 
-<h1>Mutation Testing Results</h1>
-<p
-    style="
-        color: var(--text-secondary);
-        margin-bottom: 1.5rem;
-        font-family: monospace;
-    "
->
-    {{ repository.path }}
-</p>
+<div class="repo-header">
+    <h1>{{ repository.name }}</h1>
+    <p class="repo-path">{{ repository.path }}</p>
+</div>
 
-<a href="/repositories/{{ repository.id }}/results" class="back-link"
-    >&larr; Back to Code Analysis</a
->
+<nav class="tabs">
+    <a href="/repositories/{{ repository.id }}/architecture" class="tab">Architecture</a>
+    <a href="/repositories/{{ repository.id }}/files" class="tab">File Analysis</a>
+    <a href="/repositories/{{ repository.id }}/mutations" class="tab active">Mutation Testing</a>
+</nav>
 
 <div class="summary-grid">
     <div class="summary-card">

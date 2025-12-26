@@ -74,12 +74,18 @@ impl AnalysisResultView {
 }
 
 #[derive(Template)]
-#[template(path = "repository_results.html")]
-pub struct RepositoryResultsTemplate {
+#[template(path = "repository_architecture.html")]
+pub struct RepositoryArchitectureTemplate {
     pub repository: Repository,
     pub architecture_summary: Option<AnalysisResult>,
-    pub file_results: Vec<AnalysisResultView>,
     pub architecture_summary_html: String,
+}
+
+#[derive(Template)]
+#[template(path = "repository_files.html")]
+pub struct RepositoryFilesTemplate {
+    pub repository: Repository,
+    pub file_results: Vec<AnalysisResultView>,
 }
 
 /// A mutation result with a relative file path for display

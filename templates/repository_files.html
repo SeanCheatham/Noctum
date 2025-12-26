@@ -1,4 +1,4 @@
-{% extends "base.html" %} {% block title %}{{ repository.name }} - Results -
+{% extends "base.html" %} {% block title %}File Analysis - {{ repository.name }} -
 Noctum{% endblock %} {% block content %}
 <style>
     .breadcrumb {
@@ -13,12 +13,15 @@ Noctum{% endblock %} {% block content %}
         text-decoration: underline;
     }
 
-    .architecture-summary {
-        margin-bottom: 2rem;
+    .repo-header {
+        margin-bottom: 1.5rem;
     }
-    .architecture-summary .card {
-        border-left: 3px solid var(--accent);
+    .repo-path {
+        color: var(--text-secondary);
+        font-family: monospace;
+        margin-bottom: 0;
     }
+
     .markdown-content {
         line-height: 1.7;
     }
@@ -187,38 +190,16 @@ Noctum{% endblock %} {% block content %}
     <a href="/repositories">Repositories</a> / {{ repository.name }}
 </div>
 
-<h1>{{ repository.name }}</h1>
-<p
-    style="
-        color: var(--text-secondary);
-        margin-bottom: 1rem;
-        font-family: monospace;
-    "
->
-    {{ repository.path }}
-</p>
-<p style="margin-bottom: 1.5rem">
-    <a
-        href="/repositories/{{ repository.id }}/mutations"
-        style="color: var(--accent); text-decoration: none"
-    >
-        View Mutation Testing Results &rarr;
-    </a>
-</p>
-
-{% match architecture_summary %} {% when Some with (summary) %}
-<div class="architecture-summary">
-    <div class="card">
-        <h3>Architecture Summary</h3>
-        <div class="detail-date" style="margin-bottom: 1rem">
-            Updated: {{ summary.created_at }}
-        </div>
-        <div class="markdown-content">{{ architecture_summary_html|safe }}</div>
-    </div>
+<div class="repo-header">
+    <h1>{{ repository.name }}</h1>
+    <p class="repo-path">{{ repository.path }}</p>
 </div>
-{% when None %} {% endmatch %}
 
-<h2>File Analysis</h2>
+<nav class="tabs">
+    <a href="/repositories/{{ repository.id }}/architecture" class="tab">Architecture</a>
+    <a href="/repositories/{{ repository.id }}/files" class="tab active">File Analysis</a>
+    <a href="/repositories/{{ repository.id }}/mutations" class="tab">Mutation Testing</a>
+</nav>
 
 <div class="results-container">
     <div class="file-panel">

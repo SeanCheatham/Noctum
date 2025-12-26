@@ -87,6 +87,14 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow
             get(handlers::repository_results),
         )
         .route(
+            "/repositories/:id/architecture",
+            get(handlers::repository_architecture),
+        )
+        .route(
+            "/repositories/:id/files",
+            get(handlers::repository_files),
+        )
+        .route(
             "/repositories/:id/mutations",
             get(handlers::mutation_results),
         )

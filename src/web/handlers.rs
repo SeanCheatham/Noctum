@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use super::templates::{
     render_markdown, AnalysisResultView, MutationResultView, MutationResultsTemplate,
-    RepositoriesTemplate, RepositoryResultsTemplate, SettingsTemplate,
+    RepositoriesTemplate, RepositoryArchitectureTemplate, RepositoryFilesTemplate, SettingsTemplate,
 };
 use askama::Template;
 
@@ -126,7 +126,12 @@ pub async fn delete_repository(
     }
 }
 
-pub async fn repository_results(
+/// Legacy route - redirects to architecture tab
+pub async fn repository_results(Path(id): Path<i64>) -> impl IntoResponse {
+    axum::response::Redirect::permanent(&format!("/repositories/{}/architecture", id))
+}
+
+pub async fn repository_architecture(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
@@ -141,32 +146,46 @@ pub async fn repository_results(
         .await
         .unwrap_or_default();
 
-    let mut architecture_summary = None;
-    let mut file_results = Vec::new();
-
-    for result in all_results {
-        if result.analysis_type == "architecture_summary" {
-            architecture_summary = Some(result);
-        } else {
-            file_results.push(result);
-        }
-    }
-
-    let file_results: Vec<AnalysisResultView> = file_results
+    let architecture_summary = all_results
         .into_iter()
-        .map(|r| AnalysisResultView::from_result(r, &repository.path))
-        .collect();
+        .find(|r| r.analysis_type == "architecture_summary");
 
     let architecture_summary_html = architecture_summary
         .as_ref()
         .map(|s| render_markdown(&s.result))
         .unwrap_or_default();
 
-    render_template(RepositoryResultsTemplate {
+    render_template(RepositoryArchitectureTemplate {
         repository,
         architecture_summary,
-        file_results,
         architecture_summary_html,
+    })
+}
+
+pub async fn repository_files(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let repository = match get_repo_or_error(&state.db, id).await {
+        Ok(repo) => repo,
+        Err(response) => return response,
+    };
+
+    let all_results = state
+        .db
+        .get_all_repository_results(id)
+        .await
+        .unwrap_or_default();
+
+    let file_results: Vec<AnalysisResultView> = all_results
+        .into_iter()
+        .filter(|r| r.analysis_type != "architecture_summary")
+        .map(|r| AnalysisResultView::from_result(r, &repository.path))
+        .collect();
+
+    render_template(RepositoryFilesTemplate {
+        repository,
+        file_results,
     })
 }
 
