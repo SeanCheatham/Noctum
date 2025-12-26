@@ -5,7 +5,7 @@ use crate::mutation::{
     analyze_and_generate_mutations, executor::execute_mutation_test, MutationConfig,
 };
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -34,6 +34,54 @@ fn compute_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+/// Copy a repository to a temporary directory for isolated mutation testing.
+///
+/// Returns the TempDir handle (which auto-cleans on drop) and the path to the
+/// copied repository within it.
+async fn copy_repo_to_temp(repo_path: &Path) -> anyhow::Result<tempfile::TempDir> {
+    let repo_path = repo_path.to_path_buf();
+
+    // Use spawn_blocking since fs_extra::dir::copy is synchronous
+    let temp_dir = tokio::task::spawn_blocking(move || -> anyhow::Result<tempfile::TempDir> {
+        let temp_dir = tempfile::TempDir::new()?;
+
+        let options = fs_extra::dir::CopyOptions {
+            overwrite: false,
+            skip_exist: false,
+            buffer_size: 64 * 1024, // 64KB buffer
+            copy_inside: true,      // Copy contents into dest, not as subdirectory
+            content_only: true,     // Copy only contents, not the directory itself
+            depth: 0,               // Unlimited depth
+        };
+
+        fs_extra::dir::copy(&repo_path, temp_dir.path(), &options)
+            .map_err(|e| anyhow::anyhow!("Failed to copy repository: {}", e))?;
+
+        Ok(temp_dir)
+    })
+    .await??;
+
+    Ok(temp_dir)
+}
+
+/// Translate a path from the temp copy back to the original repository path.
+///
+/// Given a file path in the temp directory, returns the corresponding path
+/// in the original repository for storage/display purposes.
+fn translate_temp_to_original(
+    temp_repo_path: &Path,
+    original_repo_path: &Path,
+    file_path: &Path,
+) -> PathBuf {
+    // Strip the temp prefix and join with original
+    if let Ok(relative) = file_path.strip_prefix(temp_repo_path) {
+        original_repo_path.join(relative)
+    } else {
+        // Fallback: return as-is if path doesn't have expected prefix
+        file_path.to_path_buf()
+    }
 }
 
 /// Daemon status
@@ -68,6 +116,7 @@ impl DaemonStatus {
 /// A task to be processed by an endpoint worker
 struct AnalysisTask {
     repository_id: i64,
+    /// Original file path (for DB storage and display)
     file_path: PathBuf,
     content: String,
     content_hash: String,
@@ -333,15 +382,34 @@ self.set_status(DaemonStatus::Processing);
         repo: &crate::db::Repository,
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
-        let repo_path = std::path::Path::new(&repo.path);
+        let original_repo_path = std::path::Path::new(&repo.path);
 
-        if !repo_path.exists() {
+        if !original_repo_path.exists() {
             tracing::warn!("Repository path does not exist: {}", repo.path);
             return Ok(false);
         }
 
-        // Find all Rust files in the repository
-        let rust_files = self.find_rust_files(repo_path)?;
+        // Copy repository to temp directory for isolated analysis
+        // This ensures the original repo is never modified during mutation testing
+        tracing::info!(
+            "Copying repository {} to temp directory for analysis",
+            repo.name
+        );
+        let temp_dir = match copy_repo_to_temp(original_repo_path).await {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::error!("Failed to copy repository to temp: {}", e);
+                return Err(e);
+            }
+        };
+        let temp_repo_path = temp_dir.path();
+        tracing::info!(
+            "Repository copied to temp directory: {}",
+            temp_repo_path.display()
+        );
+
+        // Find all Rust files in the temp copy
+        let rust_files = self.find_rust_files(temp_repo_path)?;
 
         if rust_files.is_empty() {
             tracing::debug!("No Rust files found in repository: {}", repo.name);
@@ -404,27 +472,31 @@ self.set_status(DaemonStatus::Processing);
 
             // Compute content hash
             let content_hash = compute_hash(&content);
-            let file_path_str = file_path.to_string_lossy().to_string();
 
-            // Check if file has changed since last analysis
+            // Translate temp path to original for DB storage
+            let original_file_path =
+                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
+            let original_file_path_str = original_file_path.to_string_lossy().to_string();
+
+            // Check if file has changed since last analysis (using original path)
             let existing_hash = self
                 .db
                 .get_latest_file_hash(
                     repository_id,
-                    &file_path_str,
+                    &original_file_path_str,
                     &AnalysisType::CodeUnderstanding.to_string(),
                 )
                 .await
                 .unwrap_or(None);
 
             if existing_hash.as_ref() == Some(&content_hash) {
-                tracing::debug!("Skipping unchanged file: {:?}", file_path);
+                tracing::debug!("Skipping unchanged file: {:?}", original_file_path);
                 continue;
             }
 
             let task = AnalysisTask {
                 repository_id,
-                file_path,
+                file_path: original_file_path, // Use original path for storage
                 content,
                 content_hash,
             };
@@ -469,12 +541,22 @@ self.set_status(DaemonStatus::Processing);
             );
         }
 
-        // Run mutation testing after architecture summary
+        // Run mutation testing after architecture summary (using temp copy)
         if !self.should_stop.load(Ordering::SeqCst) {
-            if let Err(e) = self.run_mutation_testing(repo, endpoints).await {
+            if let Err(e) = self
+                .run_mutation_testing(repo, endpoints, temp_repo_path, original_repo_path)
+                .await
+            {
                 tracing::warn!("Failed to run mutation testing for {}: {}", repo.name, e);
             }
         }
+
+        // temp_dir is dropped here, cleaning up the temp copy
+        tracing::debug!(
+            "Cleaning up temp directory for {}",
+            repo.name
+        );
+        drop(temp_dir);
 
         Ok(files_analyzed)
     }
@@ -598,11 +680,16 @@ self.set_status(DaemonStatus::Processing);
         Ok(())
     }
 
-    /// Run LLM-driven mutation testing on a repository
+    /// Run LLM-driven mutation testing on a repository using a temp copy.
+    ///
+    /// The temp copy is created by `analyze_repository_parallel()` before any analysis,
+    /// ensuring the original repository is never modified.
     async fn run_mutation_testing(
         &self,
         repo: &crate::db::Repository,
         endpoints: &[OllamaEndpoint],
+        temp_repo_path: &Path,
+        original_repo_path: &Path,
     ) -> anyhow::Result<()> {
         tracing::info!("Starting mutation testing for {}", repo.name);
 
@@ -613,7 +700,6 @@ self.set_status(DaemonStatus::Processing);
             )
             .await?;
 
-        let repo_path = std::path::Path::new(&repo.path);
         let config = MutationConfig::default();
 
         // Find first available endpoint
@@ -625,8 +711,8 @@ self.set_status(DaemonStatus::Processing);
             }
         };
 
-        // Find Rust files
-        let rust_files = self.find_rust_files(repo_path)?;
+        // Find Rust files in the temp copy
+        let rust_files = self.find_rust_files(temp_repo_path)?;
         let mut total_mutations = 0;
         let mut current_client = client;
         let mut current_endpoint_idx = endpoints
@@ -639,7 +725,7 @@ self.set_status(DaemonStatus::Processing);
                 break;
             }
 
-            // Read file
+            // Read file from temp copy
             let content = match tokio::fs::read_to_string(&file_path).await {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -650,27 +736,35 @@ self.set_status(DaemonStatus::Processing);
             }
 
             let content_hash = compute_hash(&content);
-            let file_path_str = file_path.to_string_lossy().to_string();
 
-            // Check if already tested with this hash
+            // Keep temp path for file operations (analyzer and executor)
+            let temp_file_path_str = file_path.to_string_lossy().to_string();
+
+            // Translate temp path back to original for DB lookups and storage
+            let original_file_path =
+                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
+            let original_file_path_str = original_file_path.to_string_lossy().to_string();
+
+            // Check if already tested with this hash (using original path for DB lookup)
             if self
                 .db
-                .has_mutation_results_for_hash(repo.id, &file_path_str, &content_hash)
+                .has_mutation_results_for_hash(repo.id, &original_file_path_str, &content_hash)
                 .await
                 .unwrap_or(false)
             {
                 tracing::debug!(
                     "Skipping mutation testing for unchanged file: {}",
-                    file_path_str
+                    original_file_path_str
                 );
                 continue;
             }
 
             // Analyze and generate mutations, with endpoint fallback
-            tracing::debug!("Analyzing mutations for {}", file_path_str);
+            // Pass temp path so mutations store temp paths for executor to use
+            tracing::debug!("Analyzing mutations for {}", original_file_path_str);
             let mutations = match analyze_and_generate_mutations(
                 &current_client,
-                &file_path_str,
+                &temp_file_path_str,
                 &content,
                 config.max_mutations_per_file,
             )
@@ -680,7 +774,7 @@ self.set_status(DaemonStatus::Processing);
                 Err(e) => {
                     tracing::warn!(
                         "Failed to analyze mutations in {} with current endpoint: {}",
-                        file_path_str,
+                        original_file_path_str,
                         e
                     );
 
@@ -697,7 +791,7 @@ self.set_status(DaemonStatus::Processing);
                         // Retry with new endpoint
                         match analyze_and_generate_mutations(
                             &current_client,
-                            &file_path_str,
+                            &temp_file_path_str,
                             &content,
                             config.max_mutations_per_file,
                         )
@@ -705,7 +799,11 @@ self.set_status(DaemonStatus::Processing);
                         {
                             Ok(m) => m,
                             Err(e2) => {
-                                tracing::warn!("Retry also failed for {}: {}", file_path_str, e2);
+                                tracing::warn!(
+                                    "Retry also failed for {}: {}",
+                                    original_file_path_str,
+                                    e2
+                                );
                                 continue;
                             }
                         }
@@ -716,14 +814,14 @@ self.set_status(DaemonStatus::Processing);
             };
 
             if mutations.is_empty() {
-                tracing::debug!("No mutations generated for {}", file_path_str);
+                tracing::debug!("No mutations generated for {}", original_file_path_str);
                 continue;
             }
 
             tracing::info!(
                 "Generated {} mutations for {}",
                 mutations.len(),
-                file_path_str
+                original_file_path_str
             );
 
             // Pre-compute original lines for building replacement details
@@ -734,10 +832,10 @@ self.set_status(DaemonStatus::Processing);
                     break;
                 }
 
-                // Execute the mutation test (with retry logic for compile errors)
+                // Execute the mutation test on the temp copy
                 let result = match execute_mutation_test(
                     &current_client,
-                    repo_path,
+                    temp_repo_path,
                     mutation,
                     &content,
                     &config,
@@ -775,11 +873,12 @@ self.set_status(DaemonStatus::Processing);
                 let replacements_json = serde_json::to_string(&replacements_with_context)
                     .unwrap_or_else(|_| "[]".to_string());
 
+                // Save result with original path (not temp path) for UI display
                 if let Err(e) = self
                     .db
                     .save_mutation_result(
                         repo.id,
-                        &file_path_str,
+                        &original_file_path_str,
                         &result.mutation.description,
                         &result.mutation.reasoning,
                         &replacements_json,
