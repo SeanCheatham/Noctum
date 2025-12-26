@@ -179,6 +179,32 @@ impl Database {
         Ok(sqlx::Row::get(&result, "id"))
     }
 
+    /// Delete a repository and all its associated data
+    pub async fn delete_repository(&self, id: i64) -> Result<bool> {
+        // Delete associated mutation results first
+        sqlx::query("DELETE FROM mutation_results WHERE repository_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete mutation results")?;
+
+        // Delete associated analysis results
+        sqlx::query("DELETE FROM analysis_results WHERE repository_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete analysis results")?;
+
+        // Delete the repository itself
+        let result = sqlx::query("DELETE FROM repositories WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete repository")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Get recent analysis results (latest per file)
     pub async fn get_recent_results(&self, limit: i32) -> Result<Vec<AnalysisResult>> {
         // Get the latest result for each file/analysis_type combination
@@ -811,5 +837,57 @@ mod tests {
 
         let result = db.add_repository("/path", "Repo2").await;
         assert!(result.is_err(), "Duplicate path should fail");
+    }
+
+    #[tokio::test]
+    async fn test_delete_repository() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test/path", "Test Repo").await.unwrap();
+
+        // Add some analysis results
+        db.save_analysis_result(repo_id, "file.rs", "type1", "result", None, None)
+            .await
+            .unwrap();
+
+        // Add some mutation results
+        db.save_mutation_result(
+            repo_id,
+            "file.rs",
+            "desc",
+            "reason",
+            "{}",
+            "killed",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Delete the repository
+        let deleted = db.delete_repository(repo_id).await.unwrap();
+        assert!(deleted, "Repository should be deleted");
+
+        // Verify repository is gone
+        let repo = db.get_repository(repo_id).await.unwrap();
+        assert!(repo.is_none(), "Repository should not exist after deletion");
+
+        // Verify analysis results are gone
+        let results = db.get_repository_results(repo_id, "type1").await.unwrap();
+        assert!(results.is_empty(), "Analysis results should be deleted");
+
+        // Verify mutation results are gone
+        let mutations = db.get_mutation_results(repo_id).await.unwrap();
+        assert!(mutations.is_empty(), "Mutation results should be deleted");
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_repository() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let deleted = db.delete_repository(999).await.unwrap();
+        assert!(!deleted, "Deleting non-existent repository should return false");
     }
 }

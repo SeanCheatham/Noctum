@@ -2,11 +2,13 @@ mod analyzer;
 mod config;
 mod daemon;
 mod db;
+mod language;
 mod mutation;
 mod web;
 
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
+use tokio::signal;
 use tokio::sync::RwLock;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -74,12 +76,9 @@ async fn main() -> anyhow::Result<()> {
             db.run_migrations().await?;
             tracing::info!("Database initialized");
 
-            // Initialize daemon
+            // Initialize daemon with shared config
             let config = Arc::new(RwLock::new(config));
-            let daemon = Arc::new(RwLock::new(Daemon::new(
-                config.read().await.clone(),
-                db.clone(),
-            )));
+            let daemon = Arc::new(RwLock::new(Daemon::new(config.clone(), db.clone())));
 
             // Create shared state
             let state = Arc::new(AppState {
@@ -89,13 +88,11 @@ async fn main() -> anyhow::Result<()> {
             });
 
             // Start the daemon in a background task
-            let daemon_handle = {
-                let daemon = daemon.clone();
-                tokio::spawn(async move {
-                    let mut daemon = daemon.write().await;
-                    daemon.run().await
-                })
-            };
+            let daemon_for_task = daemon.clone();
+            let daemon_handle = tokio::spawn(async move {
+                let mut daemon = daemon_for_task.write().await;
+                daemon.run().await
+            });
 
             // Start the web server
             let web_host = config.read().await.web.host.clone();
@@ -108,9 +105,14 @@ async fn main() -> anyhow::Result<()> {
                 "Noctum is running. Dashboard available at http://localhost:{}",
                 web_port
             );
+            tracing::info!("Press Ctrl+C to stop");
 
-            // Wait for either to complete (or fail)
+            // Wait for shutdown signal or task completion
             tokio::select! {
+                _ = shutdown_signal() => {
+                    tracing::info!("Shutdown signal received");
+                    daemon.read().await.stop();
+                }
                 result = daemon_handle => {
                     if let Err(e) = result {
                         tracing::error!("Daemon task failed: {}", e);
@@ -122,10 +124,37 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+
+            tracing::info!("Noctum stopped");
         }
     }
 
     Ok(())
+}
+
+/// Wait for shutdown signal (Ctrl+C or SIGTERM)
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 #[cfg(test)]

@@ -90,6 +90,31 @@ pub async fn add_repository(
     }
 }
 
+pub async fn delete_repository(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    match state.db.delete_repository(id).await {
+        Ok(true) => {
+            tracing::info!("Deleted repository {}", id);
+            (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
+        }
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Repository not found" })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("Failed to delete repository {}: {}", id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to delete repository" })),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn repository_results(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
@@ -368,18 +393,11 @@ pub async fn api_update_config(
     let start_hour = req.start_hour.min(23);
     let end_hour = req.end_hour.min(23);
 
-    // Update in-memory config
+    // Update in-memory config (daemon reads this directly each cycle)
     {
         let mut config = state.config.write().await;
         config.schedule.start_hour = start_hour;
         config.schedule.end_hour = end_hour;
-    }
-
-    // Update daemon's schedule
-    {
-        let daemon = state.daemon.read().await;
-        let config = state.config.read().await;
-        daemon.set_schedule(config.schedule.clone()).await;
     }
 
     tracing::info!(
@@ -415,16 +433,10 @@ pub async fn api_save_config(State(state): State<Arc<AppState>>) -> impl IntoRes
 pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match Config::load(None) {
         Ok(new_config) => {
-            let schedule = new_config.schedule.clone();
-
+            // Update shared config (daemon reads this directly each cycle)
             {
                 let mut config = state.config.write().await;
                 *config = new_config;
-            }
-
-            {
-                let daemon = state.daemon.read().await;
-                daemon.set_schedule(schedule).await;
             }
 
             tracing::info!("Config reloaded from disk");

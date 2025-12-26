@@ -8,15 +8,40 @@ mod templates;
 
 use crate::AppState;
 use axum::{
+    body::Body,
     extract::Request,
-    http::StatusCode,
+    http::{header, StatusCode},
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
     Router,
 };
+use rust_embed::Embed;
 use std::sync::Arc;
-use tower_http::services::ServeDir;
+
+#[derive(Embed)]
+#[folder = "static/"]
+struct StaticAssets;
+
+/// Serve embedded static files.
+async fn serve_static(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
+    let mime_type = mime_guess::from_path(&path)
+        .first_raw()
+        .unwrap_or("application/octet-stream");
+
+    match StaticAssets::get(&path) {
+        Some(content) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, mime_type)
+            .header(header::CACHE_CONTROL, "public, max-age=31536000")
+            .body(Body::from(content.data.into_owned()))
+            .unwrap(),
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("Not found"))
+            .unwrap(),
+    }
+}
 
 /// Middleware to validate Host header against DNS rebinding attacks.
 ///
@@ -59,6 +84,7 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow
         .route("/", get(handlers::list_repositories))
         .route("/repositories", get(handlers::list_repositories))
         .route("/repositories", post(handlers::add_repository))
+        .route("/repositories/:id", delete(handlers::delete_repository))
         .route(
             "/repositories/:id/results",
             get(handlers::repository_results),
@@ -85,8 +111,8 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow
         .route("/api/config/reload", post(handlers::api_reload_config))
         // Scan API
         .route("/api/scan/trigger", post(handlers::api_trigger_scan))
-        // Static files
-        .nest_service("/static", ServeDir::new("static"))
+        // Static files (embedded in binary)
+        .route("/static/{*path}", get(serve_static))
         // State
         .with_state(state);
 

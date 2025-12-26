@@ -18,7 +18,6 @@ tokio = { version = "1", features = ["full"] }
 # Web framework
 axum = { version = "0.7", features = ["macros"] }
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
@@ -53,6 +52,10 @@ clap = { version = "4", features = ["derive"] }
 
 # Templating
 askama = "0.12"
+
+# Embed static files
+rust-embed = "8"
+mime_guess = "2"
 
 # Markdown rendering
 pulldown-cmark = "0.10"

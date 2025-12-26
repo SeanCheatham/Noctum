@@ -93,7 +93,7 @@
                 <td style="color: var(--text-secondary)">
                     {{ repo.created_at }}
                 </td>
-                <td>
+                <td style="display: flex; gap: 0.5rem">
                     <a
                         href="/repositories/{{ repo.id }}/results"
                         class="btn"
@@ -101,6 +101,13 @@
                     >
                         View Results
                     </a>
+                    <button
+                        class="btn btn-danger"
+                        style="font-size: 0.75rem; padding: 0.25rem 0.75rem"
+                        onclick="deleteRepository({{ repo.id }}, '{{ repo.name }}')"
+                    >
+                        Delete
+                    </button>
                 </td>
             </tr>
             {% endfor %}
@@ -162,6 +169,27 @@
             alert("Failed to trigger scan: " + err.message);
             btn.textContent = originalText;
             btn.disabled = false;
+        }
+    }
+
+    async function deleteRepository(id, name) {
+        if (!confirm(`Delete repository "${name}"?\n\nThis will also delete all analysis and mutation results for this repository.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/repositories/${id}`, {
+                method: "DELETE",
+            });
+
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                const error = await response.json();
+                alert("Error: " + (error.error || "Failed to delete repository"));
+            }
+        } catch (err) {
+            alert("Failed to delete repository: " + err.message);
         }
     }
 </script>

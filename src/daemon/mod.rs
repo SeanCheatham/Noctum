@@ -1,5 +1,5 @@
 use crate::analyzer::{AnalysisType, OllamaClient};
-use crate::config::{Config, OllamaEndpoint, ScheduleConfig};
+use crate::config::{Config, OllamaEndpoint};
 use crate::db::Database;
 use crate::mutation::{
     analyze_and_generate_mutations, executor::execute_mutation_test, MutationConfig,
@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 /// Minimum file size (bytes) for code analysis. Smaller files are typically
@@ -56,20 +57,17 @@ struct AnalysisTask {
 
 /// The background daemon that manages analysis tasks
 pub struct Daemon {
-    config: Config,
+    config: Arc<RwLock<Config>>,
     status: DaemonStatus,
-    schedule: Arc<TokioMutex<ScheduleConfig>>,
     should_stop: Arc<AtomicBool>,
     trigger_scan: Arc<AtomicBool>,
     db: Database,
 }
 
 impl Daemon {
-    /// Create a new daemon instance
-    pub fn new(config: Config, db: Database) -> Self {
-        let schedule = config.schedule.clone();
+    /// Create a new daemon instance with shared config
+    pub fn new(config: Arc<RwLock<Config>>, db: Database) -> Self {
         Self {
-            schedule: Arc::new(TokioMutex::new(schedule)),
             config,
             status: DaemonStatus::Waiting,
             should_stop: Arc::new(AtomicBool::new(false)),
@@ -84,14 +82,9 @@ impl Daemon {
         tracing::info!("Scan triggered manually");
     }
 
-    /// Update the schedule (called when config is reloaded)
-    pub async fn set_schedule(&self, schedule: ScheduleConfig) {
-        *self.schedule.lock().await = schedule;
-    }
-
     /// Check if we're in the scheduled window
     async fn is_in_schedule(&self) -> bool {
-        self.schedule.lock().await.is_in_window()
+        self.config.read().await.schedule.is_in_window()
     }
 
     /// Get current daemon status
@@ -99,20 +92,28 @@ impl Daemon {
         self.status
     }
 
-    /// Signal the daemon to stop
+    /// Signal the daemon to stop gracefully
     pub fn stop(&self) {
+        tracing::info!("Shutdown requested, stopping daemon...");
         self.should_stop.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if shutdown has been requested
+    pub fn should_stop(&self) -> bool {
+        self.should_stop.load(Ordering::SeqCst)
     }
 
     /// Run the daemon loop
     pub async fn run(&mut self) -> anyhow::Result<()> {
+        let config = self.config.read().await;
         tracing::info!(
             "Daemon started (scheduled window: {:02}:00 - {:02}:00)",
-            self.config.schedule.start_hour,
-            self.config.schedule.end_hour
+            config.schedule.start_hour,
+            config.schedule.end_hour
         );
+        let check_interval = Duration::from_secs(config.schedule.check_interval_seconds);
+        drop(config);
 
-        let check_interval = Duration::from_secs(self.config.schedule.check_interval_seconds);
         let mut ticker = interval(check_interval);
 
         while !self.should_stop.load(Ordering::SeqCst) {
@@ -169,9 +170,11 @@ impl Daemon {
             .update_daemon_status("processing", Some("scanning repositories"))
             .await?;
 
-        // Get enabled endpoints from config
+        // Get enabled endpoints from config (read fresh each cycle)
         let endpoints: Vec<_> = self
             .config
+            .read()
+            .await
             .endpoints
             .iter()
             .filter(|e| e.enabled)
@@ -466,46 +469,54 @@ impl Daemon {
             repo.name, truncated
         );
 
-        // Use the first available endpoint for the summary
-        let endpoint = match endpoints.first() {
-            Some(ep) => ep,
-            None => {
-                tracing::warn!("No endpoints available for architecture summary");
-                return Ok(());
+        // Try each endpoint until one succeeds
+        for endpoint in endpoints {
+            let client = OllamaClient::new(&endpoint.url, &endpoint.model);
+
+            if !client.is_available().await {
+                tracing::debug!(
+                    "Endpoint {} not available for architecture summary, trying next",
+                    endpoint.name
+                );
+                continue;
             }
-        };
 
-        let client = OllamaClient::new(&endpoint.url, &endpoint.model);
+            match client.generate(&prompt).await {
+                Ok(summary) => {
+                    tracing::info!(
+                        "Generated architecture summary for {} using endpoint {}",
+                        repo.name,
+                        endpoint.name
+                    );
 
-        if !client.is_available().await {
-            tracing::warn!(
-                "Endpoint {} not available for architecture summary",
-                endpoint.name
-            );
-            return Ok(());
+                    // Save the summary - use repo path as the "file_path" to identify it
+                    self.db
+                        .save_analysis_result(
+                            repo.id,
+                            &format!("[{}] Architecture Summary", repo.name),
+                            &AnalysisType::ArchitectureSummary.to_string(),
+                            &summary,
+                            Some("info"),
+                            None, // No content hash for architecture summaries
+                        )
+                        .await?;
+
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Endpoint {} failed for architecture summary: {}, trying next",
+                        endpoint.name,
+                        e
+                    );
+                }
+            }
         }
 
-        match client.generate(&prompt).await {
-            Ok(summary) => {
-                tracing::info!("Generated architecture summary for {}", repo.name);
-
-                // Save the summary - use repo path as the "file_path" to identify it
-                self.db
-                    .save_analysis_result(
-                        repo.id,
-                        &format!("[{}] Architecture Summary", repo.name),
-                        &AnalysisType::ArchitectureSummary.to_string(),
-                        &summary,
-                        Some("info"),
-                        None, // No content hash for architecture summaries
-                    )
-                    .await?;
-            }
-            Err(e) => {
-                tracing::warn!("Failed to generate architecture summary: {}", e);
-            }
-        }
-
+        tracing::warn!(
+            "All endpoints failed for architecture summary of {}",
+            repo.name
+        );
         Ok(())
     }
 
@@ -527,28 +538,23 @@ impl Daemon {
         let repo_path = std::path::Path::new(&repo.path);
         let config = MutationConfig::default();
 
-        // Get first available endpoint
-        let endpoint = match endpoints.first() {
-            Some(ep) => ep,
+        // Find first available endpoint
+        let (client, endpoint_name) = match find_available_endpoint(endpoints).await {
+            Some((c, name)) => (c, name),
             None => {
                 tracing::warn!("No endpoints available for mutation testing");
                 return Ok(());
             }
         };
 
-        let client = OllamaClient::new(&endpoint.url, &endpoint.model);
-
-        if !client.is_available().await {
-            tracing::warn!(
-                "Endpoint {} not available for mutation testing",
-                endpoint.name
-            );
-            return Ok(());
-        }
-
         // Find Rust files
         let rust_files = self.find_rust_files(repo_path)?;
         let mut total_mutations = 0;
+        let mut current_client = client;
+        let mut current_endpoint_idx = endpoints
+            .iter()
+            .position(|e| e.name == endpoint_name)
+            .unwrap_or(0);
 
         for file_path in rust_files {
             if self.should_stop.load(Ordering::SeqCst) {
@@ -582,10 +588,10 @@ impl Daemon {
                 continue;
             }
 
-            // Analyze and generate mutations in a single LLM call
+            // Analyze and generate mutations, with endpoint fallback
             tracing::debug!("Analyzing mutations for {}", file_path_str);
             let mutations = match analyze_and_generate_mutations(
-                &client,
+                &current_client,
                 &file_path_str,
                 &content,
                 config.max_mutations_per_file,
@@ -594,8 +600,44 @@ impl Daemon {
             {
                 Ok(m) => m,
                 Err(e) => {
-                    tracing::warn!("Failed to analyze mutations in {}: {}", file_path_str, e);
-                    continue;
+                    tracing::warn!(
+                        "Failed to analyze mutations in {} with current endpoint: {}",
+                        file_path_str,
+                        e
+                    );
+
+                    // Try to find another endpoint
+                    let remaining = &endpoints[current_endpoint_idx + 1..];
+                    if let Some((new_client, new_name)) = find_available_endpoint(remaining).await {
+                        tracing::info!("Switching to endpoint {} for mutation analysis", new_name);
+                        current_client = new_client;
+                        current_endpoint_idx = endpoints
+                            .iter()
+                            .position(|ep| ep.name == new_name)
+                            .unwrap_or(current_endpoint_idx);
+
+                        // Retry with new endpoint
+                        match analyze_and_generate_mutations(
+                            &current_client,
+                            &file_path_str,
+                            &content,
+                            config.max_mutations_per_file,
+                        )
+                        .await
+                        {
+                            Ok(m) => m,
+                            Err(e2) => {
+                                tracing::warn!(
+                                    "Retry also failed for {}: {}",
+                                    file_path_str,
+                                    e2
+                                );
+                                continue;
+                            }
+                        }
+                    } else {
+                        continue;
+                    }
                 }
             };
 
@@ -813,6 +855,19 @@ async fn endpoint_worker(
     tracing::info!("Worker for endpoint '{}' stopped", endpoint.name);
 }
 
+/// Find the first available endpoint from a list.
+/// Returns the client and endpoint name if found.
+async fn find_available_endpoint(endpoints: &[OllamaEndpoint]) -> Option<(OllamaClient, String)> {
+    for endpoint in endpoints {
+        let client = OllamaClient::new(&endpoint.url, &endpoint.model);
+        if client.is_available().await {
+            return Some((client, endpoint.name.clone()));
+        }
+        tracing::debug!("Endpoint {} not available, trying next", endpoint.name);
+    }
+    None
+}
+
 /// Map keywords in analysis results to severity levels.
 ///
 /// - "critical", "vulnerability", "unsafe" → "warning"
@@ -952,8 +1007,7 @@ mod tests {
     // Daemon lifecycle tests
     // =========================================================================
 
-    #[test]
-    fn test_daemon_new() {
+    fn create_test_daemon() -> (Daemon, tempfile::TempDir) {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let db = rt.block_on(async {
@@ -962,23 +1016,19 @@ mod tests {
             db.run_migrations().await.unwrap();
             db
         });
+        let config = Arc::new(RwLock::new(Config::default()));
+        (Daemon::new(config, db), temp_dir)
+    }
 
-        let daemon = Daemon::new(Config::default(), db);
+    #[test]
+    fn test_daemon_new() {
+        let (daemon, _temp_dir) = create_test_daemon();
         assert_eq!(daemon.status(), DaemonStatus::Waiting);
     }
 
     #[test]
     fn test_daemon_trigger_scan() {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = temp_dir.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
+        let (daemon, _temp_dir) = create_test_daemon();
         assert!(!daemon
             .trigger_scan
             .load(std::sync::atomic::Ordering::SeqCst));
@@ -991,42 +1041,33 @@ mod tests {
 
     #[test]
     fn test_daemon_stop() {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = temp_dir.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
-        assert!(!daemon.should_stop.load(std::sync::atomic::Ordering::SeqCst));
+        let (daemon, _temp_dir) = create_test_daemon();
+        assert!(!daemon.should_stop());
 
         daemon.stop();
-        assert!(daemon.should_stop.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(daemon.should_stop());
     }
 
     #[tokio::test]
-    async fn test_daemon_set_schedule() {
+    async fn test_daemon_config_sync() {
         let temp_file = tempfile::NamedTempFile::new().unwrap();
         let db = Database::new(temp_file.path()).await.unwrap();
         db.run_migrations().await.unwrap();
 
-        let daemon = Daemon::new(Config::default(), db);
+        let config = Arc::new(RwLock::new(Config::default()));
+        let daemon = Daemon::new(config.clone(), db);
 
-        let new_schedule = ScheduleConfig {
-            start_hour: 10,
-            end_hour: 20,
-            check_interval_seconds: 30,
-        };
+        // Update config externally
+        {
+            let mut cfg = config.write().await;
+            cfg.schedule.start_hour = 10;
+            cfg.schedule.end_hour = 20;
+        }
 
-        daemon.set_schedule(new_schedule.clone()).await;
-
-        let schedule = daemon.schedule.lock().await;
-        assert_eq!(schedule.start_hour, 10);
-        assert_eq!(schedule.end_hour, 20);
-        assert_eq!(schedule.check_interval_seconds, 30);
+        // Daemon should see the updated config
+        let cfg = daemon.config.read().await;
+        assert_eq!(cfg.schedule.start_hour, 10);
+        assert_eq!(cfg.schedule.end_hour, 20);
     }
 
     // =========================================================================
@@ -1036,42 +1077,19 @@ mod tests {
     #[test]
     fn test_find_rust_files_empty_dir() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-
-        let temp_dir2 = tempfile::TempDir::new().unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = temp_dir2.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
+        let (daemon, _db_dir) = create_test_daemon();
         let files = daemon.find_rust_files(temp_dir.path()).unwrap();
-
         assert_eq!(files.len(), 0);
     }
 
     #[test]
     fn test_find_rust_files_with_files() {
-        // Use with_prefix to avoid directory names starting with '.' which would be filtered
         let temp_dir = tempfile::TempDir::with_prefix("test_rust_files").unwrap();
-        let db_temp_dir = tempfile::TempDir::new().unwrap();
-
-        // Create some Rust files
         std::fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
         std::fs::write(temp_dir.path().join("lib.rs"), "pub fn lib() {}").unwrap();
         std::fs::write(temp_dir.path().join("test.txt"), "not rust").unwrap();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = db_temp_dir.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
+        let (daemon, _db_dir) = create_test_daemon();
         let files = daemon.find_rust_files(temp_dir.path()).unwrap();
 
         assert_eq!(files.len(), 2);
@@ -1082,23 +1100,12 @@ mod tests {
 
     #[test]
     fn test_find_rust_files_recursive() {
-        // Use with_prefix to avoid directory names starting with '.' which would be filtered
         let temp_dir = tempfile::TempDir::with_prefix("test_rust_files").unwrap();
-        let db_temp_dir = tempfile::TempDir::new().unwrap();
         let subdir = temp_dir.path().join("src");
-
         std::fs::create_dir_all(&subdir).unwrap();
         std::fs::write(subdir.join("main.rs"), "fn main() {}").unwrap();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = db_temp_dir.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
+        let (daemon, _db_dir) = create_test_daemon();
         let files = daemon.find_rust_files(temp_dir.path()).unwrap();
 
         assert_eq!(files.len(), 1);
@@ -1109,20 +1116,10 @@ mod tests {
     fn test_find_rust_files_excludes_target() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let target_dir = temp_dir.path().join("target");
-
         std::fs::create_dir_all(target_dir.join("debug")).unwrap();
         std::fs::write(target_dir.join("debug").join("lib.rs"), "fn test() {}").unwrap();
 
-        let temp_dir2 = tempfile::TempDir::new().unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = temp_dir2.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
+        let (daemon, _db_dir) = create_test_daemon();
         let files = daemon.find_rust_files(temp_dir.path()).unwrap();
 
         assert!(!files.iter().any(|f| f.to_string_lossy().contains("target")));
@@ -1132,20 +1129,10 @@ mod tests {
     fn test_find_rust_files_excludes_hidden() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let hidden_dir = temp_dir.path().join(".hidden");
-
         std::fs::create_dir_all(&hidden_dir).unwrap();
         std::fs::write(hidden_dir.join("lib.rs"), "fn test() {}").unwrap();
 
-        let temp_dir2 = tempfile::TempDir::new().unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async {
-            let db_path = temp_dir2.path().join("test.db");
-            let db = Database::new(&db_path).await.unwrap();
-            db.run_migrations().await.unwrap();
-            db
-        });
-
-        let daemon = Daemon::new(Config::default(), db);
+        let (daemon, _db_dir) = create_test_daemon();
         let files = daemon.find_rust_files(temp_dir.path()).unwrap();
 
         assert!(!files
