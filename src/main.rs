@@ -29,7 +29,7 @@ struct Cli {
     config: Option<std::path::PathBuf>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug, PartialEq)]
 enum Commands {
     /// Start the daemon and web server
     Start,
@@ -123,4 +123,75 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn test_cli_parse_default() {
+        let cli = Cli::try_parse_from(["noctum"]).unwrap();
+        assert!(cli.command.is_none());
+        assert!(cli.config.is_none());
+    }
+
+    #[test]
+    fn test_cli_parse_start() {
+        let cli = Cli::try_parse_from(["noctum", "start"]).unwrap();
+        assert_eq!(cli.command, Some(Commands::Start));
+    }
+
+    #[test]
+    fn test_cli_parse_config_flag() {
+        let cli = Cli::try_parse_from(["noctum", "--config", "/path/to/config.toml"]).unwrap();
+        assert_eq!(
+            cli.config,
+            Some(std::path::PathBuf::from("/path/to/config.toml"))
+        );
+    }
+
+    #[test]
+    fn test_cli_parse_config_short_flag() {
+        let cli = Cli::try_parse_from(["noctum", "-c", "/path/to/config.toml"]).unwrap();
+        assert_eq!(
+            cli.config,
+            Some(std::path::PathBuf::from("/path/to/config.toml"))
+        );
+    }
+
+    #[test]
+    fn test_cli_parse_start_with_config() {
+        let cli = Cli::try_parse_from([
+            "noctum",
+            "--config",
+            "/path/config.toml",
+            "start",
+        ])
+        .unwrap();
+        assert_eq!(cli.command, Some(Commands::Start));
+        assert_eq!(
+            cli.config,
+            Some(std::path::PathBuf::from("/path/config.toml"))
+        );
+    }
+
+    #[test]
+    fn test_cli_validate() {
+        let cmd = Cli::command();
+        cmd.debug_assert();
+    }
+
+    #[test]
+    fn test_cli_long_about() {
+        let cmd = Cli::command();
+        assert!(cmd.get_about().is_some());
+    }
+
+    #[test]
+    fn test_cli_version() {
+        let cmd = Cli::command();
+        assert!(cmd.get_version().is_some());
+    }
 }

@@ -38,7 +38,7 @@ pub async fn list_repositories(State(state): State<Arc<AppState>>) -> impl IntoR
 }
 
 /// Add a repository
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct AddRepositoryRequest {
     path: String,
     name: String,
@@ -417,7 +417,8 @@ pub async fn api_update_config(
 
     tracing::info!(
         "Config updated: schedule = {:02}:00 - {:02}:00",
-        start_hour, end_hour
+        start_hour,
+        end_hour
     );
 
     (StatusCode::OK, Json(serde_json::json!({ "success": true })))

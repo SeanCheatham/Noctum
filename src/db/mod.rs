@@ -264,7 +264,7 @@ impl Database {
         let result = sqlx::query_scalar::<_, Option<String>>(
             "SELECT content_hash FROM analysis_results \
              WHERE repository_id = ? AND file_path = ? AND analysis_type = ? \
-             ORDER BY created_at DESC LIMIT 1",
+             ORDER BY id DESC LIMIT 1",
         )
         .bind(repository_id)
         .bind(file_path)
@@ -435,5 +435,376 @@ impl Database {
         .context("Failed to check mutation results for hash")?;
 
         Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::{NamedTempFile, TempDir};
+
+    async fn create_test_db() -> (Database, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(&db_path).await.unwrap();
+        db.run_migrations().await.unwrap();
+        (db, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn test_database_creation() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db = Database::new(temp_file.path()).await;
+        assert!(db.is_ok(), "Database creation should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_run_migrations() {
+        let (db, _temp_dir) = create_test_db().await;
+        assert!(db.run_migrations().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_add_repository() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let id = db.add_repository("/test/path", "Test Repo").await.unwrap();
+        assert!(id > 0, "Repository ID should be positive");
+
+        let repo = db.get_repository(id).await.unwrap().unwrap();
+        assert_eq!(repo.path, "/test/path");
+        assert_eq!(repo.name, "Test Repo");
+        assert!(repo.enabled);
+    }
+
+    #[tokio::test]
+    async fn test_get_repositories() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        db.add_repository("/path1", "Repo 1").await.unwrap();
+        db.add_repository("/path2", "Repo 2").await.unwrap();
+
+        let repos = db.get_repositories().await.unwrap();
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0].name, "Repo 1");
+        assert_eq!(repos[1].name, "Repo 2");
+    }
+
+    #[tokio::test]
+    async fn test_get_repository_not_found() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo = db.get_repository(999).await.unwrap();
+        assert!(repo.is_none(), "Non-existent repository should return None");
+    }
+
+    #[tokio::test]
+    async fn test_save_analysis_result() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let id = db
+            .save_analysis_result(
+                repo_id,
+                "src/main.rs",
+                "code_understanding",
+                "Test analysis result",
+                Some("info"),
+                Some("hash123"),
+            )
+            .await
+            .unwrap();
+
+        assert!(id > 0);
+
+        let results = db
+            .get_repository_results(repo_id, "code_understanding")
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "src/main.rs");
+        assert_eq!(results[0].analysis_type, "code_understanding");
+        assert_eq!(results[0].result, "Test analysis result");
+        assert_eq!(results[0].severity, Some("info".to_string()));
+        assert_eq!(results[0].content_hash, Some("hash123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_recent_results() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        db.save_analysis_result(repo_id, "file1.rs", "type1", "result1", None, None)
+            .await
+            .unwrap();
+        db.save_analysis_result(repo_id, "file2.rs", "type2", "result2", None, None)
+            .await
+            .unwrap();
+
+        let results = db.get_recent_results(10).await.unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_repository_results() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        db.save_analysis_result(repo_id, "file1.rs", "type1", "result1", None, None)
+            .await
+            .unwrap();
+        db.save_analysis_result(repo_id, "file2.rs", "type1", "result2", None, None)
+            .await
+            .unwrap();
+        db.save_analysis_result(repo_id, "file1.rs", "type2", "result3", None, None)
+            .await
+            .unwrap();
+
+        let results = db.get_repository_results(repo_id, "type1").await.unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.analysis_type == "type1"));
+    }
+
+    #[tokio::test]
+    async fn test_get_all_repository_results() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        db.save_analysis_result(repo_id, "file1.rs", "type1", "result1", None, None)
+            .await
+            .unwrap();
+        db.save_analysis_result(repo_id, "file2.rs", "type2", "result2", None, None)
+            .await
+            .unwrap();
+
+        let results = db.get_all_repository_results(repo_id).await.unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_file_hash() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        db.save_analysis_result(repo_id, "test.rs", "type1", "result", None, Some("hash1"))
+            .await
+            .unwrap();
+        db.save_analysis_result(repo_id, "test.rs", "type1", "result2", None, Some("hash2"))
+            .await
+            .unwrap();
+
+        let hash = db
+            .get_latest_file_hash(repo_id, "test.rs", "type1")
+            .await
+            .unwrap();
+        assert_eq!(hash, Some("hash2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_file_hash_no_results() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let hash = db
+            .get_latest_file_hash(repo_id, "nonexistent.rs", "type1")
+            .await
+            .unwrap();
+        assert!(hash.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_daemon_state() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        db.update_daemon_status("processing", Some("analyzing files"))
+            .await
+            .unwrap();
+
+        let state = db.get_daemon_status().await.unwrap();
+        assert_eq!(state.status, "processing");
+        assert_eq!(state.current_task, Some("analyzing files".to_string()));
+
+        db.update_daemon_status("idle", None).await.unwrap();
+        let state = db.get_daemon_status().await.unwrap();
+        assert_eq!(state.status, "idle");
+        assert!(state.current_task.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_save_mutation_result() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let replacements_json = serde_json::json!({
+            "line_number": 10,
+            "find": "x > 0",
+            "replace": "x >= 0"
+        })
+        .to_string();
+
+        let id = db
+            .save_mutation_result(
+                repo_id,
+                "src/main.rs",
+                "Changed > to >=",
+                "Test reasoning",
+                &replacements_json,
+                "killed",
+                Some("test_foo"),
+                Some("Test output"),
+                Some(100),
+                Some("hash123"),
+            )
+            .await
+            .unwrap();
+
+        assert!(id > 0);
+
+        let results = db.get_mutation_results(repo_id).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "src/main.rs");
+        assert_eq!(results[0].description, "Changed > to >=");
+        assert_eq!(results[0].test_outcome, "killed");
+        assert_eq!(results[0].killing_test, Some("test_foo".to_string()));
+        assert_eq!(results[0].execution_time_ms, Some(100));
+    }
+
+    #[tokio::test]
+    async fn test_get_mutation_summary() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let replacements_json = "{}".to_string();
+
+        db.save_mutation_result(
+            repo_id,
+            "f1.rs",
+            "desc1",
+            "reason",
+            &replacements_json,
+            "killed",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        db.save_mutation_result(
+            repo_id,
+            "f2.rs",
+            "desc2",
+            "reason",
+            &replacements_json,
+            "killed",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        db.save_mutation_result(
+            repo_id,
+            "f3.rs",
+            "desc3",
+            "reason",
+            &replacements_json,
+            "survived",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        db.save_mutation_result(
+            repo_id,
+            "f4.rs",
+            "desc4",
+            "reason",
+            &replacements_json,
+            "timeout",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        db.save_mutation_result(
+            repo_id,
+            "f5.rs",
+            "desc5",
+            "reason",
+            &replacements_json,
+            "compile_error",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let summary = db.get_mutation_summary(repo_id).await.unwrap();
+        assert_eq!(summary.total, 5);
+        assert_eq!(summary.killed, 2);
+        assert_eq!(summary.survived, 1);
+        assert_eq!(summary.timeout, 1);
+        assert_eq!(summary.compile_error, 1);
+    }
+
+    #[tokio::test]
+    async fn test_has_mutation_results_for_hash() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let replacements_json = "{}".to_string();
+        db.save_mutation_result(
+            repo_id,
+            "test.rs",
+            "desc",
+            "reason",
+            &replacements_json,
+            "killed",
+            None,
+            None,
+            None,
+            Some("hash123"),
+        )
+        .await
+        .unwrap();
+
+        assert!(db
+            .has_mutation_results_for_hash(repo_id, "test.rs", "hash123")
+            .await
+            .unwrap());
+        assert!(!db
+            .has_mutation_results_for_hash(repo_id, "test.rs", "different")
+            .await
+            .unwrap());
+        assert!(!db
+            .has_mutation_results_for_hash(repo_id, "other.rs", "hash123")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_repository_path() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        db.add_repository("/path", "Repo1").await.unwrap();
+
+        let result = db.add_repository("/path", "Repo2").await;
+        assert!(result.is_err(), "Duplicate path should fail");
     }
 }

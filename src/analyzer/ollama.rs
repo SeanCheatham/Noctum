@@ -120,3 +120,63 @@ impl OllamaClient {
         Ok(result.models.into_iter().map(|m| m.name).collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ollama_client_new() {
+        let client = OllamaClient::new("http://localhost:11434/", "llama2");
+        assert_eq!(client.base_url, "http://localhost:11434");
+        assert_eq!(client.model, "llama2");
+    }
+
+    #[test]
+    fn test_ollama_client_new_trims_slash() {
+        let client = OllamaClient::new("http://localhost:11434/", "llama2");
+        assert_eq!(client.base_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_ollama_client_new_multiple_trailing_slashes() {
+        let client = OllamaClient::new("http://localhost:11434///", "llama2");
+        assert_eq!(client.base_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_generate_request_serialization() {
+        let request = GenerateRequest {
+            model: "llama2",
+            prompt: "test prompt",
+            stream: false,
+            format: None,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"model\":\"llama2\""));
+        assert!(json.contains("\"prompt\":\"test prompt\""));
+        assert!(json.contains("\"stream\":false"));
+    }
+
+    #[test]
+    fn test_generate_request_with_format() {
+        let schema = serde_json::json!({"type": "object"});
+        let request = GenerateRequest {
+            model: "llama2",
+            prompt: "test",
+            stream: false,
+            format: Some(schema),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"format\""));
+    }
+
+    #[test]
+    fn test_generate_response_deserialization() {
+        let json = r#"{"response": "test response"}"#;
+        let response: GenerateResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.response, "test response");
+    }
+}

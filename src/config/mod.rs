@@ -405,4 +405,132 @@ check_interval_seconds = 120
         assert_eq!(config.schedule.end_hour, 6);
         assert!(config.endpoints.is_empty());
     }
+
+    // =========================================================================
+    // File I/O tests
+    // =========================================================================
+
+    #[test]
+    fn test_config_load_nonexistent() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::remove_file(temp_file.path()).unwrap();
+
+        let config = Config::load(Some(temp_file.path())).unwrap();
+        assert_eq!(config.schedule.start_hour, 22);
+        assert_eq!(config.endpoints.len(), 0);
+    }
+
+    #[test]
+    fn test_config_load_valid_file() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+
+        let toml_content = r#"
+[general]
+log_level = "debug"
+
+[web]
+port = 9000
+
+[schedule]
+start_hour = 8
+end_hour = 18
+"#;
+
+        std::fs::write(temp_file.path(), toml_content).unwrap();
+
+        let config = Config::load(Some(temp_file.path())).unwrap();
+        assert_eq!(config.general.log_level, "debug");
+        assert_eq!(config.web.port, 9000);
+        assert_eq!(config.schedule.start_hour, 8);
+        assert_eq!(config.schedule.end_hour, 18);
+    }
+
+    #[test]
+    fn test_config_load_invalid_toml() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+
+        std::fs::write(temp_file.path(), "invalid {{{{ toml").unwrap();
+
+        let result = Config::load(Some(temp_file.path()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_save() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+
+        let config = Config {
+            general: GeneralConfig {
+                log_level: "debug".to_string(),
+            },
+            web: WebConfig {
+                port: 9000,
+                host: "0.0.0.0".to_string(),
+            },
+            endpoints: vec![],
+            schedule: ScheduleConfig {
+                start_hour: 8,
+                end_hour: 18,
+                check_interval_seconds: 120,
+            },
+            data_dir: None,
+        };
+
+        config.save(Some(temp_file.path())).unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("log_level"));
+        assert!(content.contains("port"));
+        assert!(content.contains("start_hour"));
+    }
+
+    #[test]
+    fn test_config_save_creates_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("subdir").join("config.toml");
+
+        let config = Config::default();
+        config.save(Some(&config_path)).unwrap();
+
+        assert!(config_path.exists());
+    }
+
+    #[test]
+    fn test_default_config_path() {
+        let path = Config::default_config_path();
+        assert!(path.is_some());
+        assert!(path.unwrap().ends_with("config.toml"));
+    }
+
+    #[test]
+    fn test_data_dir_with_custom() {
+        let config = Config {
+            data_dir: Some("/custom/path".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(config.data_dir(), PathBuf::from("/custom/path"));
+    }
+
+    #[test]
+    fn test_data_dir_default() {
+        let config = Config {
+            data_dir: None,
+            ..Default::default()
+        };
+
+        let path = config.data_dir();
+        assert!(!path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn test_database_path() {
+        let config = Config {
+            data_dir: Some("/test/data".into()),
+            ..Default::default()
+        };
+
+        let db_path = config.database_path();
+        assert_eq!(db_path, PathBuf::from("/test/data/noctum.db"));
+    }
 }

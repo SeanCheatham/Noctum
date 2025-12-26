@@ -129,3 +129,151 @@ pub struct MutationResultsTemplate {
     pub summary: MutationSummary,
     pub mutation_score_percent: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_markdown_basic() {
+        let md = "# Heading\n\nSome **bold** text.";
+        let html = render_markdown(md);
+
+        assert!(html.contains("<h1>"));
+        assert!(html.contains("Heading"));
+        assert!(html.contains("<strong>"));
+        assert!(html.contains("bold"));
+    }
+
+    #[test]
+    fn test_render_markdown_code() {
+        let md = "```rust\nfn main() {}\n```";
+        let html = render_markdown(md);
+
+        assert!(html.contains("<code>") || html.contains("<pre>"));
+    }
+
+    #[test]
+    fn test_render_markdown_links() {
+        let md = "[link](http://example.com)";
+        let html = render_markdown(md);
+
+        assert!(html.contains("<a href"));
+        assert!(html.contains("http://example.com"));
+    }
+
+    #[test]
+    fn test_render_markdown_lists() {
+        let md = "- item 1\n- item 2";
+        let html = render_markdown(md);
+
+        assert!(html.contains("<ul>") || html.contains("<li>"));
+    }
+
+    #[test]
+    fn test_render_markdown_tables() {
+        let md = "| col1 | col2 |\n|------|------|\n| val1 | val2 |";
+        let html = render_markdown(md);
+
+        assert!(html.contains("<table>") || html.contains("<td>"));
+    }
+
+    #[test]
+    fn test_render_markdown_empty() {
+        let html = render_markdown("");
+        assert!(html.is_empty());
+    }
+
+    #[test]
+    fn test_analysis_result_view_from_result_full_path() {
+        let result = AnalysisResult {
+            id: 1,
+            repository_id: 1,
+            file_path: "/repo/path/src/main.rs".to_string(),
+            analysis_type: "type1".to_string(),
+            result: "test".to_string(),
+            severity: Some("info".to_string()),
+            content_hash: Some("hash".to_string()),
+            created_at: "2025-01-01".to_string(),
+        };
+
+        let view = AnalysisResultView::from_result(result, "/repo/path");
+        assert_eq!(view.file_path, "src/main.rs");
+    }
+
+    #[test]
+    fn test_analysis_result_view_from_result_with_leading_slash() {
+        let result = AnalysisResult {
+            id: 1,
+            repository_id: 1,
+            file_path: "/repo/path//src/main.rs".to_string(),
+            analysis_type: "type1".to_string(),
+            result: "test".to_string(),
+            severity: None,
+            content_hash: None,
+            created_at: "2025-01-01".to_string(),
+        };
+
+        let view = AnalysisResultView::from_result(result, "/repo/path");
+        assert_eq!(view.file_path, "src/main.rs");
+    }
+
+    #[test]
+    fn test_analysis_result_view_from_result_no_match() {
+        let result = AnalysisResult {
+            id: 1,
+            repository_id: 1,
+            file_path: "/other/path/src/main.rs".to_string(),
+            analysis_type: "type1".to_string(),
+            result: "test".to_string(),
+            severity: None,
+            content_hash: None,
+            created_at: "2025-01-01".to_string(),
+        };
+
+        let view = AnalysisResultView::from_result(result, "/repo/path");
+        assert_eq!(view.file_path, "/other/path/src/main.rs");
+    }
+
+    #[test]
+    fn test_mutation_result_view_from_result_full_path() {
+        let result = MutationResult {
+            id: 1,
+            repository_id: 1,
+            file_path: "/repo/path/src/main.rs".to_string(),
+            description: "test".to_string(),
+            reasoning: "reason".to_string(),
+            replacements_json: "{}".to_string(),
+            test_outcome: "killed".to_string(),
+            killing_test: Some("test_foo".to_string()),
+            test_output: Some("output".to_string()),
+            execution_time_ms: Some(100),
+            content_hash: Some("hash".to_string()),
+            created_at: "2025-01-01".to_string(),
+        };
+
+        let view = MutationResultView::from_result(result, "/repo/path");
+        assert_eq!(view.file_path, "src/main.rs");
+    }
+
+    #[test]
+    fn test_mutation_result_view_from_result_no_match() {
+        let result = MutationResult {
+            id: 1,
+            repository_id: 1,
+            file_path: "/other/path/src/main.rs".to_string(),
+            description: "test".to_string(),
+            reasoning: "reason".to_string(),
+            replacements_json: "{}".to_string(),
+            test_outcome: "killed".to_string(),
+            killing_test: None,
+            test_output: None,
+            execution_time_ms: None,
+            content_hash: None,
+            created_at: "2025-01-01".to_string(),
+        };
+
+        let view = MutationResultView::from_result(result, "/repo/path");
+        assert_eq!(view.file_path, "/other/path/src/main.rs");
+    }
+}

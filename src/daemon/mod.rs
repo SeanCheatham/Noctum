@@ -92,7 +92,8 @@ impl Daemon {
     pub async fn run(&mut self) -> anyhow::Result<()> {
         tracing::info!(
             "Daemon started (scheduled window: {:02}:00 - {:02}:00)",
-            self.config.schedule.start_hour, self.config.schedule.end_hour
+            self.config.schedule.start_hour,
+            self.config.schedule.end_hour
         );
 
         let check_interval = Duration::from_secs(self.config.schedule.check_interval_seconds);
@@ -362,7 +363,8 @@ impl Daemon {
             if let Err(e) = self.generate_architecture_summary(repo, endpoints).await {
                 tracing::warn!(
                     "Failed to generate architecture summary for {}: {}",
-                    repo.name, e
+                    repo.name,
+                    e
                 );
             }
         } else {
@@ -652,7 +654,8 @@ impl Daemon {
 
         tracing::info!(
             "Completed mutation testing for {} ({} mutations)",
-            repo.name, total_mutations
+            repo.name,
+            total_mutations
         );
         Ok(())
     }
@@ -699,14 +702,16 @@ async fn endpoint_worker(
     if !client.is_available().await {
         tracing::warn!(
             "Ollama endpoint '{}' at {} is not available, skipping",
-            endpoint.name, endpoint.url
+            endpoint.name,
+            endpoint.url
         );
         return;
     }
 
     tracing::info!(
         "Worker started for endpoint '{}' ({})",
-        endpoint.name, endpoint.url
+        endpoint.name,
+        endpoint.url
     );
 
     loop {
@@ -757,7 +762,8 @@ async fn endpoint_worker(
             Ok(result) => {
                 tracing::info!(
                     "Worker '{}' completed analysis of {}",
-                    endpoint.name, file_path_str
+                    endpoint.name,
+                    file_path_str
                 );
 
                 // Determine severity from result (simple heuristic)
@@ -781,7 +787,9 @@ async fn endpoint_worker(
             Err(e) => {
                 tracing::warn!(
                     "Worker '{}' failed to analyze {}: {}",
-                    endpoint.name, file_path_str, e
+                    endpoint.name,
+                    file_path_str,
+                    e
                 );
             }
         }
@@ -919,5 +927,210 @@ mod tests {
             determine_severity("BUG detected"),
             Some("error".to_string())
         );
+    }
+
+    // =========================================================================
+    // Daemon lifecycle tests
+    // =========================================================================
+
+    #[test]
+    fn test_daemon_new() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = temp_dir.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        assert_eq!(daemon.status(), DaemonStatus::Waiting);
+    }
+
+    #[test]
+    fn test_daemon_trigger_scan() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = temp_dir.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        assert!(!daemon
+            .trigger_scan
+            .load(std::sync::atomic::Ordering::SeqCst));
+
+        daemon.trigger_scan();
+        assert!(daemon
+            .trigger_scan
+            .load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_daemon_stop() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = temp_dir.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        assert!(!daemon.should_stop.load(std::sync::atomic::Ordering::SeqCst));
+
+        daemon.stop();
+        assert!(daemon.should_stop.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_daemon_set_schedule() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::new(temp_file.path()).await.unwrap();
+        db.run_migrations().await.unwrap();
+
+        let daemon = Daemon::new(Config::default(), db);
+
+        let new_schedule = ScheduleConfig {
+            start_hour: 10,
+            end_hour: 20,
+            check_interval_seconds: 30,
+        };
+
+        daemon.set_schedule(new_schedule.clone()).await;
+
+        let schedule = daemon.schedule.lock().await;
+        assert_eq!(schedule.start_hour, 10);
+        assert_eq!(schedule.end_hour, 20);
+        assert_eq!(schedule.check_interval_seconds, 30);
+    }
+
+    // =========================================================================
+    // find_rust_files tests
+    // =========================================================================
+
+    #[test]
+    fn test_find_rust_files_empty_dir() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+
+        let temp_dir2 = tempfile::TempDir::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = temp_dir2.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        let files = daemon.find_rust_files(temp_dir.path()).unwrap();
+
+        assert_eq!(files.len(), 0);
+    }
+
+    #[test]
+    fn test_find_rust_files_with_files() {
+        // Use with_prefix to avoid directory names starting with '.' which would be filtered
+        let temp_dir = tempfile::TempDir::with_prefix("test_rust_files").unwrap();
+        let db_temp_dir = tempfile::TempDir::new().unwrap();
+
+        // Create some Rust files
+        std::fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(temp_dir.path().join("lib.rs"), "pub fn lib() {}").unwrap();
+        std::fs::write(temp_dir.path().join("test.txt"), "not rust").unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = db_temp_dir.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        let files = daemon.find_rust_files(temp_dir.path()).unwrap();
+
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f.ends_with("main.rs")));
+        assert!(files.iter().any(|f| f.ends_with("lib.rs")));
+        assert!(!files.iter().any(|f| f.ends_with("test.txt")));
+    }
+
+    #[test]
+    fn test_find_rust_files_recursive() {
+        // Use with_prefix to avoid directory names starting with '.' which would be filtered
+        let temp_dir = tempfile::TempDir::with_prefix("test_rust_files").unwrap();
+        let db_temp_dir = tempfile::TempDir::new().unwrap();
+        let subdir = temp_dir.path().join("src");
+
+        std::fs::create_dir_all(&subdir).unwrap();
+        std::fs::write(subdir.join("main.rs"), "fn main() {}").unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = db_temp_dir.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        let files = daemon.find_rust_files(temp_dir.path()).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("src/main.rs"));
+    }
+
+    #[test]
+    fn test_find_rust_files_excludes_target() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let target_dir = temp_dir.path().join("target");
+
+        std::fs::create_dir_all(target_dir.join("debug")).unwrap();
+        std::fs::write(target_dir.join("debug").join("lib.rs"), "fn test() {}").unwrap();
+
+        let temp_dir2 = tempfile::TempDir::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = temp_dir2.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        let files = daemon.find_rust_files(temp_dir.path()).unwrap();
+
+        assert!(!files.iter().any(|f| f.to_string_lossy().contains("target")));
+    }
+
+    #[test]
+    fn test_find_rust_files_excludes_hidden() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let hidden_dir = temp_dir.path().join(".hidden");
+
+        std::fs::create_dir_all(&hidden_dir).unwrap();
+        std::fs::write(hidden_dir.join("lib.rs"), "fn test() {}").unwrap();
+
+        let temp_dir2 = tempfile::TempDir::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async {
+            let db_path = temp_dir2.path().join("test.db");
+            let db = Database::new(&db_path).await.unwrap();
+            db.run_migrations().await.unwrap();
+            db
+        });
+
+        let daemon = Daemon::new(Config::default(), db);
+        let files = daemon.find_rust_files(temp_dir.path()).unwrap();
+
+        assert!(!files
+            .iter()
+            .any(|f| f.to_string_lossy().contains(".hidden")));
     }
 }
