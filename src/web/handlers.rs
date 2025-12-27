@@ -180,7 +180,7 @@ pub async fn repository_files(
 
     let file_results: Vec<AnalysisResultView> = all_results
         .into_iter()
-        .filter(|r| r.analysis_type != "architecture_summary")
+        .filter(|r| r.analysis_type == "code_understanding")
         .map(|r| AnalysisResultView::from_result(r, &repository.path))
         .collect();
 
