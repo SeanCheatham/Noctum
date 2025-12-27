@@ -834,6 +834,17 @@ impl Daemon {
                     }
                 };
 
+                // Skip compile errors - they're not useful to the user
+                // Just log them for debugging purposes
+                if result.outcome == crate::mutation::TestOutcome::CompileError {
+                    tracing::debug!(
+                        "Mutation compile error (not saving): {} - {}",
+                        original_file_path_str,
+                        result.mutation.description
+                    );
+                    continue;
+                }
+
                 // Build replacements JSON with all replacement info
                 // Each replacement has: line_number, find, replace
                 // We also include the original lines for context
