@@ -2,7 +2,8 @@ use crate::analyzer::{AnalysisType, OllamaClient};
 use crate::config::{Config, OllamaEndpoint};
 use crate::db::Database;
 use crate::diagram::{
-    clean_d2_output, validate_d2_syntax, DiagramExtractor, DiagramGenerator, DiagramType,
+    clean_dot_output, render_dot_to_svg, validate_dot_syntax, DiagramExtractor, DiagramGenerator,
+    DiagramType,
 };
 use crate::mutation::{
     analyze_and_generate_mutations, executor::execute_mutation_test, MutationConfig,
@@ -16,8 +17,8 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
-/// Maximum number of retries for D2 diagram generation when syntax errors occur
-const D2_MAX_RETRIES: usize = 3;
+/// Maximum number of retries for DOT diagram generation when syntax errors occur
+const DOT_MAX_RETRIES: usize = 3;
 
 /// Minimum file size (bytes) for code analysis. Smaller files are typically
 /// just module declarations (`mod foo;`) with no meaningful content.
@@ -912,16 +913,16 @@ impl Daemon {
         // Generate the diagram with retry logic
         let prompt = DiagramGenerator::prompt_for_type(diagram_type, &repo.name, &truncated);
 
-        let mut d2_code: Option<String> = None;
+        let mut dot_code: Option<String> = None;
         let mut last_error: Option<String> = None;
 
-        for attempt in 0..=D2_MAX_RETRIES {
+        for attempt in 0..=DOT_MAX_RETRIES {
             let current_prompt = if attempt == 0 {
                 prompt.clone()
             } else {
                 // Use fix prompt for retries
-                DiagramGenerator::fix_d2_prompt(
-                    d2_code.as_deref().unwrap_or(""),
+                DiagramGenerator::fix_dot_prompt(
+                    dot_code.as_deref().unwrap_or(""),
                     last_error.as_deref().unwrap_or("Unknown error"),
                 )
             };
@@ -936,21 +937,21 @@ impl Daemon {
 
                 match client.generate(&current_prompt).await {
                     Ok(raw_output) => {
-                        let cleaned = clean_d2_output(&raw_output);
+                        let cleaned = clean_dot_output(&raw_output);
 
-                        match validate_d2_syntax(&cleaned) {
+                        match validate_dot_syntax(&cleaned) {
                             Ok(()) => {
-                                d2_code = Some(cleaned);
+                                dot_code = Some(cleaned);
                                 break;
                             }
                             Err(e) => {
                                 tracing::debug!(
-                                    "D2 validation failed for {} (attempt {}): {}",
+                                    "DOT validation failed for {} (attempt {}): {}",
                                     diagram_type.title(),
                                     attempt + 1,
                                     e
                                 );
-                                d2_code = Some(cleaned);
+                                dot_code = Some(cleaned);
                                 last_error = Some(e);
                             }
                         }
@@ -966,25 +967,39 @@ impl Daemon {
                 }
             }
 
-            // If we got valid D2, break out of retry loop
-            if d2_code.is_some() && last_error.is_none() {
+            // If we got valid DOT, break out of retry loop
+            if dot_code.is_some() && last_error.is_none() {
                 break;
             }
 
             // Clear error for next attempt if we're retrying
-            if attempt < D2_MAX_RETRIES && d2_code.is_some() {
+            if attempt < DOT_MAX_RETRIES && dot_code.is_some() {
                 tracing::debug!(
                     "Retrying {} diagram generation (attempt {}/{})",
                     diagram_type.title(),
                     attempt + 2,
-                    D2_MAX_RETRIES + 1
+                    DOT_MAX_RETRIES + 1
                 );
             }
         }
 
-        // Save diagram if we got valid D2
-        match (d2_code, last_error) {
+        // Render and save diagram if we got valid DOT
+        match (dot_code, last_error) {
             (Some(code), None) => {
+                // Render DOT to SVG
+                let svg_content = match render_dot_to_svg(&code) {
+                    Ok(svg) => svg,
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to render {} diagram to SVG for {}: {}",
+                            diagram_type.title(),
+                            repo.name,
+                            e
+                        );
+                        return Ok(());
+                    }
+                };
+
                 tracing::info!(
                     "Generated {} diagram for {}",
                     diagram_type.title(),
@@ -998,6 +1013,7 @@ impl Daemon {
                         diagram_type.title(),
                         diagram_type.description(),
                         &code,
+                        &svg_content,
                         Some(combined_hash),
                     )
                     .await?;
@@ -1007,7 +1023,7 @@ impl Daemon {
                     "Failed to generate valid {} diagram for {} after {} retries: {}",
                     diagram_type.title(),
                     repo.name,
-                    D2_MAX_RETRIES,
+                    DOT_MAX_RETRIES,
                     e
                 );
             }

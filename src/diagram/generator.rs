@@ -1,11 +1,11 @@
-//! D2 diagram generation prompts.
+//! GraphViz DOT diagram generation prompts.
 //!
 //! This module provides prompts for the second phase of diagram generation:
-//! aggregating per-file extractions into final D2 diagrams.
+//! aggregating per-file extractions into final DOT diagrams.
 
 use super::DiagramType;
 
-/// Provides prompts for generating D2 diagrams from aggregated extractions
+/// Provides prompts for generating DOT diagrams from aggregated extractions
 pub struct DiagramGenerator;
 
 impl DiagramGenerator {
@@ -26,175 +26,206 @@ impl DiagramGenerator {
         }
     }
 
-    /// Generate a system architecture D2 diagram
+    /// Generate a system architecture DOT diagram
     pub fn architecture_diagram_prompt(repo_name: &str, extractions: &str) -> String {
         format!(
-            r#"Generate a D2 diagram showing the system architecture of '{}'.
+            r#"Generate a GraphViz DOT diagram showing the system architecture of '{}'.
 
 Based on these file analyses:
 {}
 
-Create a D2 diagram that shows:
-- Main modules/components as labeled shapes
-- Dependencies between modules as arrows with descriptive labels
-- Group related modules into containers when logical
-- External dependencies as separate shapes
+Create a DOT digraph that shows:
+- Main modules/components as labeled nodes
+- Dependencies between modules as directed edges with labels
+- Group related modules into subgraph clusters
+- External dependencies as separate nodes
 
-D2 syntax reference:
-- Shapes: `component_name: "Display Label"`
-- Arrows: `source -> target: "relationship"`
-- Containers: `layer: Layer Name {{ child1; child2 }}`
-- Bidirectional: `a <-> b`
+DOT syntax reference:
+- Graph declaration: `digraph G {{ ... }}`
+- Nodes with labels: `node_name [label="Display Label"];`
+- Edges with labels: `source -> target [label="relationship"];`
+- Clusters: `subgraph cluster_name {{ label="Group"; node1; node2; }}`
+- Layout direction: `rankdir=LR;` for left-to-right
 
 Example structure:
 ```
-web: Web Layer {{
-    handlers: HTTP Handlers
-    templates: Templates
-}}
+digraph Architecture {{
+    rankdir=TB;
 
-db: Database Layer {{
-    models: Models
-    queries: Queries
-}}
+    subgraph cluster_web {{
+        label="Web Layer";
+        handlers [label="HTTP Handlers"];
+        templates [label="Templates"];
+    }}
 
-web.handlers -> db.queries: executes
+    subgraph cluster_db {{
+        label="Database Layer";
+        models [label="Models"];
+        queries [label="Queries"];
+    }}
+
+    handlers -> queries [label="executes"];
+    templates -> handlers [label="renders"];
+}}
 ```
 
 Rules:
-1. Use snake_case for identifiers (no spaces, no special chars except underscore)
+1. Use snake_case for node names (no spaces, no special chars except underscore)
 2. Use descriptive labels in quotes
 3. Keep the diagram focused - show major components, not every file
-4. Group by architectural layer when possible
+4. Group by architectural layer using subgraph clusters
+5. Prefix cluster names with "cluster_" for proper rendering
 
-Output ONLY valid D2 code. No markdown code fences. No explanations."#,
+Output ONLY valid DOT code. No markdown code fences. No explanations."#,
             repo_name, extractions
         )
     }
 
-    /// Generate a data flow D2 diagram
+    /// Generate a data flow DOT diagram
     pub fn data_flow_diagram_prompt(repo_name: &str, extractions: &str) -> String {
         format!(
-            r#"Generate a D2 diagram showing data flow in '{}'.
+            r#"Generate a GraphViz DOT diagram showing data flow in '{}'.
 
 Based on these file analyses:
 {}
 
-Create a D2 diagram showing:
+Create a DOT digraph showing:
 - Data sources on the left (users, external APIs, files, etc.)
 - Processing stages in the middle
 - Data sinks on the right (databases, responses, files, etc.)
-- Arrows showing data movement with labels describing the data
+- Directed edges showing data movement with labels describing the data
 
-D2 syntax reference:
-- Shapes: `name: "Label"`
-- Arrows: `source -> target: "data description"`
-- Direction hint: Add `.direction: right` to encourage left-to-right flow
+DOT syntax reference:
+- Graph: `digraph DataFlow {{ rankdir=LR; ... }}`
+- Nodes: `node_name [label="Label"];`
+- Edges: `source -> target [label="data description"];`
+- Clusters for grouping: `subgraph cluster_sources {{ label="Sources"; ... }}`
 
 Example structure:
 ```
-direction: right
+digraph DataFlow {{
+    rankdir=LR;
 
-sources: Data Sources {{
-    user: User Request
-    config: Config Files
+    subgraph cluster_sources {{
+        label="Data Sources";
+        user [label="User Request"];
+        config [label="Config Files"];
+    }}
+
+    subgraph cluster_processing {{
+        label="Processing";
+        validation [label="Validation"];
+        transform [label="Transform"];
+    }}
+
+    subgraph cluster_sinks {{
+        label="Data Sinks";
+        database [label="Database"];
+        response [label="HTTP Response"];
+    }}
+
+    user -> validation [label="JSON payload"];
+    validation -> transform [label="validated data"];
+    transform -> database [label="model objects"];
+    transform -> response [label="JSON response"];
 }}
-
-processing: Processing {{
-    validation: Validation
-    transform: Transform
-}}
-
-sinks: Data Sinks {{
-    database: Database
-    response: HTTP Response
-}}
-
-sources.user -> processing.validation: JSON payload
-processing.validation -> processing.transform: validated data
-processing.transform -> sinks.database: model objects
-processing.transform -> sinks.response: JSON response
 ```
 
 Rules:
-1. Use snake_case for identifiers
+1. Use snake_case for node names
 2. Show the main data paths, not every detail
-3. Label arrows with what data flows through them
-4. Group related elements
+3. Label edges with what data flows through them
+4. Use rankdir=LR for left-to-right flow
+5. Group related elements in clusters
 
-Output ONLY valid D2 code. No markdown code fences. No explanations."#,
+Output ONLY valid DOT code. No markdown code fences. No explanations."#,
             repo_name, extractions
         )
     }
 
-    /// Generate a database schema D2 diagram
+    /// Generate a database schema DOT diagram
     pub fn database_schema_diagram_prompt(repo_name: &str, extractions: &str) -> String {
         format!(
-            r#"Generate a D2 diagram showing the database schema for '{}'.
+            r#"Generate a GraphViz DOT diagram showing the database schema for '{}'.
 
 Based on these file analyses:
 {}
 
-Create a D2 diagram showing:
-- Each database table as a shape
+Create a DOT digraph showing:
+- Each database table as a record-shaped node
 - Key columns listed inside each table
-- Foreign key relationships as arrows between tables
+- Foreign key relationships as edges between tables
 
-D2 syntax for tables:
+DOT syntax for tables using record shapes:
 ```
-users: users {{
-    shape: sql_table
-    id: INTEGER PK
-    name: TEXT
-    email: TEXT
-    created_at: TIMESTAMP
-}}
+digraph Schema {{
+    rankdir=LR;
+    node [shape=record];
 
-posts: posts {{
-    shape: sql_table
-    id: INTEGER PK
-    user_id: INTEGER FK
-    title: TEXT
-    content: TEXT
-}}
+    users [label="{{users|id: INTEGER PK|name: TEXT|email: TEXT|created_at: TIMESTAMP}}"];
+    posts [label="{{posts|id: INTEGER PK|user_id: INTEGER FK|title: TEXT|content: TEXT}}"];
 
-posts.user_id -> users.id: belongs_to
+    posts -> users [label="belongs_to"];
+}}
+```
+
+Alternative HTML-like label syntax:
+```
+digraph Schema {{
+    rankdir=LR;
+    node [shape=plaintext];
+
+    users [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0">
+        <TR><TD BGCOLOR="lightblue"><B>users</B></TD></TR>
+        <TR><TD>id: INTEGER PK</TD></TR>
+        <TR><TD>name: TEXT</TD></TR>
+        </TABLE>
+    >];
+}}
 ```
 
 Rules:
 1. Use the actual table names from the codebase
-2. Include primary keys (PK) and foreign keys (FK)
+2. Mark primary keys (PK) and foreign keys (FK)
 3. Show only the most important columns (5-7 max per table)
-4. Draw arrows for foreign key relationships
-5. Use `shape: sql_table` for proper table rendering
+4. Draw edges for foreign key relationships
+5. Use record or plaintext shapes for table rendering
 
-If no database tables are found in the extractions, create a simple diagram showing "No database schema detected".
+If no database tables are found in the extractions, output:
+```
+digraph Schema {{
+    no_schema [label="No database schema detected"];
+}}
+```
 
-Output ONLY valid D2 code. No markdown code fences. No explanations."#,
+Output ONLY valid DOT code. No markdown code fences. No explanations."#,
             repo_name, extractions
         )
     }
 
-    /// Prompt to fix invalid D2 syntax
-    pub fn fix_d2_prompt(d2_code: &str, error_message: &str) -> String {
+    /// Prompt to fix invalid DOT syntax
+    pub fn fix_dot_prompt(dot_code: &str, error_message: &str) -> String {
         format!(
-            r#"The following D2 diagram has a syntax error:
+            r#"The following GraphViz DOT diagram has a syntax error:
 
 {}
 
 Error: {}
 
-Fix the D2 syntax error and output the corrected diagram.
+Fix the DOT syntax error and output the corrected diagram.
 
 Common fixes:
 - Ensure all braces {{ }} are balanced
-- Use snake_case for identifiers (no spaces or special characters)
-- Put labels with spaces in quotes: `name: "My Label"`
-- Arrows use -> not - or -->
-- Check for typos in shape names
+- Use snake_case for node names (no spaces or special characters)
+- Put labels in quotes: `node [label="My Label"];`
+- Edges use -> for digraph (not - or -->)
+- Statements should end with semicolons
+- Graph must start with `digraph Name {{ ... }}`
+- Cluster subgraphs must start with "cluster_" prefix
 
-Output ONLY the corrected D2 code. No markdown code fences. No explanations."#,
-            d2_code, error_message
+Output ONLY the corrected DOT code. No markdown code fences. No explanations."#,
+            dot_code, error_message
         )
     }
 }
@@ -212,33 +243,33 @@ mod tests {
     }
 
     #[test]
-    fn test_architecture_diagram_prompt_contains_d2_syntax() {
+    fn test_architecture_diagram_prompt_contains_dot_syntax() {
         let prompt = DiagramGenerator::architecture_diagram_prompt("test", "extractions");
-        assert!(prompt.contains("D2 syntax"));
+        assert!(prompt.contains("DOT"));
+        assert!(prompt.contains("digraph"));
         assert!(prompt.contains("->"));
         assert!(prompt.contains("snake_case"));
     }
 
     #[test]
-    fn test_data_flow_diagram_prompt_contains_direction() {
+    fn test_data_flow_diagram_prompt_contains_rankdir() {
         let prompt = DiagramGenerator::data_flow_diagram_prompt("test", "extractions");
-        assert!(prompt.contains("direction"));
-        assert!(prompt.contains("left"));
-        assert!(prompt.contains("right"));
+        assert!(prompt.contains("rankdir"));
+        assert!(prompt.contains("LR"));
     }
 
     #[test]
-    fn test_database_schema_diagram_prompt_contains_sql_table() {
+    fn test_database_schema_diagram_prompt_contains_record() {
         let prompt = DiagramGenerator::database_schema_diagram_prompt("test", "extractions");
-        assert!(prompt.contains("sql_table"));
+        assert!(prompt.contains("record"));
         assert!(prompt.contains("PK"));
         assert!(prompt.contains("FK"));
     }
 
     #[test]
-    fn test_fix_d2_prompt_contains_error() {
-        let prompt = DiagramGenerator::fix_d2_prompt("broken { code", "Unbalanced braces");
-        assert!(prompt.contains("broken { code"));
+    fn test_fix_dot_prompt_contains_error() {
+        let prompt = DiagramGenerator::fix_dot_prompt("digraph { broken", "Unbalanced braces");
+        assert!(prompt.contains("digraph { broken"));
         assert!(prompt.contains("Unbalanced braces"));
         assert!(prompt.contains("Fix"));
     }

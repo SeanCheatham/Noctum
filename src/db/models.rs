@@ -64,7 +64,7 @@ pub struct MutationSummary {
     pub compile_error: usize,
 }
 
-/// A generated D2 diagram for a repository
+/// A generated DOT diagram for a repository
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Diagram {
     pub id: i64,
@@ -75,8 +75,10 @@ pub struct Diagram {
     pub title: String,
     /// Description of what the diagram shows
     pub description: String,
-    /// The D2 diagram source code
-    pub d2_content: String,
+    /// The GraphViz DOT diagram source code
+    pub dot_content: String,
+    /// Pre-rendered SVG content
+    pub svg_content: String,
     /// Combined hash of source files used to generate this diagram
     pub content_hash: Option<String>,
     pub created_at: String,

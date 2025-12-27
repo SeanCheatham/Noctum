@@ -60,19 +60,6 @@
         height: auto;
     }
 
-    .diagram-loading {
-        color: var(--text-secondary);
-        font-style: italic;
-    }
-
-    .diagram-error {
-        color: #ff6b6b;
-        font-style: italic;
-        padding: 1rem;
-        background: rgba(255, 107, 107, 0.1);
-        border-radius: 4px;
-    }
-
     .diagram-source {
         margin-top: 1rem;
     }
@@ -142,56 +129,16 @@
     <div class="card diagram-card">
         <h3>{{ diagram.title }}</h3>
         <p class="diagram-description">{{ diagram.description }}</p>
-        <div class="diagram-container" id="diagram-{{ diagram.id }}">
-            <span class="diagram-loading">Rendering diagram...</span>
+        <div class="diagram-container">
+            {{ diagram.svg_content|safe }}
         </div>
         <details class="diagram-source">
-            <summary>View D2 Source</summary>
-            <pre><code>{{ diagram.d2_content }}</code></pre>
+            <summary>View DOT Source</summary>
+            <pre><code>{{ diagram.dot_content }}</code></pre>
         </details>
         <div class="diagram-meta">Updated: {{ diagram.created_at }}</div>
     </div>
-    <script type="application/d2" data-diagram-id="{{ diagram.id }}">{{ diagram.d2_content }}</script>
     {% endfor %}
 </div>
 {% endif %}
-
-<!-- D2 WASM renderer from Terrastruct -->
-<script type="module">
-    // Only run if there are diagrams to render
-    const diagramScripts = document.querySelectorAll('script[type="application/d2"]');
-    if (diagramScripts.length === 0) {
-        // No diagrams to render
-    } else {
-        // Dynamically import D2 renderer
-        import('https://esm.sh/@terrastruct/d2@0.1.33')
-            .then(async ({ D2 }) => {
-                const d2 = new D2();
-
-                for (const script of diagramScripts) {
-                    const diagramId = script.dataset.diagramId;
-                    const container = document.getElementById(`diagram-${diagramId}`);
-                    const d2Code = script.textContent.trim();
-
-                    try {
-                        const result = await d2.compile(d2Code);
-                        const svg = await d2.render(result.diagram, result.renderOptions);
-                        container.innerHTML = svg;
-                    } catch (e) {
-                        console.error('D2 render error for diagram', diagramId, ':', e);
-                        container.innerHTML = `<span class="diagram-error">Failed to render diagram: ${e.message || 'Unknown error'}</span>`;
-                    }
-                }
-            })
-            .catch(e => {
-                console.error('Failed to load D2 renderer:', e);
-                // Update all containers with error message
-                for (const script of diagramScripts) {
-                    const diagramId = script.dataset.diagramId;
-                    const container = document.getElementById(`diagram-${diagramId}`);
-                    container.innerHTML = '<span class="diagram-error">Failed to load diagram renderer. Check your internet connection.</span>';
-                }
-            });
-    }
-</script>
 {% endblock %}

@@ -142,7 +142,7 @@ impl Database {
         .execute(&self.pool)
         .await;
 
-        // Create diagrams table for D2 diagram storage
+        // Create diagrams table for DOT diagram storage
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS diagrams (
@@ -151,7 +151,8 @@ impl Database {
                 diagram_type TEXT NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT NOT NULL,
-                d2_content TEXT NOT NULL,
+                dot_content TEXT NOT NULL,
+                svg_content TEXT NOT NULL,
                 content_hash TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (repository_id) REFERENCES repositories(id)
@@ -510,13 +511,14 @@ impl Database {
         diagram_type: &str,
         title: &str,
         description: &str,
-        d2_content: &str,
+        dot_content: &str,
+        svg_content: &str,
         content_hash: Option<&str>,
     ) -> Result<i64> {
         let row = sqlx::query(
             r#"
-            INSERT INTO diagrams (repository_id, diagram_type, title, description, d2_content, content_hash)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO diagrams (repository_id, diagram_type, title, description, dot_content, svg_content, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             "#,
         )
@@ -524,7 +526,8 @@ impl Database {
         .bind(diagram_type)
         .bind(title)
         .bind(description)
-        .bind(d2_content)
+        .bind(dot_content)
+        .bind(svg_content)
         .bind(content_hash)
         .fetch_one(&self.pool)
         .await
@@ -977,7 +980,8 @@ mod tests {
             "system_architecture",
             "Title",
             "Desc",
-            "content",
+            "digraph { a -> b }",
+            "<svg></svg>",
             None,
         )
         .await
@@ -1031,7 +1035,8 @@ mod tests {
                 "system_architecture",
                 "System Architecture",
                 "High-level view of components",
-                "web -> db: queries",
+                "digraph { web -> db }",
+                "<svg>web-db</svg>",
                 Some("hash123"),
             )
             .await
@@ -1043,7 +1048,8 @@ mod tests {
         assert_eq!(diagrams.len(), 1);
         assert_eq!(diagrams[0].diagram_type, "system_architecture");
         assert_eq!(diagrams[0].title, "System Architecture");
-        assert_eq!(diagrams[0].d2_content, "web -> db: queries");
+        assert_eq!(diagrams[0].dot_content, "digraph { web -> db }");
+        assert_eq!(diagrams[0].svg_content, "<svg>web-db</svg>");
         assert_eq!(diagrams[0].content_hash, Some("hash123".to_string()));
     }
 
@@ -1059,22 +1065,32 @@ mod tests {
             "system_architecture",
             "Architecture",
             "Desc",
-            "a -> b",
+            "digraph { a -> b }",
+            "<svg>a-b</svg>",
             None,
         )
         .await
         .unwrap();
 
-        db.save_diagram(repo_id, "data_flow", "Data Flow", "Desc", "x -> y", None)
-            .await
-            .unwrap();
+        db.save_diagram(
+            repo_id,
+            "data_flow",
+            "Data Flow",
+            "Desc",
+            "digraph { x -> y }",
+            "<svg>x-y</svg>",
+            None,
+        )
+        .await
+        .unwrap();
 
         db.save_diagram(
             repo_id,
             "database_schema",
             "DB Schema",
             "Desc",
-            "users -> posts",
+            "digraph { users -> posts }",
+            "<svg>users-posts</svg>",
             None,
         )
         .await
@@ -1104,7 +1120,8 @@ mod tests {
                 "system_architecture",
                 "Old Version",
                 "Desc",
-                "old -> content",
+                "digraph { old -> content }",
+                "<svg>old</svg>",
                 Some("hash1"),
             )
             .await
@@ -1116,7 +1133,8 @@ mod tests {
                 "system_architecture",
                 "New Version",
                 "Desc",
-                "new -> content",
+                "digraph { new -> content }",
+                "<svg>new</svg>",
                 Some("hash2"),
             )
             .await
@@ -1131,7 +1149,7 @@ mod tests {
         // Since they may have same timestamp, verify by checking the id
         assert_eq!(diagrams[0].id, new_id);
         assert_eq!(diagrams[0].title, "New Version");
-        assert_eq!(diagrams[0].d2_content, "new -> content");
+        assert_eq!(diagrams[0].dot_content, "digraph { new -> content }");
         assert_eq!(diagrams[0].content_hash, Some("hash2".to_string()));
     }
 
@@ -1154,7 +1172,8 @@ mod tests {
             "system_architecture",
             "Title",
             "Desc",
-            "content",
+            "digraph { a -> b }",
+            "<svg></svg>",
             Some("hash123"),
         )
         .await
@@ -1186,7 +1205,8 @@ mod tests {
             "system_architecture",
             "Title",
             "Desc",
-            "content",
+            "digraph { a -> b }",
+            "<svg></svg>",
             None,
         )
         .await
