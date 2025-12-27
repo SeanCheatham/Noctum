@@ -64,6 +64,24 @@ pub struct MutationSummary {
     pub compile_error: usize,
 }
 
+/// A generated D2 diagram for a repository
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Diagram {
+    pub id: i64,
+    pub repository_id: i64,
+    /// Type of diagram: 'system_architecture', 'data_flow', 'database_schema'
+    pub diagram_type: String,
+    /// Human-readable title for the diagram
+    pub title: String,
+    /// Description of what the diagram shows
+    pub description: String,
+    /// The D2 diagram source code
+    pub d2_content: String,
+    /// Combined hash of source files used to generate this diagram
+    pub content_hash: Option<String>,
+    pub created_at: String,
+}
+
 impl MutationSummary {
     /// Calculate the mutation score (killed / (killed + survived))
     pub fn mutation_score(&self) -> f64 {

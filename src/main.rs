@@ -2,6 +2,7 @@ mod analyzer;
 mod config;
 mod daemon;
 mod db;
+mod diagram;
 mod language;
 mod mutation;
 mod web;

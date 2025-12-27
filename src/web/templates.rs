@@ -4,7 +4,7 @@
 //! database models for display (e.g., converting absolute paths to relative).
 
 use crate::config::OllamaEndpoint;
-use crate::db::{AnalysisResult, MutationResult, MutationSummary, Repository};
+use crate::db::{AnalysisResult, Diagram, MutationResult, MutationSummary, Repository};
 use askama::Template;
 use pulldown_cmark::{html, Options, Parser};
 use serde::Serialize;
@@ -139,6 +139,13 @@ pub struct MutationResultsTemplate {
     pub results: Vec<MutationResultView>,
     pub summary: MutationSummary,
     pub mutation_score_percent: String,
+}
+
+#[derive(Template)]
+#[template(path = "repository_diagrams.html")]
+pub struct RepositoryDiagramsTemplate {
+    pub repository: Repository,
+    pub diagrams: Vec<Diagram>,
 }
 
 #[cfg(test)]

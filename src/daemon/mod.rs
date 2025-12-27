@@ -1,6 +1,9 @@
 use crate::analyzer::{AnalysisType, OllamaClient};
 use crate::config::{Config, OllamaEndpoint};
 use crate::db::Database;
+use crate::diagram::{
+    clean_d2_output, validate_d2_syntax, DiagramExtractor, DiagramGenerator, DiagramType,
+};
 use crate::mutation::{
     analyze_and_generate_mutations, executor::execute_mutation_test, MutationConfig,
 };
@@ -12,6 +15,9 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
+
+/// Maximum number of retries for D2 diagram generation when syntax errors occur
+const D2_MAX_RETRIES: usize = 3;
 
 /// Minimum file size (bytes) for code analysis. Smaller files are typically
 /// just module declarations (`mod foo;`) with no meaningful content.
@@ -120,6 +126,26 @@ struct AnalysisTask {
     file_path: PathBuf,
     content: String,
     content_hash: String,
+}
+
+/// The type of analysis to perform for a task
+#[derive(Debug, Clone, Copy)]
+enum AnalysisTaskType {
+    /// Granular code understanding (for File Analysis tab)
+    CodeUnderstanding,
+    /// Architecture-focused analysis (for Architecture summary aggregation)
+    ArchitectureFileAnalysis,
+    /// Diagram extraction for a specific diagram type
+    DiagramExtraction(DiagramType),
+}
+
+/// A generic analysis task that can be used for different analysis types
+struct GenericAnalysisTask {
+    repository_id: i64,
+    file_path: PathBuf,
+    content: String,
+    content_hash: String,
+    task_type: AnalysisTaskType,
 }
 
 /// Handle for controlling the daemon from outside (e.g., web handlers).
@@ -404,13 +430,151 @@ impl Daemon {
             return Ok(false);
         }
 
+        // Read all file contents and compute hashes upfront
+        let mut file_data: Vec<(PathBuf, String, String)> = Vec::new();
+        for file_path in rust_files {
+            let content = match tokio::fs::read_to_string(&file_path).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to read file {:?}: {}", file_path, e);
+                    continue;
+                }
+            };
+
+            if content.len() > ANALYSIS_MAX_FILE_SIZE || content.len() < ANALYSIS_MIN_FILE_SIZE {
+                tracing::debug!("Skipping file due to size: {:?}", file_path);
+                continue;
+            }
+
+            let original_file_path =
+                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
+            let content_hash = compute_hash(&content);
+
+            file_data.push((original_file_path, content, content_hash));
+        }
+
+        if file_data.is_empty() {
+            tracing::debug!("No suitable Rust files found in repository: {}", repo.name);
+            return Ok(false);
+        }
+
         tracing::info!(
-            "Found {} Rust files in {}, distributing across {} endpoint(s)",
-            rust_files.len(),
+            "Found {} suitable Rust files in {}, distributing across {} endpoint(s)",
+            file_data.len(),
             repo.name,
             endpoints.len()
         );
 
+        // Compute combined hash for diagram change detection
+        let combined_hash = {
+            let mut hasher = Sha256::new();
+            for (_, _, hash) in &file_data {
+                hasher.update(hash.as_bytes());
+            }
+            format!("{:x}", hasher.finalize())
+        };
+
+        // =========================================================================
+        // PHASE 1: PARALLEL ANALYSIS
+        // Run code understanding, architecture file analysis, and diagram extractions
+        // concurrently. These are all read-only operations on the same files.
+        // =========================================================================
+
+        tracing::info!("Starting parallel analysis phase for {}", repo.name);
+
+        // Run all analysis types in parallel using tokio::join!
+        let (code_result, arch_result, diagram_result) = tokio::join!(
+            self.run_code_understanding_analysis(repo, &file_data, endpoints),
+            self.run_architecture_file_analysis(repo, &file_data, endpoints),
+            self.run_diagram_extractions(repo, &file_data, endpoints),
+        );
+
+        // Check results
+        let code_changed = code_result.unwrap_or_else(|e| {
+            tracing::warn!("Code understanding analysis failed: {}", e);
+            false
+        });
+
+        let arch_changed = arch_result.unwrap_or_else(|e| {
+            tracing::warn!("Architecture file analysis failed: {}", e);
+            false
+        });
+
+        let diagrams_changed = diagram_result.unwrap_or_else(|e| {
+            tracing::warn!("Diagram extraction failed: {}", e);
+            false
+        });
+
+        let any_changed = code_changed || arch_changed || diagrams_changed;
+
+        // Check if we should continue
+        if self.should_stop.load(Ordering::SeqCst) {
+            return Ok(any_changed);
+        }
+
+        // =========================================================================
+        // PHASE 2: AGGREGATION
+        // Generate architecture summary and D2 diagrams from the extracted data.
+        // These can also run in parallel since they're independent.
+        // =========================================================================
+
+        if any_changed {
+            tracing::info!("Starting aggregation phase for {}", repo.name);
+
+            let (arch_summary_result, diagrams_result) = tokio::join!(
+                self.generate_architecture_summary(repo, endpoints),
+                self.generate_diagrams(repo, endpoints, &combined_hash),
+            );
+
+            if let Err(e) = arch_summary_result {
+                tracing::warn!(
+                    "Failed to generate architecture summary for {}: {}",
+                    repo.name,
+                    e
+                );
+            }
+
+            if let Err(e) = diagrams_result {
+                tracing::warn!("Failed to generate diagrams for {}: {}", repo.name, e);
+            }
+        } else {
+            tracing::debug!(
+                "Skipping aggregation phase for {} - no files changed",
+                repo.name
+            );
+        }
+
+        // Check if we should continue
+        if self.should_stop.load(Ordering::SeqCst) {
+            return Ok(any_changed);
+        }
+
+        // =========================================================================
+        // PHASE 3: MUTATION TESTING
+        // This must be sequential as it modifies files in the temp directory.
+        // =========================================================================
+
+        if let Err(e) = self
+            .run_mutation_testing(repo, endpoints, temp_repo_path, original_repo_path)
+            .await
+        {
+            tracing::warn!("Failed to run mutation testing for {}: {}", repo.name, e);
+        }
+
+        // temp_dir is dropped here, cleaning up the temp copy
+        tracing::debug!("Cleaning up temp directory for {}", repo.name);
+        drop(temp_dir);
+
+        Ok(any_changed)
+    }
+
+    /// Run code understanding analysis on files (for File Analysis tab)
+    async fn run_code_understanding_analysis(
+        &self,
+        repo: &crate::db::Repository,
+        file_data: &[(PathBuf, String, String)],
+        endpoints: &[OllamaEndpoint],
+    ) -> anyhow::Result<bool> {
         // Create work queue channel
         let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
         let rx = Arc::new(TokioMutex::new(rx));
@@ -433,120 +597,432 @@ impl Daemon {
         // Send tasks to the work queue
         let repository_id = repo.id;
         let mut tasks_sent = 0;
-        for file_path in rust_files {
-            // Check if we should stop
+
+        for (file_path, content, content_hash) in file_data {
             if self.should_stop.load(Ordering::SeqCst) {
                 break;
             }
 
-            // Read file content
-            let content = match tokio::fs::read_to_string(&file_path).await {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!("Failed to read file {:?}: {}", file_path, e);
-                    continue;
-                }
-            };
+            let file_path_str = file_path.to_string_lossy().to_string();
 
-            if content.len() > ANALYSIS_MAX_FILE_SIZE {
-                tracing::debug!("Skipping large file: {:?}", file_path);
-                continue;
-            }
-
-            if content.len() < ANALYSIS_MIN_FILE_SIZE {
-                tracing::debug!("Skipping small file: {:?}", file_path);
-                continue;
-            }
-
-            // Compute content hash
-            let content_hash = compute_hash(&content);
-
-            // Translate temp path to original for DB storage
-            let original_file_path =
-                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
-            let original_file_path_str = original_file_path.to_string_lossy().to_string();
-
-            // Check if file has changed since last analysis (using original path)
+            // Check if file has changed since last code understanding analysis
             let existing_hash = self
                 .db
                 .get_latest_file_hash(
                     repository_id,
-                    &original_file_path_str,
+                    &file_path_str,
                     &AnalysisType::CodeUnderstanding.to_string(),
                 )
                 .await
                 .unwrap_or(None);
 
-            if existing_hash.as_ref() == Some(&content_hash) {
-                tracing::debug!("Skipping unchanged file: {:?}", original_file_path);
-                continue;
+            if existing_hash.as_ref() == Some(content_hash) {
+                continue; // Skip unchanged file
             }
 
             let task = AnalysisTask {
                 repository_id,
-                file_path: original_file_path, // Use original path for storage
-                content,
-                content_hash,
+                file_path: file_path.clone(),
+                content: content.clone(),
+                content_hash: content_hash.clone(),
             };
 
             if tx.send(task).await.is_err() {
-                // All receivers dropped, workers are done
                 break;
             }
             tasks_sent += 1;
         }
 
-        // Drop sender to signal workers that no more tasks are coming
         drop(tx);
 
-        // Wait for all workers to complete
         for handle in worker_handles {
             if let Err(e) = handle.await {
-                tracing::warn!("Worker task failed: {}", e);
+                tracing::warn!("Code understanding worker failed: {}", e);
             }
         }
 
-        let files_analyzed = tasks_sent > 0;
+        Ok(tasks_sent > 0)
+    }
 
-        // Check if we should continue with architecture summary
-        if self.should_stop.load(Ordering::SeqCst) {
-            return Ok(files_analyzed);
+    /// Run architecture-focused file analysis (for Architecture summary aggregation)
+    async fn run_architecture_file_analysis(
+        &self,
+        repo: &crate::db::Repository,
+        file_data: &[(PathBuf, String, String)],
+        endpoints: &[OllamaEndpoint],
+    ) -> anyhow::Result<bool> {
+        let (tx, rx) = mpsc::channel::<GenericAnalysisTask>(100);
+        let rx = Arc::new(TokioMutex::new(rx));
+
+        let mut worker_handles = Vec::new();
+        for endpoint in endpoints {
+            let worker_rx = Arc::clone(&rx);
+            let db = self.db.clone();
+            let should_stop = Arc::clone(&self.should_stop);
+            let endpoint = endpoint.clone();
+
+            let handle = tokio::spawn(async move {
+                generic_analysis_worker(endpoint, worker_rx, db, should_stop).await
+            });
+            worker_handles.push(handle);
         }
 
-        // Only generate architecture summary if at least one file was analyzed
-        if files_analyzed {
-            if let Err(e) = self.generate_architecture_summary(repo, endpoints).await {
+        let repository_id = repo.id;
+        let mut tasks_sent = 0;
+
+        for (file_path, content, content_hash) in file_data {
+            if self.should_stop.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let file_path_str = file_path.to_string_lossy().to_string();
+
+            // Check if file has changed since last architecture file analysis
+            let existing_hash = self
+                .db
+                .get_latest_file_hash(
+                    repository_id,
+                    &file_path_str,
+                    &AnalysisType::ArchitectureFileAnalysis.to_string(),
+                )
+                .await
+                .unwrap_or(None);
+
+            if existing_hash.as_ref() == Some(content_hash) {
+                continue;
+            }
+
+            let task = GenericAnalysisTask {
+                repository_id,
+                file_path: file_path.clone(),
+                content: content.clone(),
+                content_hash: content_hash.clone(),
+                task_type: AnalysisTaskType::ArchitectureFileAnalysis,
+            };
+
+            if tx.send(task).await.is_err() {
+                break;
+            }
+            tasks_sent += 1;
+        }
+
+        drop(tx);
+
+        for handle in worker_handles {
+            if let Err(e) = handle.await {
+                tracing::warn!("Architecture file analysis worker failed: {}", e);
+            }
+        }
+
+        Ok(tasks_sent > 0)
+    }
+
+    /// Run diagram extraction for all diagram types on all files
+    async fn run_diagram_extractions(
+        &self,
+        repo: &crate::db::Repository,
+        file_data: &[(PathBuf, String, String)],
+        endpoints: &[OllamaEndpoint],
+    ) -> anyhow::Result<bool> {
+        let (tx, rx) = mpsc::channel::<GenericAnalysisTask>(100);
+        let rx = Arc::new(TokioMutex::new(rx));
+
+        let mut worker_handles = Vec::new();
+        for endpoint in endpoints {
+            let worker_rx = Arc::clone(&rx);
+            let db = self.db.clone();
+            let should_stop = Arc::clone(&self.should_stop);
+            let endpoint = endpoint.clone();
+
+            let handle = tokio::spawn(async move {
+                generic_analysis_worker(endpoint, worker_rx, db, should_stop).await
+            });
+            worker_handles.push(handle);
+        }
+
+        let repository_id = repo.id;
+        let mut tasks_sent = 0;
+
+        // For each diagram type, check if we need to extract for each file
+        for diagram_type in DiagramType::all() {
+            let analysis_type_str = format!("diagram_extraction_{}", diagram_type.as_str());
+
+            for (file_path, content, content_hash) in file_data {
+                if self.should_stop.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let file_path_str = file_path.to_string_lossy().to_string();
+
+                // Check if file has changed since last extraction for this diagram type
+                let existing_hash = self
+                    .db
+                    .get_latest_file_hash(repository_id, &file_path_str, &analysis_type_str)
+                    .await
+                    .unwrap_or(None);
+
+                if existing_hash.as_ref() == Some(content_hash) {
+                    continue;
+                }
+
+                let task = GenericAnalysisTask {
+                    repository_id,
+                    file_path: file_path.clone(),
+                    content: content.clone(),
+                    content_hash: content_hash.clone(),
+                    task_type: AnalysisTaskType::DiagramExtraction(*diagram_type),
+                };
+
+                if tx.send(task).await.is_err() {
+                    break;
+                }
+                tasks_sent += 1;
+            }
+        }
+
+        drop(tx);
+
+        for handle in worker_handles {
+            if let Err(e) = handle.await {
+                tracing::warn!("Diagram extraction worker failed: {}", e);
+            }
+        }
+
+        Ok(tasks_sent > 0)
+    }
+
+    /// Generate D2 diagrams from extracted data
+    async fn generate_diagrams(
+        &self,
+        repo: &crate::db::Repository,
+        endpoints: &[OllamaEndpoint],
+        combined_hash: &str,
+    ) -> anyhow::Result<()> {
+        tracing::info!("Generating D2 diagrams for {}", repo.name);
+
+        self.db
+            .update_daemon_status(
+                "processing",
+                Some(&format!("generating diagrams for {}", repo.name)),
+            )
+            .await?;
+
+        for diagram_type in DiagramType::all() {
+            if self.should_stop.load(Ordering::SeqCst) {
+                break;
+            }
+
+            // Check if diagrams need regeneration based on combined hash
+            let existing_hash = self
+                .db
+                .get_latest_diagram_hash(repo.id, diagram_type.as_str())
+                .await
+                .unwrap_or(None);
+
+            if existing_hash.as_ref() == Some(&combined_hash.to_string()) {
+                tracing::debug!(
+                    "Skipping {} diagram for {} - no changes",
+                    diagram_type.title(),
+                    repo.name
+                );
+                continue;
+            }
+
+            if let Err(e) = self
+                .generate_single_diagram(repo, endpoints, *diagram_type, combined_hash)
+                .await
+            {
                 tracing::warn!(
-                    "Failed to generate architecture summary for {}: {}",
+                    "Failed to generate {} diagram for {}: {}",
+                    diagram_type.title(),
                     repo.name,
                     e
                 );
             }
-        } else {
-            tracing::debug!(
-                "Skipping architecture summary for {} - no files changed",
-                repo.name
-            );
         }
 
-        // Run mutation testing after architecture summary (using temp copy)
-        if !self.should_stop.load(Ordering::SeqCst) {
-            if let Err(e) = self
-                .run_mutation_testing(repo, endpoints, temp_repo_path, original_repo_path)
-                .await
+        Ok(())
+    }
+
+    /// Generate a single D2 diagram with retry logic for syntax errors
+    async fn generate_single_diagram(
+        &self,
+        repo: &crate::db::Repository,
+        endpoints: &[OllamaEndpoint],
+        diagram_type: DiagramType,
+        combined_hash: &str,
+    ) -> anyhow::Result<()> {
+        let analysis_type_str = format!("diagram_extraction_{}", diagram_type.as_str());
+
+        // Fetch all extractions for this diagram type
+        let results = self
+            .db
+            .get_repository_results(repo.id, &analysis_type_str)
+            .await?;
+
+        if results.is_empty() {
+            tracing::debug!(
+                "No {} extractions found for {}",
+                diagram_type.title(),
+                repo.name
+            );
+            return Ok(());
+        }
+
+        // Build aggregated extractions, filtering out deleted files and empty results
+        let mut extractions = String::new();
+        let mut included_count = 0;
+        for result in &results {
+            let file_path = std::path::Path::new(&result.file_path);
+            if !file_path.exists() {
+                continue;
+            }
+            // Skip "no content" type responses
+            let result_lower = result.result.to_lowercase();
+            if result_lower.contains("no significant")
+                || result_lower.contains("no database content")
+                || result_lower.contains("minimal architectural")
             {
-                tracing::warn!("Failed to run mutation testing for {}: {}", repo.name, e);
+                continue;
+            }
+            extractions.push_str(&format!("\n## {}\n{}\n", result.file_path, result.result));
+            included_count += 1;
+        }
+
+        if included_count == 0 {
+            tracing::debug!(
+                "No relevant {} extractions for {}",
+                diagram_type.title(),
+                repo.name
+            );
+            return Ok(());
+        }
+
+        // Truncate if too long
+        let truncated = if extractions.len() > 50000 {
+            format!(
+                "{}...\n\n(truncated, {} files total)",
+                &extractions[..50000],
+                included_count
+            )
+        } else {
+            extractions
+        };
+
+        // Generate the diagram with retry logic
+        let prompt = DiagramGenerator::prompt_for_type(diagram_type, &repo.name, &truncated);
+
+        let mut d2_code: Option<String> = None;
+        let mut last_error: Option<String> = None;
+
+        for attempt in 0..=D2_MAX_RETRIES {
+            let current_prompt = if attempt == 0 {
+                prompt.clone()
+            } else {
+                // Use fix prompt for retries
+                DiagramGenerator::fix_d2_prompt(
+                    d2_code.as_deref().unwrap_or(""),
+                    last_error.as_deref().unwrap_or("Unknown error"),
+                )
+            };
+
+            // Try each endpoint
+            for endpoint in endpoints {
+                let client = OllamaClient::new(&endpoint.url, &endpoint.model);
+
+                if !client.is_available().await {
+                    continue;
+                }
+
+                match client.generate(&current_prompt).await {
+                    Ok(raw_output) => {
+                        let cleaned = clean_d2_output(&raw_output);
+
+                        match validate_d2_syntax(&cleaned) {
+                            Ok(()) => {
+                                d2_code = Some(cleaned);
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::debug!(
+                                    "D2 validation failed for {} (attempt {}): {}",
+                                    diagram_type.title(),
+                                    attempt + 1,
+                                    e
+                                );
+                                d2_code = Some(cleaned);
+                                last_error = Some(e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Endpoint {} failed for {} diagram: {}",
+                            endpoint.name,
+                            diagram_type.title(),
+                            e
+                        );
+                    }
+                }
+            }
+
+            // If we got valid D2, break out of retry loop
+            if d2_code.is_some() && last_error.is_none() {
+                break;
+            }
+
+            // Clear error for next attempt if we're retrying
+            if attempt < D2_MAX_RETRIES && d2_code.is_some() {
+                tracing::debug!(
+                    "Retrying {} diagram generation (attempt {}/{})",
+                    diagram_type.title(),
+                    attempt + 2,
+                    D2_MAX_RETRIES + 1
+                );
             }
         }
 
-        // temp_dir is dropped here, cleaning up the temp copy
-        tracing::debug!("Cleaning up temp directory for {}", repo.name);
-        drop(temp_dir);
+        // Save diagram if we got valid D2
+        match (d2_code, last_error) {
+            (Some(code), None) => {
+                tracing::info!(
+                    "Generated {} diagram for {}",
+                    diagram_type.title(),
+                    repo.name
+                );
 
-        Ok(files_analyzed)
+                self.db
+                    .save_diagram(
+                        repo.id,
+                        diagram_type.as_str(),
+                        diagram_type.title(),
+                        diagram_type.description(),
+                        &code,
+                        Some(combined_hash),
+                    )
+                    .await?;
+            }
+            (Some(_), Some(e)) => {
+                tracing::warn!(
+                    "Failed to generate valid {} diagram for {} after {} retries: {}",
+                    diagram_type.title(),
+                    repo.name,
+                    D2_MAX_RETRIES,
+                    e
+                );
+            }
+            (None, _) => {
+                tracing::warn!(
+                    "No endpoints available for {} diagram generation",
+                    diagram_type.title()
+                );
+            }
+        }
+
+        Ok(())
     }
 
-    /// Generate an architectural summary by aggregating all file analysis results
+    /// Generate an architectural summary by aggregating architecture file analysis results
     async fn generate_architecture_summary(
         &self,
         repo: &crate::db::Repository,
@@ -558,14 +1034,18 @@ impl Daemon {
             .update_daemon_status("processing", Some(&format!("summarizing {}", repo.name)))
             .await?;
 
-        // Get all code understanding results for this repository
+        // Get architecture file analysis results (not code understanding)
+        // This provides architecture-focused analysis rather than granular code details
         let results = self
             .db
-            .get_repository_results(repo.id, &AnalysisType::CodeUnderstanding.to_string())
+            .get_repository_results(repo.id, &AnalysisType::ArchitectureFileAnalysis.to_string())
             .await?;
 
         if results.is_empty() {
-            tracing::debug!("No file analyses to summarize for {}", repo.name);
+            tracing::debug!(
+                "No architecture file analyses to summarize for {}",
+                repo.name
+            );
             return Ok(());
         }
 
@@ -601,16 +1081,16 @@ impl Daemon {
 
         let prompt = format!(
             "You are analyzing a Rust codebase called '{}'. \
-             Below are summaries of individual files in the project.\n\n\
-             Based on these file summaries, provide a high-level architectural overview including:\n\
+             Below are architecture-focused analyses of individual files in the project.\n\n\
+             Based on these analyses, provide a high-level architectural overview including:\n\
              1. **Purpose**: What is this project/application about?\n\
              2. **Architecture**: What architectural patterns are used (e.g., layered, microservices, MVC)?\n\
              3. **Key Components**: What are the main modules/components and their responsibilities?\n\
              4. **Data Flow**: How does data flow through the system?\n\
              5. **Dependencies**: What external dependencies or integrations exist?\n\
              6. **Suggestions**: Any architectural improvements or concerns?\n\n\
-             IMPORTANT: Respond only in English (or code)\n\n
-             File Summaries:\n{}\n",
+             IMPORTANT: Respond only in English (or code)\n\n\
+             Architecture Analyses:\n{}\n",
             repo.name, truncated
         );
 
@@ -634,7 +1114,7 @@ impl Daemon {
                         endpoint.name
                     );
 
-                    // Save the summary - use repo path as the "file_path" to identify it
+                    // Save the summary
                     self.db
                         .save_analysis_result(
                             repo.id,
@@ -1054,6 +1534,138 @@ async fn endpoint_worker(
     }
 
     tracing::info!("Worker for endpoint '{}' stopped", endpoint.name);
+}
+
+/// Worker function for generic analysis tasks (architecture file analysis, diagram extraction)
+async fn generic_analysis_worker(
+    endpoint: OllamaEndpoint,
+    receiver: Arc<TokioMutex<mpsc::Receiver<GenericAnalysisTask>>>,
+    db: Database,
+    should_stop: Arc<AtomicBool>,
+) {
+    let client = OllamaClient::new(&endpoint.url, &endpoint.model);
+
+    if !client.is_available().await {
+        tracing::warn!(
+            "Ollama endpoint '{}' at {} is not available for generic analysis, skipping",
+            endpoint.name,
+            endpoint.url
+        );
+        return;
+    }
+
+    tracing::debug!(
+        "Generic analysis worker started for endpoint '{}' ({})",
+        endpoint.name,
+        endpoint.url
+    );
+
+    loop {
+        if should_stop.load(Ordering::SeqCst) {
+            tracing::debug!(
+                "Generic worker for '{}' stopping due to shutdown signal",
+                endpoint.name
+            );
+            break;
+        }
+
+        let task = {
+            let mut rx = receiver.lock().await;
+            tokio::select! {
+                task = rx.recv() => task,
+                _ = wait_for_stop_signal(&should_stop) => {
+                    tracing::debug!(
+                        "Generic worker for '{}' stopping due to shutdown signal",
+                        endpoint.name
+                    );
+                    break;
+                }
+            }
+        };
+
+        let task = match task {
+            Some(t) => t,
+            None => {
+                tracing::debug!(
+                    "Generic worker for '{}' finished - no more tasks",
+                    endpoint.name
+                );
+                break;
+            }
+        };
+
+        let file_path_str = task.file_path.to_string_lossy().to_string();
+
+        // Build the appropriate prompt based on task type
+        let (prompt, analysis_type_str) = match task.task_type {
+            AnalysisTaskType::ArchitectureFileAnalysis => {
+                let prompt = DiagramExtractor::architecture_file_analysis_prompt(
+                    &file_path_str,
+                    &task.content,
+                );
+                (prompt, AnalysisType::ArchitectureFileAnalysis.to_string())
+            }
+            AnalysisTaskType::DiagramExtraction(diagram_type) => {
+                let prompt =
+                    DiagramExtractor::prompt_for_type(diagram_type, &file_path_str, &task.content);
+                let analysis_type = format!("diagram_extraction_{}", diagram_type.as_str());
+                (prompt, analysis_type)
+            }
+            AnalysisTaskType::CodeUnderstanding => {
+                // This shouldn't happen - code understanding uses the original worker
+                tracing::warn!("CodeUnderstanding task sent to generic worker, skipping");
+                continue;
+            }
+        };
+
+        tracing::debug!(
+            "Generic worker '{}' processing {} for: {}",
+            endpoint.name,
+            analysis_type_str,
+            file_path_str
+        );
+
+        match client.generate(&prompt).await {
+            Ok(result) => {
+                tracing::debug!(
+                    "Generic worker '{}' completed {} for {}",
+                    endpoint.name,
+                    analysis_type_str,
+                    file_path_str
+                );
+
+                let severity = determine_severity(&result);
+
+                if let Err(e) = db
+                    .save_analysis_result(
+                        task.repository_id,
+                        &file_path_str,
+                        &analysis_type_str,
+                        &result,
+                        severity.as_deref(),
+                        Some(&task.content_hash),
+                    )
+                    .await
+                {
+                    tracing::warn!("Failed to save {} result: {}", analysis_type_str, e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Generic worker '{}' failed {} for {}: {}",
+                    endpoint.name,
+                    analysis_type_str,
+                    file_path_str,
+                    e
+                );
+            }
+        }
+    }
+
+    tracing::debug!(
+        "Generic analysis worker for endpoint '{}' stopped",
+        endpoint.name
+    );
 }
 
 /// Find the first available endpoint from a list.

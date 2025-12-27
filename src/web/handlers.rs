@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use super::templates::{
     render_markdown, AnalysisResultView, MutationResultView, MutationResultsTemplate,
-    RepositoriesTemplate, RepositoryArchitectureTemplate, RepositoryFilesTemplate,
-    SettingsTemplate,
+    RepositoriesTemplate, RepositoryArchitectureTemplate, RepositoryDiagramsTemplate,
+    RepositoryFilesTemplate, SettingsTemplate,
 };
 use askama::Template;
 
@@ -214,6 +214,23 @@ pub async fn mutation_results(
         results,
         summary,
         mutation_score_percent,
+    })
+}
+
+pub async fn repository_diagrams(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let repository = match get_repo_or_error(&state.db, id).await {
+        Ok(repo) => repo,
+        Err(response) => return response,
+    };
+
+    let diagrams = state.db.get_latest_diagrams(id).await.unwrap_or_default();
+
+    render_template(RepositoryDiagramsTemplate {
+        repository,
+        diagrams,
     })
 }
 

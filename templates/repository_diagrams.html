@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Diagrams - {{ repository.name }} - Noctum{% endblock %}
+{% block content %}
+<style>
+    .breadcrumb {
+        margin-bottom: 1rem;
+        color: var(--text-secondary);
+    }
+    .breadcrumb a {
+        color: var(--accent);
+        text-decoration: none;
+    }
+    .breadcrumb a:hover {
+        text-decoration: underline;
+    }
+
+    .repo-header {
+        margin-bottom: 1.5rem;
+    }
+    .repo-path {
+        color: var(--text-secondary);
+        font-family: monospace;
+        margin-bottom: 0;
+    }
+
+    .diagram-grid {
+        display: grid;
+        gap: 1.5rem;
+    }
+
+    .diagram-card {
+        border-left: 3px solid var(--accent);
+    }
+
+    .diagram-card h3 {
+        margin-bottom: 0.5rem;
+        color: var(--text-primary);
+    }
+
+    .diagram-description {
+        color: var(--text-secondary);
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+
+    .diagram-container {
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        min-height: 200px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: auto;
+    }
+
+    .diagram-container svg {
+        max-width: 100%;
+        height: auto;
+    }
+
+    .diagram-loading {
+        color: var(--text-secondary);
+        font-style: italic;
+    }
+
+    .diagram-error {
+        color: #ff6b6b;
+        font-style: italic;
+        padding: 1rem;
+        background: rgba(255, 107, 107, 0.1);
+        border-radius: 4px;
+    }
+
+    .diagram-source {
+        margin-top: 1rem;
+    }
+
+    .diagram-source summary {
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        user-select: none;
+    }
+
+    .diagram-source summary:hover {
+        color: var(--text-primary);
+    }
+
+    .diagram-source pre {
+        margin-top: 0.5rem;
+        background: var(--bg-tertiary);
+        padding: 1rem;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 0.8rem;
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    }
+
+    .diagram-meta {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        margin-top: 0.5rem;
+    }
+
+    .empty-state {
+        color: var(--text-secondary);
+        padding: 3rem;
+        text-align: center;
+    }
+</style>
+
+<div class="breadcrumb">
+    <a href="/repositories">Repositories</a> / {{ repository.name }}
+</div>
+
+<div class="repo-header">
+    <h1>{{ repository.name }}</h1>
+    <p class="repo-path">{{ repository.path }}</p>
+</div>
+
+<nav class="tabs">
+    <a href="/repositories/{{ repository.id }}/architecture" class="tab">Architecture</a>
+    <a href="/repositories/{{ repository.id }}/files" class="tab">File Analysis</a>
+    <a href="/repositories/{{ repository.id }}/mutations" class="tab">Mutation Testing</a>
+    <a href="/repositories/{{ repository.id }}/diagrams" class="tab active">Diagrams</a>
+</nav>
+
+{% if diagrams.is_empty() %}
+<div class="card">
+    <div class="empty-state">
+        <p>No diagrams generated yet.</p>
+        <p style="margin-top: 0.5rem">
+            Diagrams are generated automatically during the scheduled window.
+        </p>
+    </div>
+</div>
+{% else %}
+<div class="diagram-grid">
+    {% for diagram in diagrams %}
+    <div class="card diagram-card">
+        <h3>{{ diagram.title }}</h3>
+        <p class="diagram-description">{{ diagram.description }}</p>
+        <div class="diagram-container" id="diagram-{{ diagram.id }}">
+            <span class="diagram-loading">Rendering diagram...</span>
+        </div>
+        <details class="diagram-source">
+            <summary>View D2 Source</summary>
+            <pre><code>{{ diagram.d2_content }}</code></pre>
+        </details>
+        <div class="diagram-meta">Updated: {{ diagram.created_at }}</div>
+    </div>
+    <script type="application/d2" data-diagram-id="{{ diagram.id }}">{{ diagram.d2_content }}</script>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- D2 WASM renderer from Terrastruct -->
+<script type="module">
+    // Only run if there are diagrams to render
+    const diagramScripts = document.querySelectorAll('script[type="application/d2"]');
+    if (diagramScripts.length === 0) {
+        // No diagrams to render
+    } else {
+        // Dynamically import D2 renderer
+        import('https://esm.sh/@terrastruct/d2@0.1.33')
+            .then(async ({ D2 }) => {
+                const d2 = new D2();
+
+                for (const script of diagramScripts) {
+                    const diagramId = script.dataset.diagramId;
+                    const container = document.getElementById(`diagram-${diagramId}`);
+                    const d2Code = script.textContent.trim();
+
+                    try {
+                        const result = await d2.compile(d2Code);
+                        const svg = await d2.render(result.diagram, result.renderOptions);
+                        container.innerHTML = svg;
+                    } catch (e) {
+                        console.error('D2 render error for diagram', diagramId, ':', e);
+                        container.innerHTML = `<span class="diagram-error">Failed to render diagram: ${e.message || 'Unknown error'}</span>`;
+                    }
+                }
+            })
+            .catch(e => {
+                console.error('Failed to load D2 renderer:', e);
+                // Update all containers with error message
+                for (const script of diagramScripts) {
+                    const diagramId = script.dataset.diagramId;
+                    const container = document.getElementById(`diagram-${diagramId}`);
+                    container.innerHTML = '<span class="diagram-error">Failed to load diagram renderer. Check your internet connection.</span>';
+                }
+            });
+    }
+</script>
+{% endblock %}

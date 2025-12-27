@@ -95,6 +95,10 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow
             "/repositories/:id/mutations",
             get(handlers::mutation_results),
         )
+        .route(
+            "/repositories/:id/diagrams",
+            get(handlers::repository_diagrams),
+        )
         // Settings / Endpoints
         .route("/settings", get(handlers::settings))
         .route("/endpoints", post(handlers::add_endpoint))

@@ -142,6 +142,34 @@ impl Database {
         .execute(&self.pool)
         .await;
 
+        // Create diagrams table for D2 diagram storage
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS diagrams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                repository_id INTEGER NOT NULL,
+                diagram_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                d2_content TEXT NOT NULL,
+                content_hash TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (repository_id) REFERENCES repositories(id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create diagrams table")?;
+
+        // Create indexes for diagrams
+        let _ = sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_diagrams_repo_type \
+             ON diagrams(repository_id, diagram_type)",
+        )
+        .execute(&self.pool)
+        .await;
+
         Ok(())
     }
 
@@ -181,7 +209,14 @@ impl Database {
 
     /// Delete a repository and all its associated data
     pub async fn delete_repository(&self, id: i64) -> Result<bool> {
-        // Delete associated mutation results first
+        // Delete associated diagrams first
+        sqlx::query("DELETE FROM diagrams WHERE repository_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete diagrams")?;
+
+        // Delete associated mutation results
         sqlx::query("DELETE FROM mutation_results WHERE repository_id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -466,6 +501,85 @@ impl Database {
         .context("Failed to check mutation results for hash")?;
 
         Ok(count > 0)
+    }
+
+    /// Save a new diagram (inserts new row, keeping history)
+    pub async fn save_diagram(
+        &self,
+        repository_id: i64,
+        diagram_type: &str,
+        title: &str,
+        description: &str,
+        d2_content: &str,
+        content_hash: Option<&str>,
+    ) -> Result<i64> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO diagrams (repository_id, diagram_type, title, description, d2_content, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+            "#,
+        )
+        .bind(repository_id)
+        .bind(diagram_type)
+        .bind(title)
+        .bind(description)
+        .bind(d2_content)
+        .bind(content_hash)
+        .fetch_one(&self.pool)
+        .await
+        .context("Failed to save diagram")?;
+
+        Ok(sqlx::Row::get(&row, "id"))
+    }
+
+    /// Get the latest diagram of each type for a repository
+    pub async fn get_latest_diagrams(&self, repository_id: i64) -> Result<Vec<Diagram>> {
+        let diagrams = sqlx::query_as::<_, Diagram>(
+            r#"
+            SELECT d.* FROM diagrams d
+            INNER JOIN (
+                SELECT diagram_type, MAX(id) as max_id
+                FROM diagrams
+                WHERE repository_id = ?
+                GROUP BY diagram_type
+            ) latest ON d.diagram_type = latest.diagram_type
+                AND d.id = latest.max_id
+            WHERE d.repository_id = ?
+            ORDER BY d.diagram_type
+            "#,
+        )
+        .bind(repository_id)
+        .bind(repository_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to fetch latest diagrams")?;
+
+        Ok(diagrams)
+    }
+
+    /// Get the latest content hash for diagrams of a repository
+    /// Used to determine if diagrams need regeneration
+    pub async fn get_latest_diagram_hash(
+        &self,
+        repository_id: i64,
+        diagram_type: &str,
+    ) -> Result<Option<String>> {
+        let result = sqlx::query_scalar::<_, Option<String>>(
+            r#"
+            SELECT content_hash FROM diagrams
+            WHERE repository_id = ? AND diagram_type = ?
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(repository_id)
+        .bind(diagram_type)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to fetch diagram hash")?;
+
+        Ok(result.flatten())
     }
 }
 
@@ -857,6 +971,18 @@ mod tests {
         .await
         .unwrap();
 
+        // Add some diagrams
+        db.save_diagram(
+            repo_id,
+            "system_architecture",
+            "Title",
+            "Desc",
+            "content",
+            None,
+        )
+        .await
+        .unwrap();
+
         // Delete the repository
         let deleted = db.delete_repository(repo_id).await.unwrap();
         assert!(deleted, "Repository should be deleted");
@@ -872,6 +998,10 @@ mod tests {
         // Verify mutation results are gone
         let mutations = db.get_mutation_results(repo_id).await.unwrap();
         assert!(mutations.is_empty(), "Mutation results should be deleted");
+
+        // Verify diagrams are gone
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert!(diagrams.is_empty(), "Diagrams should be deleted");
     }
 
     #[tokio::test]
@@ -883,5 +1013,204 @@ mod tests {
             !deleted,
             "Deleting non-existent repository should return false"
         );
+    }
+
+    // =========================================================================
+    // Diagram tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_save_diagram() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let id = db
+            .save_diagram(
+                repo_id,
+                "system_architecture",
+                "System Architecture",
+                "High-level view of components",
+                "web -> db: queries",
+                Some("hash123"),
+            )
+            .await
+            .unwrap();
+
+        assert!(id > 0);
+
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert_eq!(diagrams.len(), 1);
+        assert_eq!(diagrams[0].diagram_type, "system_architecture");
+        assert_eq!(diagrams[0].title, "System Architecture");
+        assert_eq!(diagrams[0].d2_content, "web -> db: queries");
+        assert_eq!(diagrams[0].content_hash, Some("hash123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_diagrams_multiple_types() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        // Save diagrams of different types
+        db.save_diagram(
+            repo_id,
+            "system_architecture",
+            "Architecture",
+            "Desc",
+            "a -> b",
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.save_diagram(repo_id, "data_flow", "Data Flow", "Desc", "x -> y", None)
+            .await
+            .unwrap();
+
+        db.save_diagram(
+            repo_id,
+            "database_schema",
+            "DB Schema",
+            "Desc",
+            "users -> posts",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert_eq!(diagrams.len(), 3);
+
+        // Verify all types are present
+        let types: Vec<_> = diagrams.iter().map(|d| d.diagram_type.as_str()).collect();
+        assert!(types.contains(&"system_architecture"));
+        assert!(types.contains(&"data_flow"));
+        assert!(types.contains(&"database_schema"));
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_diagrams_returns_newest() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        // Save two versions of the same diagram type
+        // The one with the higher ID should be returned (as a proxy for "newest")
+        let old_id = db
+            .save_diagram(
+                repo_id,
+                "system_architecture",
+                "Old Version",
+                "Desc",
+                "old -> content",
+                Some("hash1"),
+            )
+            .await
+            .unwrap();
+
+        let new_id = db
+            .save_diagram(
+                repo_id,
+                "system_architecture",
+                "New Version",
+                "Desc",
+                "new -> content",
+                Some("hash2"),
+            )
+            .await
+            .unwrap();
+
+        // Verify new_id > old_id (insertion order)
+        assert!(new_id > old_id);
+
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert_eq!(diagrams.len(), 1);
+        // The newest (by created_at or id) should be returned
+        // Since they may have same timestamp, verify by checking the id
+        assert_eq!(diagrams[0].id, new_id);
+        assert_eq!(diagrams[0].title, "New Version");
+        assert_eq!(diagrams[0].d2_content, "new -> content");
+        assert_eq!(diagrams[0].content_hash, Some("hash2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_diagram_hash() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        // No diagrams yet
+        let hash = db
+            .get_latest_diagram_hash(repo_id, "system_architecture")
+            .await
+            .unwrap();
+        assert!(hash.is_none());
+
+        // Save a diagram
+        db.save_diagram(
+            repo_id,
+            "system_architecture",
+            "Title",
+            "Desc",
+            "content",
+            Some("hash123"),
+        )
+        .await
+        .unwrap();
+
+        let hash = db
+            .get_latest_diagram_hash(repo_id, "system_architecture")
+            .await
+            .unwrap();
+        assert_eq!(hash, Some("hash123".to_string()));
+
+        // Different type should return None
+        let hash = db
+            .get_latest_diagram_hash(repo_id, "data_flow")
+            .await
+            .unwrap();
+        assert!(hash.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_repository_deletes_diagrams() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        // Add a diagram
+        db.save_diagram(
+            repo_id,
+            "system_architecture",
+            "Title",
+            "Desc",
+            "content",
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Verify diagram exists
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert_eq!(diagrams.len(), 1);
+
+        // Delete repository
+        db.delete_repository(repo_id).await.unwrap();
+
+        // Verify diagrams are gone
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert!(diagrams.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_diagrams_empty() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+
+        let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
+        assert!(diagrams.is_empty());
     }
 }

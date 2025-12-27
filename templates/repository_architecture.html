@@ -120,6 +120,7 @@ Noctum{% endblock %} {% block content %}
     <a href="/repositories/{{ repository.id }}/architecture" class="tab active">Architecture</a>
     <a href="/repositories/{{ repository.id }}/files" class="tab">File Analysis</a>
     <a href="/repositories/{{ repository.id }}/mutations" class="tab">Mutation Testing</a>
+    <a href="/repositories/{{ repository.id }}/diagrams" class="tab">Diagrams</a>
 </nav>
 
 {% match architecture_summary %} {% when Some with (summary) %}
