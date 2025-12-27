@@ -120,15 +120,6 @@ impl DaemonStatus {
     }
 }
 
-/// A task to be processed by an endpoint worker
-struct AnalysisTask {
-    repository_id: i64,
-    /// Original file path (for DB storage and display)
-    file_path: PathBuf,
-    content: String,
-    content_hash: String,
-}
-
 /// The type of analysis to perform for a task
 #[derive(Debug, Clone, Copy)]
 enum AnalysisTaskType {
@@ -140,8 +131,8 @@ enum AnalysisTaskType {
     DiagramExtraction(DiagramType),
 }
 
-/// A generic analysis task that can be used for different analysis types
-struct GenericAnalysisTask {
+/// An analysis task to be processed by a worker
+struct AnalysisTask {
     repository_id: i64,
     file_path: PathBuf,
     content: String,
@@ -576,11 +567,9 @@ impl Daemon {
         file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
-        // Create work queue channel
         let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
         let rx = Arc::new(TokioMutex::new(rx));
 
-        // Spawn worker tasks for each endpoint
         let mut worker_handles = Vec::new();
         for endpoint in endpoints {
             let worker_rx = Arc::clone(&rx);
@@ -590,12 +579,11 @@ impl Daemon {
 
             let handle =
                 tokio::spawn(
-                    async move { endpoint_worker(endpoint, worker_rx, db, should_stop).await },
+                    async move { analysis_worker(endpoint, worker_rx, db, should_stop).await },
                 );
             worker_handles.push(handle);
         }
 
-        // Send tasks to the work queue
         let repository_id = repo.id;
         let mut tasks_sent = 0;
 
@@ -626,6 +614,7 @@ impl Daemon {
                 file_path: file_path.clone(),
                 content: content.clone(),
                 content_hash: content_hash.clone(),
+                task_type: AnalysisTaskType::CodeUnderstanding,
             };
 
             if tx.send(task).await.is_err() {
@@ -652,7 +641,7 @@ impl Daemon {
         file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
-        let (tx, rx) = mpsc::channel::<GenericAnalysisTask>(100);
+        let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
         let rx = Arc::new(TokioMutex::new(rx));
 
         let mut worker_handles = Vec::new();
@@ -662,9 +651,10 @@ impl Daemon {
             let should_stop = Arc::clone(&self.should_stop);
             let endpoint = endpoint.clone();
 
-            let handle = tokio::spawn(async move {
-                generic_analysis_worker(endpoint, worker_rx, db, should_stop).await
-            });
+            let handle =
+                tokio::spawn(
+                    async move { analysis_worker(endpoint, worker_rx, db, should_stop).await },
+                );
             worker_handles.push(handle);
         }
 
@@ -693,7 +683,7 @@ impl Daemon {
                 continue;
             }
 
-            let task = GenericAnalysisTask {
+            let task = AnalysisTask {
                 repository_id,
                 file_path: file_path.clone(),
                 content: content.clone(),
@@ -725,7 +715,7 @@ impl Daemon {
         file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
-        let (tx, rx) = mpsc::channel::<GenericAnalysisTask>(100);
+        let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
         let rx = Arc::new(TokioMutex::new(rx));
 
         let mut worker_handles = Vec::new();
@@ -735,9 +725,10 @@ impl Daemon {
             let should_stop = Arc::clone(&self.should_stop);
             let endpoint = endpoint.clone();
 
-            let handle = tokio::spawn(async move {
-                generic_analysis_worker(endpoint, worker_rx, db, should_stop).await
-            });
+            let handle =
+                tokio::spawn(
+                    async move { analysis_worker(endpoint, worker_rx, db, should_stop).await },
+                );
             worker_handles.push(handle);
         }
 
@@ -766,7 +757,7 @@ impl Daemon {
                     continue;
                 }
 
-                let task = GenericAnalysisTask {
+                let task = AnalysisTask {
                     repository_id,
                     file_path: file_path.clone(),
                     content: content.clone(),
@@ -1434,128 +1425,10 @@ impl Daemon {
     }
 }
 
-/// Worker function that pulls tasks from the queue and processes them
-async fn endpoint_worker(
+/// Worker function for analysis tasks
+async fn analysis_worker(
     endpoint: OllamaEndpoint,
     receiver: Arc<TokioMutex<mpsc::Receiver<AnalysisTask>>>,
-    db: Database,
-    should_stop: Arc<AtomicBool>,
-) {
-    let client = OllamaClient::new(&endpoint.url, &endpoint.model);
-
-    // Check if endpoint is available
-    if !client.is_available().await {
-        tracing::warn!(
-            "Ollama endpoint '{}' at {} is not available, skipping",
-            endpoint.name,
-            endpoint.url
-        );
-        return;
-    }
-
-    tracing::info!(
-        "Worker started for endpoint '{}' ({})",
-        endpoint.name,
-        endpoint.url
-    );
-
-    loop {
-        // Check if we should stop
-        if should_stop.load(Ordering::SeqCst) {
-            tracing::debug!(
-                "Worker for '{}' stopping due to shutdown signal",
-                endpoint.name
-            );
-            break;
-        }
-
-        // Try to get a task from the queue, with shutdown check
-        let task = {
-            let mut rx = receiver.lock().await;
-            tokio::select! {
-                task = rx.recv() => task,
-                _ = wait_for_stop_signal(&should_stop) => {
-                    tracing::debug!(
-                        "Worker for '{}' stopping due to shutdown signal",
-                        endpoint.name
-                    );
-                    break;
-                }
-            }
-        };
-
-        let task = match task {
-            Some(t) => t,
-            None => {
-                // Channel closed, no more tasks
-                tracing::debug!("Worker for '{}' finished - no more tasks", endpoint.name);
-                break;
-            }
-        };
-
-        // Process the task
-        let file_path_str = task.file_path.to_string_lossy().to_string();
-        tracing::debug!("Worker '{}' analyzing: {}", endpoint.name, file_path_str);
-
-        // Build the analysis prompt
-        let prompt = format!(
-            "Analyze the following Rust code and provide a brief summary of what it does:\n\n\
-             File: {}\n\n\
-             ```rust\n{}\n```\n\n\
-             Provide a concise analysis including:\n\
-             1. Purpose of the code\n\
-             2. Key functions/structs\n\
-             3. Any potential issues or improvements\n
-             4. Up to two specific code modification recommendations\n\n
-             IMPORTANT: Respond only in English (or code)",
-            file_path_str, task.content
-        );
-
-        // Run code understanding analysis
-        match client.generate(&prompt).await {
-            Ok(result) => {
-                tracing::info!(
-                    "Worker '{}' completed analysis of {}",
-                    endpoint.name,
-                    file_path_str
-                );
-
-                // Determine severity from result (simple heuristic)
-                let severity = determine_severity(&result);
-
-                // Save result to database
-                if let Err(e) = db
-                    .save_analysis_result(
-                        task.repository_id,
-                        &file_path_str,
-                        &AnalysisType::CodeUnderstanding.to_string(),
-                        &result,
-                        severity.as_deref(),
-                        Some(&task.content_hash),
-                    )
-                    .await
-                {
-                    tracing::warn!("Failed to save analysis result: {}", e);
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Worker '{}' failed to analyze {}: {}",
-                    endpoint.name,
-                    file_path_str,
-                    e
-                );
-            }
-        }
-    }
-
-    tracing::info!("Worker for endpoint '{}' stopped", endpoint.name);
-}
-
-/// Worker function for generic analysis tasks (architecture file analysis, diagram extraction)
-async fn generic_analysis_worker(
-    endpoint: OllamaEndpoint,
-    receiver: Arc<TokioMutex<mpsc::Receiver<GenericAnalysisTask>>>,
     db: Database,
     should_stop: Arc<AtomicBool>,
 ) {
@@ -1628,9 +1501,19 @@ async fn generic_analysis_worker(
                 (prompt, analysis_type)
             }
             AnalysisTaskType::CodeUnderstanding => {
-                // This shouldn't happen - code understanding uses the original worker
-                tracing::warn!("CodeUnderstanding task sent to generic worker, skipping");
-                continue;
+                let prompt = format!(
+                    "Analyze the following Rust code and provide a brief summary of what it does:\n\n\
+                     File: {}\n\n\
+                     ```rust\n{}\n```\n\n\
+                     Provide a concise analysis including:\n\
+                     1. Purpose of the code\n\
+                     2. Key functions/structs\n\
+                     3. Any potential issues or improvements\n\
+                     4. Up to two specific code modification recommendations\n\n\
+                     IMPORTANT: Respond only in English (or code)",
+                    file_path_str, task.content
+                );
+                (prompt, AnalysisType::CodeUnderstanding.to_string())
             }
         };
 

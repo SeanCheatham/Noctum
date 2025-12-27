@@ -505,6 +505,7 @@ impl Database {
     }
 
     /// Save a new diagram (inserts new row, keeping history)
+    #[allow(clippy::too_many_arguments)]
     pub async fn save_diagram(
         &self,
         repository_id: i64,
