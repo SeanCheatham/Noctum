@@ -22,7 +22,12 @@
         />
         <link rel="manifest" href="/static/site.webmanifest" />
         <title>{% block title %}Noctum{% endblock %}</title>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.3/purify.min.js" integrity="sha512-Ll+TuDvrWDNNRnFFIM8dOiw7Go7dsHyxRp4RutiIFW/wm3DgDmCnRZow6AqbXnCbpWu93yM1O34q+4ggzGeXVA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.3/purify.min.js"
+            integrity="sha512-Ll+TuDvrWDNNRnFFIM8dOiw7Go7dsHyxRp4RutiIFW/wm3DgDmCnRZow6AqbXnCbpWu93yM1O34q+4ggzGeXVA=="
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"
+        ></script>
         <style>
             :root {
                 --bg-primary: #000000;
@@ -53,9 +58,9 @@
             }
 
             .container {
-                max-width: 1200px;
+                max-width: none;
                 margin: 0 auto;
-                padding: 0 1rem;
+                padding: 0 2rem;
             }
 
             header {
@@ -221,7 +226,9 @@
                 text-decoration: none;
                 border-bottom: 2px solid transparent;
                 margin-bottom: -1px;
-                transition: color 0.2s, border-color 0.2s;
+                transition:
+                    color 0.2s,
+                    border-color 0.2s;
             }
 
             .tab:hover {

@@ -50,12 +50,6 @@
     .score-survived {
         color: #f85149;
     }
-    .score-timeout {
-        color: #d29922;
-    }
-    .score-compile {
-        color: var(--text-secondary);
-    }
     .score-good {
         color: #3fb950;
     }
@@ -64,6 +58,46 @@
     }
     .score-bad {
         color: #f85149;
+    }
+
+    /* Filter controls */
+    .filter-controls {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .filter-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .filter-label {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+    .filter-select,
+    .filter-input {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 0.375rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.875rem;
+    }
+    .filter-input {
+        min-width: 200px;
+    }
+    .filter-select:focus,
+    .filter-input:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+    .result-count {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin-left: auto;
     }
 
     .mutation-table {
@@ -82,21 +116,26 @@
         font-weight: 600;
         position: sticky;
         top: 0;
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .mutation-table th:hover {
+        background: var(--bg-secondary);
+    }
+    .mutation-table th .sort-indicator {
+        margin-left: 0.5rem;
+        opacity: 0.3;
+    }
+    .mutation-table th.sorted .sort-indicator {
+        opacity: 1;
     }
     .mutation-table tbody tr:hover {
         background: var(--bg-tertiary);
     }
 
-    .code-cell {
-        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
-        font-size: 0.8125rem;
-        max-width: 200px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
     .file-cell {
-        max-width: 250px;
+        max-width: 300px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -118,19 +157,6 @@
         background: rgba(248, 81, 73, 0.2);
         color: #f85149;
     }
-    .outcome-timeout {
-        background: rgba(210, 153, 34, 0.2);
-        color: #d29922;
-    }
-    .outcome-compile_error {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-    }
-
-    .mutation-type {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-    }
 
     .empty-state {
         color: var(--text-secondary);
@@ -149,6 +175,9 @@
     .mutation-row:hover {
         background: var(--bg-tertiary);
     }
+    .mutation-row.hidden-row {
+        display: none;
+    }
     .expand-icon {
         display: inline-block;
         width: 1rem;
@@ -166,9 +195,29 @@
     .mutation-details.show {
         display: table-row;
     }
+    .mutation-details.hidden-row {
+        display: none !important;
+    }
     .mutation-details td {
         padding: 1rem;
         border-bottom: 1px solid var(--border);
+    }
+    .details-grid {
+        display: grid;
+        gap: 0.75rem;
+    }
+    .details-item {
+        color: var(--text-secondary);
+    }
+    .details-item strong {
+        color: var(--text-primary);
+    }
+    .details-item code {
+        background: var(--bg-primary);
+        padding: 0.125rem 0.375rem;
+        border-radius: 3px;
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 0.8125rem;
     }
     .diff-container {
         font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
@@ -177,6 +226,7 @@
         border-radius: 4px;
         padding: 0.75rem;
         overflow-x: auto;
+        margin-top: 0.5rem;
     }
     .diff-line {
         display: flex;
@@ -213,10 +263,18 @@
 </div>
 
 <nav class="tabs">
-    <a href="/repositories/{{ repository.id }}/architecture" class="tab">Architecture</a>
-    <a href="/repositories/{{ repository.id }}/files" class="tab">File Analysis</a>
-    <a href="/repositories/{{ repository.id }}/mutations" class="tab active">Mutation Testing</a>
-    <a href="/repositories/{{ repository.id }}/diagrams" class="tab">Diagrams</a>
+    <a href="/repositories/{{ repository.id }}/architecture" class="tab"
+        >Architecture</a
+    >
+    <a href="/repositories/{{ repository.id }}/files" class="tab"
+        >File Analysis</a
+    >
+    <a href="/repositories/{{ repository.id }}/mutations" class="tab active"
+        >Mutation Testing</a
+    >
+    <a href="/repositories/{{ repository.id }}/diagrams" class="tab"
+        >Diagrams</a
+    >
 </nav>
 
 <div class="summary-grid">
@@ -231,16 +289,6 @@
     <div class="summary-card">
         <div class="summary-value score-survived">{{ summary.survived }}</div>
         <div class="summary-label">Survived</div>
-    </div>
-    <div class="summary-card">
-        <div class="summary-value score-timeout">{{ summary.timeout }}</div>
-        <div class="summary-label">Timeout</div>
-    </div>
-    <div class="summary-card">
-        <div class="summary-value score-compile">
-            {{ summary.compile_error }}
-        </div>
-        <div class="summary-label">Compile Error</div>
     </div>
     <div class="summary-card">
         <div class="summary-value">{{ mutation_score_percent }}%</div>
@@ -259,24 +307,66 @@
         </p>
     </div>
     {% else %}
+    <div class="filter-controls">
+        <div class="filter-group">
+            <label class="filter-label" for="outcome-filter">Outcome:</label>
+            <select
+                id="outcome-filter"
+                class="filter-select"
+                onchange="applyFilters()"
+            >
+                <option value="all">All</option>
+                <option value="killed">Killed</option>
+                <option value="survived">Survived</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label class="filter-label" for="file-filter">File:</label>
+            <input
+                type="text"
+                id="file-filter"
+                class="filter-input"
+                placeholder="Filter by file path..."
+                oninput="applyFilters()"
+            />
+        </div>
+        <div class="result-count">
+            <span id="visible-count">0</span> of
+            <span id="total-count">0</span> mutations
+        </div>
+    </div>
     <div class="table-container">
-        <table class="mutation-table">
+        <table class="mutation-table" id="mutation-table">
             <thead>
                 <tr>
-                    <th>File</th>
-                    <th>Description</th>
-                    <th>Outcome</th>
-                    <th>Killing Test</th>
+                    <th data-sort="file" onclick="sortTable('file')">
+                        File <span class="sort-indicator">&#9650;</span>
+                    </th>
+                    <th data-sort="outcome" onclick="sortTable('outcome')">
+                        Outcome <span class="sort-indicator">&#9650;</span>
+                    </th>
+                    <th
+                        data-sort="description"
+                        onclick="sortTable('description')"
+                    >
+                        Description <span class="sort-indicator">&#9650;</span>
+                    </th>
                 </tr>
             </thead>
-            <tbody>
-                {% for result in results %}
-                <tr class="mutation-row" onclick="toggleDetails(this)">
+            <tbody id="mutation-tbody">
+                {% for result in results %} {% if result.test_outcome !=
+                "timeout" && result.test_outcome != "compile_error" %}
+                <tr
+                    class="mutation-row"
+                    data-file="{{ result.file_path }}"
+                    data-outcome="{{ result.test_outcome }}"
+                    data-description="{{ result.description }}"
+                    onclick="toggleDetails(this)"
+                >
                     <td class="file-cell" title="{{ result.file_path }}">
                         <span class="expand-icon">&#9654;</span>{{
                         result.file_path }}
                     </td>
-                    <td class="description-cell">{{ result.description }}</td>
                     <td>
                         <span
                             class="outcome-badge outcome-{{ result.test_outcome }}"
@@ -284,36 +374,41 @@
                             {{ result.test_outcome }}
                         </span>
                     </td>
-                    <td class="code-cell">
-                        {% match result.killing_test %} {% when Some with (test)
-                        %}
-                        <code title="{{ test }}">{{ test }}</code>
-                        {% when None %} - {% endmatch %}
-                    </td>
+                    <td class="description-cell">{{ result.description }}</td>
                 </tr>
                 <tr class="mutation-details">
-                    <td colspan="4">
-                        <div
-                            style="
-                                margin-bottom: 0.5rem;
-                                color: var(--text-secondary);
-                            "
-                        >
-                            <strong>Reasoning:</strong> {{ result.reasoning }}
-                        </div>
-                        <div
-                            class="diff-container"
-                            data-replacements="{{ result.replacements_json }}"
-                        >
-                            <!-- Populated by JavaScript -->
+                    <td colspan="3">
+                        <div class="details-grid">
+                            <div class="details-item">
+                                <strong>Reasoning:</strong> {{ result.reasoning
+                                }}
+                            </div>
+                            {% match result.killing_test %} {% when Some with
+                            (test) %}
+                            <div class="details-item">
+                                <strong>Killing Test:</strong>
+                                <code>{{ test }}</code>
+                            </div>
+                            {% when None %} {% endmatch %}
+                            <div class="details-item">
+                                <strong>Changes:</strong>
+                                <div
+                                    class="diff-container"
+                                    data-replacements="{{ result.replacements_json }}"
+                                >
+                                    <!-- Populated by JavaScript -->
+                                </div>
+                            </div>
                         </div>
                     </td>
                 </tr>
-                {% endfor %}
+                {% endif %} {% endfor %}
             </tbody>
         </table>
     </div>
     <script>
+        let currentSort = { column: null, ascending: true };
+
         function toggleDetails(row) {
             const detailsRow = row.nextElementSibling;
             row.classList.toggle("expanded");
@@ -324,11 +419,15 @@
                 const container = detailsRow.querySelector(".diff-container");
                 if (container && !container.dataset.rendered) {
                     try {
-                        const replacements = JSON.parse(container.dataset.replacements);
+                        const replacements = JSON.parse(
+                            container.dataset.replacements,
+                        );
                         let html = "";
 
                         // Sort by line number ascending for display
-                        const sorted = [...replacements].sort((a, b) => a.line_number - b.line_number);
+                        const sorted = [...replacements].sort(
+                            (a, b) => a.line_number - b.line_number,
+                        );
                         for (const repl of sorted) {
                             const lineNum = repl.line_number;
                             const originalLine = repl.original_line || "";
@@ -366,7 +465,6 @@
             return div.innerHTML;
         }
 
-        // Convert backtick-wrapped text to <code> elements
         function formatBackticks(text) {
             return escapeHtml(text).replace(
                 /`([^`]+)`/g,
@@ -374,13 +472,110 @@
             );
         }
 
-        // Apply backtick formatting to all description cells on page load
+        function applyFilters() {
+            const outcomeFilter =
+                document.getElementById("outcome-filter").value;
+            const fileFilter = document
+                .getElementById("file-filter")
+                .value.toLowerCase();
+            const rows = document.querySelectorAll(".mutation-row");
+            let visibleCount = 0;
+
+            rows.forEach((row) => {
+                const outcome = row.dataset.outcome;
+                const file = row.dataset.file.toLowerCase();
+                const detailsRow = row.nextElementSibling;
+
+                const matchesOutcome =
+                    outcomeFilter === "all" || outcome === outcomeFilter;
+                const matchesFile = file.includes(fileFilter);
+
+                if (matchesOutcome && matchesFile) {
+                    row.classList.remove("hidden-row");
+                    detailsRow.classList.remove("hidden-row");
+                    visibleCount++;
+                } else {
+                    row.classList.add("hidden-row");
+                    detailsRow.classList.add("hidden-row");
+                    row.classList.remove("expanded");
+                    detailsRow.classList.remove("show");
+                }
+            });
+
+            document.getElementById("visible-count").textContent = visibleCount;
+        }
+
+        function sortTable(column) {
+            const tbody = document.getElementById("mutation-tbody");
+            const rows = Array.from(tbody.querySelectorAll(".mutation-row"));
+            const headers = document.querySelectorAll(".mutation-table th");
+
+            // Toggle sort direction if same column
+            if (currentSort.column === column) {
+                currentSort.ascending = !currentSort.ascending;
+            } else {
+                currentSort.column = column;
+                currentSort.ascending = true;
+            }
+
+            // Update header indicators
+            headers.forEach((th) => {
+                th.classList.remove("sorted");
+                const indicator = th.querySelector(".sort-indicator");
+                if (indicator) indicator.innerHTML = "&#9650;";
+            });
+            const activeHeader = document.querySelector(
+                `th[data-sort="${column}"]`,
+            );
+            activeHeader.classList.add("sorted");
+            activeHeader.querySelector(".sort-indicator").innerHTML =
+                currentSort.ascending ? "&#9650;" : "&#9660;";
+
+            // Sort rows
+            rows.sort((a, b) => {
+                let valA, valB;
+                switch (column) {
+                    case "file":
+                        valA = a.dataset.file.toLowerCase();
+                        valB = b.dataset.file.toLowerCase();
+                        break;
+                    case "outcome":
+                        valA = a.dataset.outcome;
+                        valB = b.dataset.outcome;
+                        break;
+                    case "description":
+                        valA = a.dataset.description.toLowerCase();
+                        valB = b.dataset.description.toLowerCase();
+                        break;
+                }
+                if (valA < valB) return currentSort.ascending ? -1 : 1;
+                if (valA > valB) return currentSort.ascending ? 1 : -1;
+                return 0;
+            });
+
+            // Re-append rows with their details
+            rows.forEach((row) => {
+                const detailsRow = row.nextElementSibling;
+                tbody.appendChild(row);
+                tbody.appendChild(detailsRow);
+            });
+        }
+
+        // Initialize on page load
         document.addEventListener("DOMContentLoaded", function () {
+            // Format description cells
             document
                 .querySelectorAll(".description-cell")
                 .forEach(function (cell) {
-                    cell.innerHTML = DOMPurify.sanitize(formatBackticks(cell.textContent));
+                    cell.innerHTML = DOMPurify.sanitize(
+                        formatBackticks(cell.textContent),
+                    );
                 });
+
+            // Update counts
+            const totalRows = document.querySelectorAll(".mutation-row").length;
+            document.getElementById("total-count").textContent = totalRows;
+            document.getElementById("visible-count").textContent = totalRows;
         });
     </script>
     {% endif %}
