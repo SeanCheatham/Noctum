@@ -4,14 +4,14 @@
 //! Includes retry logic for compile errors - re-prompts the LLM up to 3 times.
 
 use crate::analyzer::OllamaClient;
-use crate::mutation::analyzer::fix_mutation_with_error;
+use crate::language::Language;
+use crate::mutation::analyzer::{analyze_test_output, fix_mutation_with_error};
 use crate::mutation::{
     GeneratedMutation, MutationConfig, MutationTestResult, Replacement, TestOutcome,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Instant;
-use tokio::process::Command;
 
 /// Maximum number of times to retry a mutation that fails to compile.
 const MAX_COMPILE_RETRIES: u8 = 3;
@@ -20,9 +20,13 @@ const MAX_COMPILE_RETRIES: u8 = 3;
 ///
 /// This function:
 /// 1. Applies the mutation to the source file
-/// 2. Runs `cargo check` to verify compilation
+/// 2. Detects the language and runs a language-specific compile check
+///    - Rust: `cargo check`
+///    - TypeScript: `tsc --noEmit` (if tsconfig.json exists), otherwise skipped
 /// 3. If compilation fails, re-prompts the LLM to fix the mutation (up to 3 times)
-/// 4. Runs `cargo test` if compilation succeeds
+/// 4. Runs language-specific tests if compilation succeeds
+///    - Rust: `cargo test`
+///    - TypeScript: Uses detected test runner (vitest, jest, mocha, or npm test)
 /// 5. Reverts the file (always, even on error)
 /// 6. Returns the test result
 pub async fn execute_mutation_test(
@@ -70,11 +74,17 @@ pub async fn execute_mutation_test(
             .await
             .context("Failed to write mutated file")?;
 
-        // Fast compile check first
-        match run_cargo_check(repo_path, config.test_timeout_seconds).await {
+        // Detect language from repo path
+        let language = Language::detect(repo_path).unwrap_or(Language::Rust);
+
+        // Fast compile check first (language-specific)
+        match language
+            .compile_check(repo_path, config.test_timeout_seconds)
+            .await
+        {
             Ok(()) => {
-                // Compilation succeeded! Run the full test suite
-                let test_result = run_cargo_test(repo_path, config).await;
+                // Compilation succeeded! Run the full test suite (language-specific)
+                let test_result = run_tests(client, repo_path, language, config).await;
 
                 // Revert file before returning
                 revert_file(file_path, &original_content).await;
@@ -89,7 +99,8 @@ pub async fn execute_mutation_test(
                         Some(truncate_output(&output, config.max_test_output_bytes)),
                     ),
                     TestResult::CompileError { output } => {
-                        // This shouldn't happen since cargo check passed, but handle it
+                        // This shouldn't happen since compile check passed, but handle it
+                        // (can occur if test execution triggers additional compilation)
                         (
                             TestOutcome::CompileError,
                             None,
@@ -309,94 +320,103 @@ enum TestResult {
     Timeout,
 }
 
-/// Run `cargo check` to quickly verify compilation without running tests.
-///
-/// Returns `Ok(())` if compilation succeeds, `Err(error_output)` if it fails.
-async fn run_cargo_check(repo_path: &Path, timeout_secs: u64) -> Result<(), String> {
-    let timeout = std::time::Duration::from_secs(timeout_secs);
+/// Run language-specific tests and analyze output with LLM.
+async fn run_tests(
+    client: &OllamaClient,
+    repo_path: &Path,
+    language: Language,
+    config: &MutationConfig,
+) -> TestResult {
+    let test_result = language
+        .run_tests(repo_path, config.test_timeout_seconds)
+        .await;
 
-    let check_future = async {
-        Command::new("cargo")
-            .arg("check")
-            .current_dir(repo_path)
-            .output()
-            .await
-    };
+    // Use LLM to analyze test output for more accurate classification
+    // This works across all test runners and languages without custom extraction logic
+    if let Some(output) = &test_result.output {
+        // Determine exit code from outcome (approximate)
+        let exit_code = match test_result.outcome {
+            crate::language::TestOutcome::Passed => Some(0),
+            crate::language::TestOutcome::Failed => Some(1),
+            crate::language::TestOutcome::CompileError => Some(1),
+            crate::language::TestOutcome::Timeout => None,
+        };
 
-    match tokio::time::timeout(timeout, check_future).await {
-        Ok(Ok(output)) => {
-            if output.status.success() {
-                Ok(())
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                Err(stderr.to_string())
-            }
-        }
-        Ok(Err(e)) => Err(format!("Failed to run cargo check: {}", e)),
-        Err(_) => Err("Cargo check timed out".to_string()),
-    }
-}
-
-async fn run_cargo_test(repo_path: &Path, config: &MutationConfig) -> TestResult {
-    let timeout = std::time::Duration::from_secs(config.test_timeout_seconds);
-
-    let test_future = async {
-        Command::new("cargo")
-            .arg("test")
-            .arg("--")
-            .arg("--test-threads=1") // Deterministic ordering
-            .current_dir(repo_path)
-            .output()
-            .await
-    };
-
-    let result = tokio::time::timeout(timeout, test_future).await;
-
-    match result {
-        Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let combined = format!("{}\n{}", stdout, stderr);
-
-            if output.status.success() {
-                TestResult::Passed
-            } else {
-                // Check if it's a compile error
-                if stderr.contains("error[E") || stderr.contains("could not compile") {
-                    TestResult::CompileError { output: combined }
-                } else {
-                    // Extract failing test name
-                    let test_name =
-                        extract_failing_test(&combined).unwrap_or_else(|| "unknown".to_string());
-                    TestResult::Failed {
-                        test_name,
-                        output: combined,
+        match analyze_test_output(client, output, exit_code).await {
+            Ok(analysis) => {
+                match analysis.outcome.as_str() {
+                    "passed" => TestResult::Passed,
+                    "failed" => TestResult::Failed {
+                        test_name: analysis
+                            .failing_test
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        output: output.clone(),
+                    },
+                    "compile_error" => TestResult::CompileError {
+                        output: output.clone(),
+                    },
+                    "timeout" => TestResult::Timeout,
+                    _ => {
+                        // Fallback to original logic if LLM returns unexpected outcome
+                        tracing::warn!(
+                            "Unexpected LLM outcome: {}, falling back to original logic",
+                            analysis.outcome
+                        );
+                        match test_result.outcome {
+                            crate::language::TestOutcome::Passed => TestResult::Passed,
+                            crate::language::TestOutcome::Failed => TestResult::Failed {
+                                test_name: test_result
+                                    .failing_test
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                                output: output.clone(),
+                            },
+                            crate::language::TestOutcome::Timeout => TestResult::Timeout,
+                            crate::language::TestOutcome::CompileError => {
+                                TestResult::CompileError {
+                                    output: output.clone(),
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-        Ok(Err(e)) => TestResult::CompileError {
-            output: format!("Failed to run cargo test: {}", e),
-        },
-        Err(_) => {
-            tracing::debug!("Test timed out after {:?}", timeout);
-            TestResult::Timeout
-        }
-    }
-}
-
-/// Extract the name of the first failing test from cargo test output.
-fn extract_failing_test(output: &str) -> Option<String> {
-    // Look for patterns like "test module::test_name ... FAILED"
-    for line in output.lines() {
-        if line.contains("FAILED") && line.trim().starts_with("test ") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                return Some(parts[1].to_string());
+            Err(e) => {
+                // If LLM analysis fails, fall back to original logic
+                tracing::warn!(
+                    "Failed to analyze test output with LLM: {}, falling back to original logic",
+                    e
+                );
+                match test_result.outcome {
+                    crate::language::TestOutcome::Passed => TestResult::Passed,
+                    crate::language::TestOutcome::Failed => TestResult::Failed {
+                        test_name: test_result
+                            .failing_test
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        output: test_result.output.unwrap_or_default(),
+                    },
+                    crate::language::TestOutcome::Timeout => TestResult::Timeout,
+                    crate::language::TestOutcome::CompileError => TestResult::CompileError {
+                        output: test_result.output.unwrap_or_default(),
+                    },
+                }
             }
         }
+    } else {
+        // No output available, use original outcome
+        match test_result.outcome {
+            crate::language::TestOutcome::Passed => TestResult::Passed,
+            crate::language::TestOutcome::Failed => TestResult::Failed {
+                test_name: test_result
+                    .failing_test
+                    .unwrap_or_else(|| "unknown".to_string()),
+                output: String::new(),
+            },
+            crate::language::TestOutcome::Timeout => TestResult::Timeout,
+            crate::language::TestOutcome::CompileError => TestResult::CompileError {
+                output: String::new(),
+            },
+        }
     }
-    None
 }
 
 fn truncate_output(output: &str, max_bytes: usize) -> String {
@@ -410,56 +430,6 @@ fn truncate_output(output: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // extract_failing_test tests
-    // =========================================================================
-
-    #[test]
-    fn test_extract_failing_test() {
-        let output = r#"
-running 3 tests
-test foo::bar::test_one ... ok
-test foo::bar::test_two ... FAILED
-test foo::bar::test_three ... ok
-"#;
-        assert_eq!(
-            extract_failing_test(output),
-            Some("foo::bar::test_two".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_failing_test_none() {
-        let output = "running 1 test\ntest foo ... ok\n";
-        assert_eq!(extract_failing_test(output), None);
-    }
-
-    #[test]
-    fn test_extract_failing_test_multiple_failures() {
-        let output = r#"
-running 3 tests
-test first_test ... FAILED
-test second_test ... FAILED
-test third_test ... ok
-"#;
-        // Should return the first failure
-        assert_eq!(extract_failing_test(output), Some("first_test".to_string()));
-    }
-
-    #[test]
-    fn test_extract_failing_test_with_module_path() {
-        let output = "test crate::module::submodule::test_name ... FAILED";
-        assert_eq!(
-            extract_failing_test(output),
-            Some("crate::module::submodule::test_name".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_failing_test_empty() {
-        assert_eq!(extract_failing_test(""), None);
-    }
 
     // =========================================================================
     // truncate_output tests

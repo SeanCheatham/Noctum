@@ -5,6 +5,7 @@ mod db;
 mod diagram;
 mod language;
 mod mutation;
+mod project;
 mod web;
 
 use clap::{Parser, Subcommand};

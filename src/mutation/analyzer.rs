@@ -43,6 +43,19 @@ struct FixMutationResponse {
     description: String,
 }
 
+/// Result of analyzing test output
+#[derive(Debug, Deserialize, Clone)]
+pub struct TestOutputAnalysis {
+    /// The outcome: "passed", "failed", "compile_error", or "timeout"
+    pub outcome: String,
+    /// Name of the failing test (if any)
+    pub failing_test: Option<String>,
+    /// Brief description of the error type (if any)
+    /// This is useful for debugging/logging but may not always be used
+    #[allow(dead_code)]
+    pub error_type: Option<String>,
+}
+
 /// JSON schema for structured output (mutation analysis)
 fn analysis_schema() -> serde_json::Value {
     json!({
@@ -89,6 +102,29 @@ fn analysis_schema() -> serde_json::Value {
             }
         },
         "required": ["mutations"]
+    })
+}
+
+/// JSON schema for analyzing test output
+fn test_output_analysis_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "outcome": {
+                "type": "string",
+                "enum": ["passed", "failed", "compile_error", "timeout"],
+                "description": "The test outcome: 'passed' if all tests passed, 'failed' if a test failed, 'compile_error' if compilation/type checking failed, 'timeout' if tests timed out"
+            },
+            "failing_test": {
+                "type": ["string", "null"],
+                "description": "The name of the failing test (if any). Extract the exact test name from the output."
+            },
+            "error_type": {
+                "type": ["string", "null"],
+                "description": "Brief description of the error type if not a test failure (e.g., 'TypeScript type error', 'Module not found', 'Syntax error')"
+            }
+        },
+        "required": ["outcome"]
     })
 }
 
@@ -237,6 +273,54 @@ fn truncate_error(error: &str, max_len: usize) -> &str {
     } else {
         &error[..max_len]
     }
+}
+
+/// Generate the prompt for analyzing test output
+fn test_output_analysis_prompt(test_output: &str, exit_code: Option<i32>) -> String {
+    let truncated_output = truncate_error(test_output, 5000);
+    format!(
+        r#"Analyze this test output and determine the result.
+
+Test output:
+```
+{truncated_output}
+```
+
+Exit code: {exit_code:?}
+
+Determine:
+1. Did the tests pass? (outcome: "passed")
+2. Did a specific test fail? (outcome: "failed", provide failing_test name)
+3. Was there a compilation/type error? (outcome: "compile_error", provide error_type)
+4. Did tests timeout? (outcome: "timeout")
+
+Important:
+- Only mark as "failed" if you can identify a specific failing test name
+- Mark as "compile_error" for type errors, syntax errors, module resolution errors, build failures, etc.
+- Extract the exact test name if a test failed (e.g., "test_name", "describe > it > test_name", "src/file.test.ts > test_name")
+- Be conservative: if unsure whether it's a test failure or compile error, prefer "compile_error"
+
+Return JSON with: outcome, failing_test (if applicable), error_type (if applicable)"#,
+    )
+}
+
+/// Analyze test output using LLM to determine the outcome.
+///
+/// This is more flexible than custom extraction logic and works across all test runners and languages.
+pub async fn analyze_test_output(
+    client: &OllamaClient,
+    test_output: &str,
+    exit_code: Option<i32>,
+) -> Result<TestOutputAnalysis> {
+    let prompt = test_output_analysis_prompt(test_output, exit_code);
+    let schema = test_output_analysis_schema();
+
+    let analysis: TestOutputAnalysis = client
+        .generate_structured(&prompt, schema)
+        .await
+        .context("Failed to analyze test output")?;
+
+    Ok(analysis)
 }
 
 /// Line tolerance when searching for the "find" text.
