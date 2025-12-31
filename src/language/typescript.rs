@@ -164,13 +164,13 @@ impl TypeScriptLanguage {
                     // 1. Actual test failures (should be marked as "killed")
                     // 2. Compilation/type errors (should be marked as "compile error")
                     // 3. Setup/configuration errors (should be marked as "compile error")
-                    
+
                     let stderr_lower = stderr.to_lowercase();
                     let combined_lower = combined.to_lowercase();
-                    
+
                     // Extract failing test name - if found, it's a real test failure
                     let failing_test = extract_failing_test(&combined);
-                    
+
                     // Check for compilation/type error patterns
                     let is_compile_error = stderr_lower.contains("cannot find module")
                         || stderr_lower.contains("syntaxerror")
@@ -189,7 +189,7 @@ impl TypeScriptLanguage {
                         || combined_lower.contains("unexpected token")
                         // If there are errors but no specific failing test found, likely a compile/setup error
                         || (combined_lower.contains("error") && failing_test.is_none() && !combined_lower.contains("test"));
-                    
+
                     if failing_test.is_some() && !is_compile_error {
                         // Found a specific failing test and no compile errors - real test failure
                         TestRunResult {
