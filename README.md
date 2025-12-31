@@ -11,13 +11,17 @@ There's a variety of tools which offer realtime coding assistance, ranging from 
 
 Noctum is different. Noctum doesn't work in realtime. It works asynchronously while you're off-the-clock. Your laptop can still run local inference, just not quickly enough for us impatient humans. It's still capable of doing work, just at a slower pace than the infinite server farm powering Gemini.
 
+## Alpha Status
+
+This project is still in development. It's not "production-ready" yet. While the project is still in alpha, releases will be backwards-incompatible.
+
 ## Prerequisites
 
 Before running Noctum, you'll need:
 
 1. **Ollama**
    - Install from [ollama.com](https://ollama.com/)
-   - Pull a code analysis model: `ollama pull qwen2.5-coder` (or your preferred model)
+   - Pull a code analysis model: `ollama pull qwen2.5-coder` (or your preferred model, but this has been the model used in testing)
    - Ollama must be running before starting Noctum
 
 ### Rust Projects
