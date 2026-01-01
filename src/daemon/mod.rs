@@ -1750,7 +1750,7 @@ impl Daemon {
         );
 
         for rule in &repo_config.mutation.rules {
-            tracing::debug!(
+            tracing::info!(
                 "Verifying baseline for rule '{}': build='{}', test='{}'",
                 rule.glob,
                 rule.build_command,
@@ -1770,6 +1770,11 @@ impl Daemon {
                 );
                 continue;
             }
+            tracing::info!(
+                "Baseline build passed for rule '{}' ({}ms)",
+                rule.glob,
+                build_result.duration_ms
+            );
 
             // Run test command
             let test_result =
@@ -1784,8 +1789,13 @@ impl Daemon {
                 );
                 continue;
             }
+            tracing::info!(
+                "Baseline test passed for rule '{}' ({}ms)",
+                rule.glob,
+                test_result.duration_ms
+            );
 
-            tracing::debug!("Baseline passed for rule '{}'", rule.glob);
+            tracing::info!("Baseline passed for rule '{}'", rule.glob);
             valid_rules.push(rule);
         }
 
