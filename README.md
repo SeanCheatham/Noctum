@@ -15,6 +15,28 @@ Noctum is different. Noctum doesn't work in realtime. It works asynchronously wh
 
 This project is still in development. It's not "production-ready" yet. While the project is still in alpha, releases will be backwards-incompatible.
 
+## What does it actually do?
+
+Install the app/service, and specify at least one local code repository and one Ollama endpoint in the web dashboard. With the default configuration, Noctum will run from 10pm to 6am, and analyze the codebase during that time.
+
+During this window, Noctum will step through each repository and:
+- Copy the repository to a temporary directory
+- Identify the types of projects in the repository
+- Identify the source files for each project
+- Code understanding:
+   - Analyze each source file by running through LLM inference with a prompt to understand the code
+- Archictural analysis:
+   - Analyze each source file again by running through LLM inference with a prompt, this time focusing on extraction of architecture-related information
+   - Aggregate the architecture-related information into an architectural summary
+- Diagram generation:
+   - Analyze each source file again by running through LLM inference with a prompt, this time focusing on extraction of information to capture into diagrams
+   - Generate diagrams of the system
+- Mutation testing:
+   - Analyze each source file again by running through LLM inference with a prompt, this time focusing on key items for mutation testing and providing suggested mutations
+   - Run each mutation through the test suite and record the results
+
+The results are stored in a SQLite database and can be viewed in the web dashboard.
+
 ## Prerequisites
 
 Before running Noctum, you'll need:
@@ -25,10 +47,14 @@ Before running Noctum, you'll need:
    - Ollama must be running before starting Noctum
 
 ### Rust Projects
-Mutation testing requires compiling and test execution.
 1. **Rust Toolchain** (1.70+)
-   - Install via [rustup](https://rustup.rs/): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+   - Install via [rustup](https://rustup.rs/)
    - Used for analyzing Rust codebases and running mutation tests
+
+### JS/TS Projects
+1. **Node.js** (18+)
+   - Install via [Node.js](https://nodejs.org/)
+   - Used for analyzing JavaScript/TypeScript codebases and running mutation tests
 
 ### Other Languages
 Coming "soon"
@@ -117,26 +143,6 @@ Noctum looks for a config file at `~/.config/noctum/config.toml`. See [`config.e
 | `schedule.start_hour` | `22` | Start hour (0-23) of the analysis window |
 | `schedule.end_hour` | `6` | End hour (0-23) of the analysis window |
 | `schedule.check_interval_seconds` | `60` | How often to check schedule (seconds) |
-
-## Features
-
-### Implemented
-
-- Rust-oriented code analysis with LLM-powered insights
-- LLM-driven mutation testing
-- Web dashboard for configuration and results
-- Scheduled analysis with configurable time windows
-- Multi-endpoint Ollama support
-- SQLite database for persistent storage
-
-### Roadmap
-
-- Multi-language support (beyond Rust)
-- Automated unit test development
-- Code documentation generation
-- Code cleanup suggestions
-- Language translation (e.g., C to Rust)
-- Architectural diagram creation
 
 ## Architecture
 
