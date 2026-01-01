@@ -67,15 +67,7 @@ Coming "soon"
 curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh | sh
 ```
 
-To install and run as a background service (starts automatically on boot):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh | sh -s -- --service
-```
-
-This installs a systemd service on Linux or a launchd agent on macOS.
-
-To uninstall (removes binary and services, preserves config/data):
+To uninstall (removes binary, preserves config/data):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh | sh -s -- --uninstall
