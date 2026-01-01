@@ -3,9 +3,106 @@
 //! Handles loading and parsing `.noctum.toml` configuration files from repositories.
 //! This configuration controls which analysis features are enabled and defines
 //! build/test commands for mutation testing.
+//!
+//! # Security
+//!
+//! The `.noctum.toml` file can specify arbitrary shell commands that will be executed
+//! during mutation testing. This is a security-sensitive operation. Before loading
+//! a config file, we validate:
+//!
+//! 1. The file is owned by the current user (on Unix systems)
+//! 2. The file is not world-writable
+//!
+//! If these checks fail, the config file is rejected and a warning is logged.
 
 use serde::Deserialize;
 use std::path::Path;
+
+/// Result of validating a config file's security properties.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSecurityCheck {
+    /// Config file passes security checks
+    Safe,
+    /// Config file is owned by a different user
+    WrongOwner { expected_uid: u32, actual_uid: u32 },
+    /// Config file is world-writable
+    WorldWritable,
+    /// Could not read file metadata
+    MetadataError(String),
+    /// Security checks not available on this platform
+    #[allow(dead_code)]
+    NotSupported,
+}
+
+impl ConfigSecurityCheck {
+    /// Returns true if the config file is safe to use
+    #[allow(dead_code)] // Used in tests
+    pub fn is_safe(&self) -> bool {
+        matches!(self, ConfigSecurityCheck::Safe)
+    }
+}
+
+/// Check if a config file has safe ownership and permissions.
+///
+/// On Unix systems, this verifies:
+/// - The file is owned by the current user
+/// - The file is not world-writable (mode & 0o002 == 0)
+///
+/// On non-Unix systems, this always returns `Safe` (checks not supported).
+#[cfg(unix)]
+pub fn check_config_security(config_path: &Path) -> ConfigSecurityCheck {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = match std::fs::metadata(config_path) {
+        Ok(m) => m,
+        Err(e) => return ConfigSecurityCheck::MetadataError(e.to_string()),
+    };
+
+    // Get current user's UID by checking the ownership of a temp file we create.
+    // This avoids needing unsafe code or external crates.
+    let current_uid = match get_current_uid() {
+        Some(uid) => uid,
+        None => {
+            return ConfigSecurityCheck::MetadataError(
+                "Could not determine current user ID".to_string(),
+            )
+        }
+    };
+
+    let file_uid = metadata.uid();
+    if file_uid != current_uid {
+        return ConfigSecurityCheck::WrongOwner {
+            expected_uid: current_uid,
+            actual_uid: file_uid,
+        };
+    }
+
+    // Check permissions - file should not be world-writable
+    let mode = metadata.mode();
+    if mode & 0o002 != 0 {
+        return ConfigSecurityCheck::WorldWritable;
+    }
+
+    ConfigSecurityCheck::Safe
+}
+
+/// Get the current user's UID by creating a temp file and checking its ownership.
+/// This is a safe alternative to calling libc::getuid() directly.
+#[cfg(unix)]
+fn get_current_uid() -> Option<u32> {
+    use std::os::unix::fs::MetadataExt;
+
+    // Create a temp file - it will be owned by the current user
+    let temp_file = tempfile::NamedTempFile::new().ok()?;
+    let metadata = temp_file.path().metadata().ok()?;
+    Some(metadata.uid())
+}
+
+#[cfg(not(unix))]
+pub fn check_config_security(_config_path: &Path) -> ConfigSecurityCheck {
+    // Security checks not available on non-Unix platforms
+    ConfigSecurityCheck::NotSupported
+}
 
 /// Repository-level configuration loaded from `.noctum.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -74,14 +171,82 @@ impl RepoConfig {
 
     /// Load configuration from `.noctum.toml`.
     ///
-    /// Returns `Some(config)` if the file exists and is valid (or empty).
-    /// Returns `None` if the file doesn't exist.
+    /// Returns `Some(config)` if the file exists, passes security checks, and is valid.
+    /// Returns `None` if:
+    /// - The file doesn't exist
+    /// - The file fails security checks (wrong owner, world-writable)
+    /// - The file contains invalid TOML
+    ///
     /// Returns `Some(default)` if the file is empty or contains only whitespace.
+    ///
+    /// # Security
+    ///
+    /// Before loading, this function checks that the config file:
+    /// - Is owned by the current user (on Unix)
+    /// - Is not world-writable (on Unix)
+    ///
+    /// If these checks fail, a warning is logged and `None` is returned.
     pub fn load(repo_path: &Path) -> Option<Self> {
+        Self::load_internal(repo_path, true)
+    }
+
+    /// Load configuration without security checks.
+    ///
+    /// This should only be used in tests where config files are created in temp directories.
+    #[cfg(test)]
+    pub fn load_unchecked(repo_path: &Path) -> Option<Self> {
+        Self::load_internal(repo_path, false)
+    }
+
+    fn load_internal(repo_path: &Path, check_security: bool) -> Option<Self> {
         let config_path = repo_path.join(".noctum.toml");
         if !config_path.exists() {
             return None;
         }
+
+        // Perform security checks before loading
+        if check_security {
+            let security_check = check_config_security(&config_path);
+            match &security_check {
+                ConfigSecurityCheck::Safe => {}
+                #[cfg(not(unix))]
+                ConfigSecurityCheck::NotSupported => {}
+                ConfigSecurityCheck::WrongOwner {
+                    expected_uid,
+                    actual_uid,
+                } => {
+                    tracing::warn!(
+                        "Rejecting .noctum.toml at {:?}: file is owned by uid {} but current user is uid {}. \
+                         Config files with shell commands must be owned by the current user for security.",
+                        config_path,
+                        actual_uid,
+                        expected_uid
+                    );
+                    return None;
+                }
+                ConfigSecurityCheck::WorldWritable => {
+                    tracing::warn!(
+                        "Rejecting .noctum.toml at {:?}: file is world-writable. \
+                         Config files with shell commands must not be world-writable for security. \
+                         Fix with: chmod o-w {:?}",
+                        config_path,
+                        config_path
+                    );
+                    return None;
+                }
+                ConfigSecurityCheck::MetadataError(e) => {
+                    tracing::warn!(
+                        "Rejecting .noctum.toml at {:?}: could not read file metadata: {}",
+                        config_path,
+                        e
+                    );
+                    return None;
+                }
+                #[cfg(unix)]
+                ConfigSecurityCheck::NotSupported => {}
+            }
+        }
+
         let content = std::fs::read_to_string(&config_path).ok()?;
         // Empty file or whitespace-only returns default config
         if content.trim().is_empty() {
@@ -132,7 +297,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(temp_dir.path().join(".noctum.toml"), "").unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.mutation.rules.is_empty());
         // All enable flags default to false
         assert!(!config.enable_code_analysis);
@@ -146,7 +311,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(temp_dir.path().join(".noctum.toml"), "   \n\n  ").unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.mutation.rules.is_empty());
     }
 
@@ -167,7 +332,7 @@ timeout_seconds = 600
 "#;
         std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert_eq!(config.mutation.rules.len(), 2);
 
         let rust_rule = &config.mutation.rules[0];
@@ -188,7 +353,7 @@ timeout_seconds = 600
         let temp_dir = TempDir::new().unwrap();
         std::fs::write(temp_dir.path().join(".noctum.toml"), "invalid {{{{ toml").unwrap();
 
-        assert!(RepoConfig::load(temp_dir.path()).is_none());
+        assert!(RepoConfig::load_unchecked(temp_dir.path()).is_none());
     }
 
     #[test]
@@ -297,7 +462,7 @@ test_command = "cargo test"
 "#;
         std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.enable_code_analysis);
         assert!(config.enable_architecture_analysis);
         assert!(!config.enable_diagram_creation);
@@ -314,7 +479,7 @@ enable_code_analysis = true
 "#;
         std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.enable_code_analysis);
         assert!(!config.enable_architecture_analysis);
         assert!(!config.enable_diagram_creation);
@@ -335,7 +500,7 @@ test_command = "npm test"
 "#;
         std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.enable_mutation_testing);
         assert_eq!(config.copy_ignore.len(), 4);
         assert!(config.copy_ignore.contains(&"node_modules".to_string()));
@@ -352,7 +517,49 @@ enable_mutation_testing = true
 "#;
         std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
 
-        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.copy_ignore.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_security_check_safe_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join(".noctum.toml");
+        std::fs::write(&config_path, "enable_code_analysis = true").unwrap();
+
+        // File created by current user should be safe
+        let result = check_config_security(&config_path);
+        assert!(result.is_safe());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_security_check_world_writable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join(".noctum.toml");
+        std::fs::write(&config_path, "enable_code_analysis = true").unwrap();
+
+        // Make the file world-writable
+        let mut perms = std::fs::metadata(&config_path).unwrap().permissions();
+        perms.set_mode(0o666);
+        std::fs::set_permissions(&config_path, perms).unwrap();
+
+        let result = check_config_security(&config_path);
+        assert_eq!(result, ConfigSecurityCheck::WorldWritable);
+        assert!(!result.is_safe());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_security_check_nonexistent_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join(".noctum.toml");
+
+        let result = check_config_security(&config_path);
+        assert!(matches!(result, ConfigSecurityCheck::MetadataError(_)));
+        assert!(!result.is_safe());
     }
 }

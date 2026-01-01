@@ -160,6 +160,38 @@ fn copy_dir_with_ignore(src: &Path, dest: &Path, ignore_patterns: &[String]) -> 
                 target.clone()
             };
 
+            // Security check: Verify the resolved symlink target is within the source directory.
+            // This prevents symlinks from copying files outside the repository (e.g., /etc/passwd).
+            let canonical_src = match src.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        "Skipping symlink {:?}: could not canonicalize source directory: {}",
+                        src_path,
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            let canonical_target = match resolved_target.canonicalize() {
+                Ok(p) => p,
+                Err(_) => {
+                    // Target doesn't exist (broken symlink), skip silently
+                    continue;
+                }
+            };
+
+            if !canonical_target.starts_with(&canonical_src) {
+                tracing::warn!(
+                    "Skipping symlink {:?}: target {:?} is outside repository bounds {:?}",
+                    src_path,
+                    canonical_target,
+                    canonical_src
+                );
+                continue;
+            }
+
             if resolved_target.is_file() {
                 fs::copy(&resolved_target, &dest_path).map_err(|e| {
                     anyhow::anyhow!(
@@ -1687,6 +1719,24 @@ impl Daemon {
                 repo.name
             );
             return Ok(());
+        }
+
+        // Security notice: Log that we're about to execute user-defined commands
+        // The .noctum.toml file has already passed ownership/permission checks in RepoConfig::load()
+        tracing::info!(
+            "Executing shell commands from .noctum.toml for {} ({} rule(s)). \
+             Commands are executed in an isolated temp directory copy of the repository.",
+            repo.name,
+            repo_config.mutation.rules.len()
+        );
+        for (i, rule) in repo_config.mutation.rules.iter().enumerate() {
+            tracing::debug!(
+                "  Rule {}: glob='{}', build='{}', test='{}'",
+                i + 1,
+                rule.glob,
+                rule.build_command,
+                rule.test_command
+            );
         }
 
         // Run baseline verification for each rule (both build and test commands)

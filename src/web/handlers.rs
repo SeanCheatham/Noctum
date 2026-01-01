@@ -78,9 +78,29 @@ pub async fn add_repository(
             .into_response();
     }
 
-    tracing::info!("Adding repository: name={}, path={}", req.name, req.path);
+    // Canonicalize the path to get an absolute, normalized path.
+    // This resolves symlinks, removes `.` and `..` components, and ensures
+    // we store a consistent path representation in the database.
+    let canonical_path = match path.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            tracing::warn!("Failed to canonicalize path {}: {}", req.path, e);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "Failed to resolve path" })),
+            )
+                .into_response();
+        }
+    };
 
-    match state.db.add_repository(&req.path, &req.name).await {
+    tracing::info!(
+        "Adding repository: name={}, path={} (canonicalized from {})",
+        req.name,
+        canonical_path,
+        req.path
+    );
+
+    match state.db.add_repository(&canonical_path, &req.name).await {
         Ok(id) => {
             tracing::info!("Repository added successfully: id={}", id);
             // If we're in the scheduled window, trigger a scan so the new repo is processed immediately

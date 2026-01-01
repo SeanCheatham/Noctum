@@ -9,7 +9,7 @@ You spent $2,000 on a high-performance laptop because you need it to be snappy a
 
 There's a variety of tools which offer realtime coding assistance, ranging from Cursor to Claude CLI and everywhere in-between. They're great, but they're all reliant on cloud-based models and services. Local LLM inference simply isn't fast enough for realtime coding assistance on consumer devices, which is why we're stuck with the cloud options for now. A developer doesn't want to wait 10 minutes for an answer to a simple question.
 
-Noctum is different. Noctum doesn't work in realtime. It works asynchronously while you're off-the-clock. Your laptop can still run local inference, just not quickly enough for us impatient humans. It's still capable of doing work, just at a slower pace than the infinite server farm powering Gemini.
+Noctum is different. Noctum doesn't work in realtime. It works asynchronously while you're off-the-clock. Your laptop can still run local inference, but not quickly enough for us impatient humans. It's still capable of doing work, just at a slower pace than the infinite server farm powering Gemini.
 
 ## Alpha Status
 
