@@ -1,8 +1,8 @@
 //! Repository-level configuration.
 //!
 //! Handles loading and parsing `.noctum.toml` configuration files from repositories.
-//! This configuration is required for mutation testing and defines build/test commands
-//! for different file patterns.
+//! This configuration controls which analysis features are enabled and defines
+//! build/test commands for mutation testing.
 
 use serde::Deserialize;
 use std::path::Path;
@@ -10,6 +10,23 @@ use std::path::Path;
 /// Repository-level configuration loaded from `.noctum.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RepoConfig {
+    /// Enable code analysis (File Analysis tab). Default: false.
+    #[serde(default)]
+    pub enable_code_analysis: bool,
+
+    /// Enable architecture analysis (Architecture summary). Default: false.
+    #[serde(default)]
+    pub enable_architecture_analysis: bool,
+
+    /// Enable diagram creation (system architecture, data flow, etc.). Default: false.
+    #[serde(default)]
+    pub enable_diagram_creation: bool,
+
+    /// Enable mutation testing. Default: false.
+    /// Note: Also requires mutation rules to be configured.
+    #[serde(default)]
+    pub enable_mutation_testing: bool,
+
     /// Mutation testing configuration.
     #[serde(default)]
     pub mutation: MutationRepoConfig,
@@ -110,6 +127,11 @@ mod tests {
 
         let config = RepoConfig::load(temp_dir.path()).unwrap();
         assert!(config.mutation.rules.is_empty());
+        // All enable flags default to false
+        assert!(!config.enable_code_analysis);
+        assert!(!config.enable_architecture_analysis);
+        assert!(!config.enable_diagram_creation);
+        assert!(!config.enable_mutation_testing);
     }
 
     #[test]
@@ -248,5 +270,45 @@ timeout_seconds = 600
     #[test]
     fn test_default_timeout() {
         assert_eq!(default_timeout(), 300);
+    }
+
+    #[test]
+    fn test_load_with_enable_flags() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_content = r#"
+enable_code_analysis = true
+enable_architecture_analysis = true
+enable_diagram_creation = false
+enable_mutation_testing = true
+
+[[mutation.rules]]
+glob = "**/*.rs"
+build_command = "cargo check"
+test_command = "cargo test"
+"#;
+        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+
+        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        assert!(config.enable_code_analysis);
+        assert!(config.enable_architecture_analysis);
+        assert!(!config.enable_diagram_creation);
+        assert!(config.enable_mutation_testing);
+        assert_eq!(config.mutation.rules.len(), 1);
+    }
+
+    #[test]
+    fn test_load_partial_enable_flags() {
+        let temp_dir = TempDir::new().unwrap();
+        // Only set some flags, others should default to false
+        let config_content = r#"
+enable_code_analysis = true
+"#;
+        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+
+        let config = RepoConfig::load(temp_dir.path()).unwrap();
+        assert!(config.enable_code_analysis);
+        assert!(!config.enable_architecture_analysis);
+        assert!(!config.enable_diagram_creation);
+        assert!(!config.enable_mutation_testing);
     }
 }

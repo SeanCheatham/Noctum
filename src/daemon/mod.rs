@@ -481,6 +481,33 @@ impl Daemon {
             temp_repo_path.display()
         );
 
+        // Load repository-level configuration
+        let repo_config = RepoConfig::load(temp_repo_path).unwrap_or_default();
+
+        // Log which features are enabled
+        tracing::info!(
+            "Repository {} config: code_analysis={}, architecture_analysis={}, diagram_creation={}, mutation_testing={}",
+            repo.name,
+            repo_config.enable_code_analysis,
+            repo_config.enable_architecture_analysis,
+            repo_config.enable_diagram_creation,
+            repo_config.enable_mutation_testing
+        );
+
+        // Check if any analysis is enabled
+        let any_analysis_enabled = repo_config.enable_code_analysis
+            || repo_config.enable_architecture_analysis
+            || repo_config.enable_diagram_creation
+            || repo_config.enable_mutation_testing;
+
+        if !any_analysis_enabled {
+            tracing::info!(
+                "No analysis features enabled for {}, skipping",
+                repo.name
+            );
+            return Ok(false);
+        }
+
         // Discover projects in the repository
         let projects = discover_projects(temp_repo_path)?;
 
@@ -587,40 +614,84 @@ impl Daemon {
 
         // =========================================================================
         // PHASE 1: PARALLEL ANALYSIS
-        // Run code understanding, architecture file analysis, diagram extractions,
-        // and documentation analysis concurrently.
+        // Run enabled analysis types concurrently based on repo config.
         // =========================================================================
 
-        tracing::info!("Starting parallel analysis phase for {}", repo.name);
+        let mut code_changed = false;
+        let mut arch_changed = false;
+        let mut diagrams_changed = false;
+        let mut docs_changed = false;
 
-        // Run all analysis types in parallel using tokio::join!
-        let (code_result, arch_result, diagram_result, doc_result) = tokio::join!(
-            self.run_code_understanding_analysis(repo, &file_data, endpoints),
-            self.run_architecture_file_analysis(repo, &file_data, endpoints),
-            self.run_diagram_extractions(repo, &file_data, endpoints),
-            self.run_documentation_analysis(repo, &context_file_data, endpoints),
-        );
+        // Only run analyses that are enabled
+        let run_code = repo_config.enable_code_analysis;
+        let run_arch = repo_config.enable_architecture_analysis;
+        let run_diagrams = repo_config.enable_diagram_creation;
 
-        // Check results
-        let code_changed = code_result.unwrap_or_else(|e| {
-            tracing::warn!("Code understanding analysis failed: {}", e);
-            false
-        });
+        if run_code || run_arch || run_diagrams {
+            tracing::info!("Starting parallel analysis phase for {}", repo.name);
 
-        let arch_changed = arch_result.unwrap_or_else(|e| {
-            tracing::warn!("Architecture file analysis failed: {}", e);
-            false
-        });
+            // Run enabled analysis types in parallel
+            // We use Option futures to conditionally include each analysis
+            let code_future = async {
+                if run_code {
+                    self.run_code_understanding_analysis(repo, &file_data, endpoints)
+                        .await
+                } else {
+                    Ok(false)
+                }
+            };
 
-        let diagrams_changed = diagram_result.unwrap_or_else(|e| {
-            tracing::warn!("Diagram extraction failed: {}", e);
-            false
-        });
+            let arch_future = async {
+                if run_arch {
+                    self.run_architecture_file_analysis(repo, &file_data, endpoints)
+                        .await
+                } else {
+                    Ok(false)
+                }
+            };
 
-        let docs_changed = doc_result.unwrap_or_else(|e| {
-            tracing::warn!("Documentation analysis failed: {}", e);
-            false
-        });
+            let diagram_future = async {
+                if run_diagrams {
+                    self.run_diagram_extractions(repo, &file_data, endpoints)
+                        .await
+                } else {
+                    Ok(false)
+                }
+            };
+
+            // Documentation analysis is needed for architecture summary
+            let doc_future = async {
+                if run_arch {
+                    self.run_documentation_analysis(repo, &context_file_data, endpoints)
+                        .await
+                } else {
+                    Ok(false)
+                }
+            };
+
+            let (code_result, arch_result, diagram_result, doc_result) =
+                tokio::join!(code_future, arch_future, diagram_future, doc_future);
+
+            code_changed = code_result.unwrap_or_else(|e| {
+                tracing::warn!("Code understanding analysis failed: {}", e);
+                false
+            });
+
+            arch_changed = arch_result.unwrap_or_else(|e| {
+                tracing::warn!("Architecture file analysis failed: {}", e);
+                false
+            });
+
+            diagrams_changed = diagram_result.unwrap_or_else(|e| {
+                tracing::warn!("Diagram extraction failed: {}", e);
+                false
+            });
+
+            docs_changed = doc_result.unwrap_or_else(|e| {
+                tracing::warn!("Documentation analysis failed: {}", e);
+                false
+            });
+        }
 
         let any_changed = code_changed || arch_changed || diagrams_changed || docs_changed;
 
@@ -632,16 +703,32 @@ impl Daemon {
         // =========================================================================
         // PHASE 2: AGGREGATION
         // Generate architecture summary and D2 diagrams from the extracted data.
-        // These can also run in parallel since they're independent.
+        // Only run if the corresponding features are enabled.
         // =========================================================================
 
-        if any_changed {
+        let should_aggregate = any_changed && (run_arch || run_diagrams);
+        if should_aggregate {
             tracing::info!("Starting aggregation phase for {}", repo.name);
 
-            let (arch_summary_result, diagrams_result) = tokio::join!(
-                self.generate_architecture_summary(repo, endpoints),
-                self.generate_diagrams(repo, endpoints, &combined_hash),
-            );
+            let arch_summary_future = async {
+                if run_arch {
+                    self.generate_architecture_summary(repo, endpoints).await
+                } else {
+                    Ok(())
+                }
+            };
+
+            let diagrams_future = async {
+                if run_diagrams {
+                    self.generate_diagrams(repo, endpoints, &combined_hash)
+                        .await
+                } else {
+                    Ok(())
+                }
+            };
+
+            let (arch_summary_result, diagrams_result) =
+                tokio::join!(arch_summary_future, diagrams_future);
 
             if let Err(e) = arch_summary_result {
                 tracing::warn!(
@@ -654,7 +741,7 @@ impl Daemon {
             if let Err(e) = diagrams_result {
                 tracing::warn!("Failed to generate diagrams for {}: {}", repo.name, e);
             }
-        } else {
+        } else if !any_changed && (run_arch || run_diagrams) {
             tracing::debug!(
                 "Skipping aggregation phase for {} - no files changed",
                 repo.name
@@ -669,13 +756,22 @@ impl Daemon {
         // =========================================================================
         // PHASE 3: MUTATION TESTING
         // This must be sequential as it modifies files in the temp directory.
+        // Only run if mutation testing is enabled in the repo config.
         // =========================================================================
 
-        if let Err(e) = self
-            .run_mutation_testing(repo, endpoints, temp_repo_path, original_repo_path)
-            .await
-        {
-            tracing::warn!("Failed to run mutation testing for {}: {}", repo.name, e);
+        if repo_config.enable_mutation_testing {
+            if let Err(e) = self
+                .run_mutation_testing(
+                    repo,
+                    endpoints,
+                    temp_repo_path,
+                    original_repo_path,
+                    &repo_config,
+                )
+                .await
+            {
+                tracing::warn!("Failed to run mutation testing for {}: {}", repo.name, e);
+            }
         }
 
         // temp_dir is dropped here, cleaning up the temp copy
@@ -1409,6 +1505,7 @@ impl Daemon {
         endpoints: &[OllamaEndpoint],
         temp_repo_path: &Path,
         original_repo_path: &Path,
+        repo_config: &RepoConfig,
     ) -> anyhow::Result<()> {
         tracing::info!("Starting mutation testing for {}", repo.name);
 
@@ -1418,9 +1515,6 @@ impl Daemon {
                 Some(&format!("mutation testing {}", repo.name)),
             )
             .await?;
-
-        // Load repository-level configuration
-        let repo_config = RepoConfig::load(temp_repo_path).unwrap_or_default();
 
         if repo_config.mutation.rules.is_empty() {
             tracing::info!(
