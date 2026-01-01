@@ -154,12 +154,14 @@ uninstall_noctum() {
 
     if [ -f "$BINARY_PATH" ]; then
         info "Removing binary..."
-        if [ -w "$BINARY_PATH" ]; then
-            rm -f "$BINARY_PATH"
+        # Try without sudo first, fall back to sudo if it fails
+        if rm -f "$BINARY_PATH" 2>/dev/null; then
+            info "Binary removed."
         else
+            warn "Requesting sudo permission to remove $BINARY_PATH"
             sudo rm -f "$BINARY_PATH"
+            info "Binary removed."
         fi
-        info "Binary removed."
     else
         warn "Binary not found at $BINARY_PATH"
     fi
