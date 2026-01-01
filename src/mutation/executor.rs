@@ -79,9 +79,14 @@ pub async fn execute_mutation_test(
         match run_build_command(repo_path, build_command, timeout_seconds).await {
             Ok(()) => {
                 // Compilation succeeded! Run the test suite using configured test command
-                let test_result =
-                    run_tests_with_command(client, repo_path, test_command, timeout_seconds, config)
-                        .await;
+                let test_result = run_tests_with_command(
+                    client,
+                    repo_path,
+                    test_command,
+                    timeout_seconds,
+                    config,
+                )
+                .await;
 
                 // Revert file before returning
                 revert_file(file_path, &original_content).await;

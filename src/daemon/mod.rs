@@ -501,10 +501,7 @@ impl Daemon {
             || repo_config.enable_mutation_testing;
 
         if !any_analysis_enabled {
-            tracing::info!(
-                "No analysis features enabled for {}, skipping",
-                repo.name
-            );
+            tracing::info!("No analysis features enabled for {}, skipping", repo.name);
             return Ok(false);
         }
 

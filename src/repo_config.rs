@@ -213,7 +213,9 @@ timeout_seconds = 600
         };
 
         assert!(config.find_rule("packages/frontend/src/App.tsx").is_some());
-        assert!(config.find_rule("packages/frontend/components/Button.tsx").is_some());
+        assert!(config
+            .find_rule("packages/frontend/components/Button.tsx")
+            .is_some());
         assert!(config.find_rule("packages/backend/src/index.ts").is_none());
         assert!(config.find_rule("src/App.tsx").is_none());
     }
