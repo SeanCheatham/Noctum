@@ -6,6 +6,7 @@ mod diagram;
 mod language;
 mod mutation;
 mod project;
+mod repo_config;
 mod web;
 
 use clap::{Parser, Subcommand};

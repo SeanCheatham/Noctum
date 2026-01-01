@@ -4,14 +4,15 @@
 //! Includes retry logic for compile errors - re-prompts the LLM up to 3 times.
 
 use crate::analyzer::OllamaClient;
-use crate::language::Language;
 use crate::mutation::analyzer::{analyze_test_output, fix_mutation_with_error};
 use crate::mutation::{
     GeneratedMutation, MutationConfig, MutationTestResult, Replacement, TestOutcome,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::Stdio;
 use std::time::Instant;
+use tokio::time::Duration;
 
 /// Maximum number of times to retry a mutation that fails to compile.
 const MAX_COMPILE_RETRIES: u8 = 3;
@@ -20,21 +21,21 @@ const MAX_COMPILE_RETRIES: u8 = 3;
 ///
 /// This function:
 /// 1. Applies the mutation to the source file
-/// 2. Detects the language and runs a language-specific compile check
-///    - Rust: `cargo check`
-///    - TypeScript: `tsc --noEmit` (if tsconfig.json exists), otherwise skipped
+/// 2. Runs the configured build command to check compilation
 /// 3. If compilation fails, re-prompts the LLM to fix the mutation (up to 3 times)
-/// 4. Runs language-specific tests if compilation succeeds
-///    - Rust: `cargo test`
-///    - TypeScript: Uses detected test runner (vitest, jest, mocha, or npm test)
+/// 4. Runs the configured test command if compilation succeeds
 /// 5. Reverts the file (always, even on error)
 /// 6. Returns the test result
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_mutation_test(
     client: &OllamaClient,
     repo_path: &Path,
     mutation: GeneratedMutation,
     original_code: &str,
     config: &MutationConfig,
+    build_command: &str,
+    test_command: &str,
+    timeout_seconds: u64,
 ) -> Result<MutationTestResult> {
     let start_time = Instant::now();
 
@@ -74,17 +75,13 @@ pub async fn execute_mutation_test(
             .await
             .context("Failed to write mutated file")?;
 
-        // Detect language from repo path
-        let language = Language::detect(repo_path).unwrap_or(Language::Rust);
-
-        // Fast compile check first (language-specific)
-        match language
-            .compile_check(repo_path, config.test_timeout_seconds)
-            .await
-        {
+        // Fast compile check first using configured build command
+        match run_build_command(repo_path, build_command, timeout_seconds).await {
             Ok(()) => {
-                // Compilation succeeded! Run the full test suite (language-specific)
-                let test_result = run_tests(client, repo_path, language, config).await;
+                // Compilation succeeded! Run the test suite using configured test command
+                let test_result =
+                    run_tests_with_command(client, repo_path, test_command, timeout_seconds, config)
+                        .await;
 
                 // Revert file before returning
                 revert_file(file_path, &original_content).await;
@@ -320,101 +317,143 @@ enum TestResult {
     Timeout,
 }
 
-/// Run language-specific tests and analyze output with LLM.
-async fn run_tests(
-    client: &OllamaClient,
+/// Run the build command and check if compilation succeeds.
+///
+/// Returns `Ok(())` if the command succeeds (exit code 0),
+/// or `Err(output)` with the command output if it fails.
+async fn run_build_command(
     repo_path: &Path,
-    language: Language,
-    config: &MutationConfig,
-) -> TestResult {
-    let test_result = language
-        .run_tests(repo_path, config.test_timeout_seconds)
-        .await;
+    build_command: &str,
+    timeout_seconds: u64,
+) -> std::result::Result<(), String> {
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(build_command)
+        .current_dir(repo_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
 
-    // Use LLM to analyze test output for more accurate classification
-    // This works across all test runners and languages without custom extraction logic
-    if let Some(output) = &test_result.output {
-        // Determine exit code from outcome (approximate)
-        let exit_code = match test_result.outcome {
-            crate::language::TestOutcome::Passed => Some(0),
-            crate::language::TestOutcome::Failed => Some(1),
-            crate::language::TestOutcome::CompileError => Some(1),
-            crate::language::TestOutcome::Timeout => None,
-        };
+    let child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(format!("Failed to spawn build command: {}", e));
+        }
+    };
 
-        match analyze_test_output(client, output, exit_code).await {
-            Ok(analysis) => {
-                match analysis.outcome.as_str() {
-                    "passed" => TestResult::Passed,
-                    "failed" => TestResult::Failed {
-                        test_name: analysis
-                            .failing_test
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        output: output.clone(),
-                    },
-                    "compile_error" => TestResult::CompileError {
-                        output: output.clone(),
-                    },
-                    "timeout" => TestResult::Timeout,
-                    _ => {
-                        // Fallback to original logic if LLM returns unexpected outcome
-                        tracing::warn!(
-                            "Unexpected LLM outcome: {}, falling back to original logic",
-                            analysis.outcome
-                        );
-                        match test_result.outcome {
-                            crate::language::TestOutcome::Passed => TestResult::Passed,
-                            crate::language::TestOutcome::Failed => TestResult::Failed {
-                                test_name: test_result
-                                    .failing_test
-                                    .unwrap_or_else(|| "unknown".to_string()),
-                                output: output.clone(),
-                            },
-                            crate::language::TestOutcome::Timeout => TestResult::Timeout,
-                            crate::language::TestOutcome::CompileError => {
-                                TestResult::CompileError {
-                                    output: output.clone(),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                // If LLM analysis fails, fall back to original logic
-                tracing::warn!(
-                    "Failed to analyze test output with LLM: {}, falling back to original logic",
-                    e
-                );
-                match test_result.outcome {
-                    crate::language::TestOutcome::Passed => TestResult::Passed,
-                    crate::language::TestOutcome::Failed => TestResult::Failed {
-                        test_name: test_result
-                            .failing_test
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        output: test_result.output.unwrap_or_default(),
-                    },
-                    crate::language::TestOutcome::Timeout => TestResult::Timeout,
-                    crate::language::TestOutcome::CompileError => TestResult::CompileError {
-                        output: test_result.output.unwrap_or_default(),
-                    },
-                }
+    let timeout = Duration::from_secs(timeout_seconds);
+    let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
+
+    match result {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("{}{}", stdout, stderr))
             }
         }
-    } else {
-        // No output available, use original outcome
-        match test_result.outcome {
-            crate::language::TestOutcome::Passed => TestResult::Passed,
-            crate::language::TestOutcome::Failed => TestResult::Failed {
-                test_name: test_result
+        Ok(Err(e)) => Err(format!("Build command execution error: {}", e)),
+        Err(_) => Err(format!(
+            "Build command timed out after {} seconds",
+            timeout_seconds
+        )),
+    }
+}
+
+/// Run test command and analyze output with LLM.
+async fn run_tests_with_command(
+    client: &OllamaClient,
+    repo_path: &Path,
+    test_command: &str,
+    timeout_seconds: u64,
+    config: &MutationConfig,
+) -> TestResult {
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(test_command)
+        .current_dir(repo_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    let child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            return TestResult::CompileError {
+                output: format!("Failed to spawn test command: {}", e),
+            };
+        }
+    };
+
+    let timeout = Duration::from_secs(timeout_seconds);
+    let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
+
+    let (exit_code, output) = match result {
+        Ok(Ok(cmd_output)) => {
+            let stdout = String::from_utf8_lossy(&cmd_output.stdout);
+            let stderr = String::from_utf8_lossy(&cmd_output.stderr);
+            let combined = format!("{}{}", stdout, stderr);
+            let code = cmd_output.status.code();
+            (code, combined)
+        }
+        Ok(Err(e)) => {
+            return TestResult::CompileError {
+                output: format!("Test command execution error: {}", e),
+            };
+        }
+        Err(_) => {
+            return TestResult::Timeout;
+        }
+    };
+
+    // Use LLM to analyze test output for more accurate classification
+    let truncated_output = truncate_output(&output, config.max_test_output_bytes);
+
+    match analyze_test_output(client, &truncated_output, exit_code).await {
+        Ok(analysis) => match analysis.outcome.as_str() {
+            "passed" => TestResult::Passed,
+            "failed" => TestResult::Failed {
+                test_name: analysis
                     .failing_test
                     .unwrap_or_else(|| "unknown".to_string()),
-                output: String::new(),
+                output: truncated_output,
             },
-            crate::language::TestOutcome::Timeout => TestResult::Timeout,
-            crate::language::TestOutcome::CompileError => TestResult::CompileError {
-                output: String::new(),
+            "compile_error" => TestResult::CompileError {
+                output: truncated_output,
             },
+            "timeout" => TestResult::Timeout,
+            _ => {
+                // Fallback based on exit code
+                tracing::warn!(
+                    "Unexpected LLM outcome: {}, falling back to exit code",
+                    analysis.outcome
+                );
+                match exit_code {
+                    Some(0) => TestResult::Passed,
+                    Some(_) => TestResult::Failed {
+                        test_name: "unknown".to_string(),
+                        output: truncated_output,
+                    },
+                    None => TestResult::Timeout,
+                }
+            }
+        },
+        Err(e) => {
+            // If LLM analysis fails, fall back to exit code
+            tracing::warn!(
+                "Failed to analyze test output with LLM: {}, falling back to exit code",
+                e
+            );
+            match exit_code {
+                Some(0) => TestResult::Passed,
+                Some(_) => TestResult::Failed {
+                    test_name: "unknown".to_string(),
+                    output: truncated_output,
+                },
+                None => TestResult::Timeout,
+            }
         }
     }
 }

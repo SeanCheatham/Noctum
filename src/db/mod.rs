@@ -195,8 +195,21 @@ impl Database {
         Ok(repo)
     }
 
-    /// Add a new repository
+    /// Add a new repository.
+    ///
+    /// The repository must contain a `.noctum.toml` configuration file.
+    /// An empty file is acceptable, but the file must exist.
     pub async fn add_repository(&self, path: &str, name: &str) -> Result<i64> {
+        // Validate .noctum.toml exists
+        let repo_path = std::path::Path::new(path);
+        if !crate::repo_config::RepoConfig::exists(repo_path) {
+            anyhow::bail!(
+                "Repository must contain a .noctum.toml configuration file. \
+                 Create one at: {}/.noctum.toml",
+                path
+            );
+        }
+
         let result =
             sqlx::query("INSERT INTO repositories (path, name) VALUES (?, ?) RETURNING id")
                 .bind(path)
@@ -600,6 +613,25 @@ mod tests {
         (db, temp_dir)
     }
 
+    /// Create a temporary repo directory with a .noctum.toml file.
+    /// Returns the TempDir (must be kept alive for the path to remain valid).
+    fn create_test_repo() -> TempDir {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(temp_dir.path().join(".noctum.toml"), "").unwrap();
+        temp_dir
+    }
+
+    /// Helper to add a test repository to the database.
+    /// Creates a temp directory with .noctum.toml and adds it to the db.
+    async fn add_test_repo(db: &Database, name: &str) -> (i64, TempDir) {
+        let repo_dir = create_test_repo();
+        let repo_id = db
+            .add_repository(&repo_dir.path().to_string_lossy(), name)
+            .await
+            .unwrap();
+        (repo_id, repo_dir)
+    }
+
     #[tokio::test]
     async fn test_database_creation() {
         let temp_file = NamedTempFile::new().unwrap();
@@ -616,12 +648,14 @@ mod tests {
     #[tokio::test]
     async fn test_add_repository() {
         let (db, _temp_dir) = create_test_db().await;
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_string_lossy().to_string();
 
-        let id = db.add_repository("/test/path", "Test Repo").await.unwrap();
+        let id = db.add_repository(&repo_path, "Test Repo").await.unwrap();
         assert!(id > 0, "Repository ID should be positive");
 
         let repo = db.get_repository(id).await.unwrap().unwrap();
-        assert_eq!(repo.path, "/test/path");
+        assert_eq!(repo.path, repo_path);
         assert_eq!(repo.name, "Test Repo");
         assert!(repo.enabled);
     }
@@ -629,9 +663,15 @@ mod tests {
     #[tokio::test]
     async fn test_get_repositories() {
         let (db, _temp_dir) = create_test_db().await;
+        let repo_dir1 = create_test_repo();
+        let repo_dir2 = create_test_repo();
 
-        db.add_repository("/path1", "Repo 1").await.unwrap();
-        db.add_repository("/path2", "Repo 2").await.unwrap();
+        db.add_repository(&repo_dir1.path().to_string_lossy(), "Repo 1")
+            .await
+            .unwrap();
+        db.add_repository(&repo_dir2.path().to_string_lossy(), "Repo 2")
+            .await
+            .unwrap();
 
         let repos = db.get_repositories().await.unwrap();
         assert_eq!(repos.len(), 2);
@@ -650,8 +690,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_analysis_result() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let id = db
             .save_analysis_result(
@@ -682,8 +721,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_recent_results() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         db.save_analysis_result(repo_id, "file1.rs", "type1", "result1", None, None)
             .await
@@ -699,8 +737,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_repository_results() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         db.save_analysis_result(repo_id, "file1.rs", "type1", "result1", None, None)
             .await
@@ -720,8 +757,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_all_repository_results() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         db.save_analysis_result(repo_id, "file1.rs", "type1", "result1", None, None)
             .await
@@ -737,8 +773,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_file_hash() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         db.save_analysis_result(repo_id, "test.rs", "type1", "result", None, Some("hash1"))
             .await
@@ -757,7 +792,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_file_hash_no_results() {
         let (db, _temp_dir) = create_test_db().await;
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let hash = db
             .get_latest_file_hash(repo_id, "nonexistent.rs", "type1")
@@ -787,8 +822,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_mutation_result() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let replacements_json = serde_json::json!({
             "line_number": 10,
@@ -827,8 +861,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_mutation_summary() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let replacements_json = "{}".to_string();
 
@@ -914,8 +947,7 @@ mod tests {
     #[tokio::test]
     async fn test_has_mutation_results_for_hash() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let replacements_json = "{}".to_string();
         db.save_mutation_result(
@@ -950,18 +982,19 @@ mod tests {
     #[tokio::test]
     async fn test_duplicate_repository_path() {
         let (db, _temp_dir) = create_test_db().await;
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_string_lossy().to_string();
 
-        db.add_repository("/path", "Repo1").await.unwrap();
+        db.add_repository(&repo_path, "Repo1").await.unwrap();
 
-        let result = db.add_repository("/path", "Repo2").await;
+        let result = db.add_repository(&repo_path, "Repo2").await;
         assert!(result.is_err(), "Duplicate path should fail");
     }
 
     #[tokio::test]
     async fn test_delete_repository() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test/path", "Test Repo").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test Repo").await;
 
         // Add some analysis results
         db.save_analysis_result(repo_id, "file.rs", "type1", "result", None, None)
@@ -1027,8 +1060,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_diagram() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let id = db
             .save_diagram(
@@ -1057,8 +1089,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_diagrams_multiple_types() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         // Save diagrams of different types
         db.save_diagram(
@@ -1110,8 +1141,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_diagrams_returns_newest() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         // Save two versions of the same diagram type
         // The one with the higher ID should be returned (as a proxy for "newest")
@@ -1157,8 +1187,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_diagram_hash() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         // No diagrams yet
         let hash = db
@@ -1197,8 +1226,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_repository_deletes_diagrams() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         // Add a diagram
         db.save_diagram(
@@ -1228,8 +1256,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_latest_diagrams_empty() {
         let (db, _temp_dir) = create_test_db().await;
-
-        let repo_id = db.add_repository("/test", "Test").await.unwrap();
+        let (repo_id, _repo_dir) = add_test_repo(&db, "Test").await;
 
         let diagrams = db.get_latest_diagrams(repo_id).await.unwrap();
         assert!(diagrams.is_empty());

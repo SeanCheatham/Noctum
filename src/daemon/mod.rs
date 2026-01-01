@@ -10,6 +10,7 @@ use crate::mutation::{
     analyze_and_generate_mutations, executor::execute_mutation_test, MutationConfig,
 };
 use crate::project::discover_projects;
+use crate::repo_config::RepoConfig;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -74,6 +75,82 @@ fn translate_temp_to_original(
     } else {
         // Fallback: return as-is if path doesn't have expected prefix
         file_path.to_path_buf()
+    }
+}
+
+/// Result of running a shell command.
+#[derive(Debug)]
+pub struct CommandResult {
+    /// Whether the command succeeded (exit code 0).
+    pub success: bool,
+    /// Combined stdout and stderr output.
+    #[allow(dead_code)]
+    pub output: String,
+    /// How long the command took to run in milliseconds.
+    #[allow(dead_code)]
+    pub duration_ms: u64,
+}
+
+/// Run a shell command with a timeout.
+///
+/// The command is executed via `sh -c` to support shell features like pipes.
+/// Returns a `CommandResult` with success status, output, and duration.
+async fn run_command_with_timeout(
+    working_dir: &Path,
+    command: &str,
+    timeout_seconds: u64,
+) -> CommandResult {
+    use std::process::Stdio;
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    let child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            return CommandResult {
+                success: false,
+                output: format!("Failed to spawn command: {}", e),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    let timeout = Duration::from_secs(timeout_seconds);
+    let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined = format!("{}{}", stdout, stderr);
+
+            CommandResult {
+                success: output.status.success(),
+                output: combined,
+                duration_ms,
+            }
+        }
+        Ok(Err(e)) => CommandResult {
+            success: false,
+            output: format!("Command execution error: {}", e),
+            duration_ms,
+        },
+        Err(_) => CommandResult {
+            success: false,
+            output: format!("Command timed out after {} seconds", timeout_seconds),
+            duration_ms,
+        },
     }
 }
 
@@ -1323,6 +1400,9 @@ impl Daemon {
     ///
     /// The temp copy is created by `analyze_repository_parallel()` before any analysis,
     /// ensuring the original repository is never modified.
+    ///
+    /// Requires a `.noctum.toml` configuration file in the repository with mutation rules.
+    /// Files without a matching rule are skipped. Baseline tests must pass before mutations.
     async fn run_mutation_testing(
         &self,
         repo: &crate::db::Repository,
@@ -1338,6 +1418,82 @@ impl Daemon {
                 Some(&format!("mutation testing {}", repo.name)),
             )
             .await?;
+
+        // Load repository-level configuration
+        let repo_config = RepoConfig::load(temp_repo_path).unwrap_or_default();
+
+        if repo_config.mutation.rules.is_empty() {
+            tracing::info!(
+                "No mutation rules configured for {}, skipping mutation testing",
+                repo.name
+            );
+            return Ok(());
+        }
+
+        // Run baseline verification for each rule (both build and test commands)
+        // Rules that fail baseline are excluded from mutation testing
+        let mut valid_rules: Vec<&crate::repo_config::MutationRule> = Vec::new();
+
+        tracing::info!(
+            "Running baseline verification for {} mutation rule(s) in {}",
+            repo_config.mutation.rules.len(),
+            repo.name
+        );
+
+        for rule in &repo_config.mutation.rules {
+            tracing::debug!(
+                "Verifying baseline for rule '{}': build='{}', test='{}'",
+                rule.glob,
+                rule.build_command,
+                rule.test_command
+            );
+
+            // Run build command first
+            let build_result =
+                run_command_with_timeout(temp_repo_path, &rule.build_command, rule.timeout_seconds)
+                    .await;
+            if !build_result.success {
+                tracing::warn!(
+                    "Excluding rule '{}' from mutation testing: baseline build '{}' failed",
+                    rule.glob,
+                    rule.build_command
+                );
+                tracing::debug!("Build output:\n{}", build_result.output);
+                continue;
+            }
+
+            // Run test command
+            let test_result =
+                run_command_with_timeout(temp_repo_path, &rule.test_command, rule.timeout_seconds)
+                    .await;
+            if !test_result.success {
+                tracing::warn!(
+                    "Excluding rule '{}' from mutation testing: baseline test '{}' failed",
+                    rule.glob,
+                    rule.test_command
+                );
+                tracing::debug!("Test output:\n{}", test_result.output);
+                continue;
+            }
+
+            tracing::debug!("Baseline passed for rule '{}'", rule.glob);
+            valid_rules.push(rule);
+        }
+
+        if valid_rules.is_empty() {
+            tracing::warn!(
+                "No mutation rules passed baseline verification for {}, skipping mutation testing",
+                repo.name
+            );
+            return Ok(());
+        }
+
+        tracing::info!(
+            "{}/{} mutation rules passed baseline verification for {}",
+            valid_rules.len(),
+            repo_config.mutation.rules.len(),
+            repo.name
+        );
 
         let config = MutationConfig::default();
 
@@ -1372,6 +1528,24 @@ impl Daemon {
                 if self.should_stop.load(Ordering::SeqCst) {
                     break;
                 }
+
+                // Get relative path for glob matching
+                let relative_path = file_path
+                    .strip_prefix(temp_repo_path)
+                    .unwrap_or(&file_path)
+                    .to_string_lossy();
+
+                // Find matching rule from validated rules only - skip file if no rule matches
+                let rule = match valid_rules
+                    .iter()
+                    .find(|r| glob_match::glob_match(&r.glob, &relative_path))
+                {
+                    Some(r) => *r,
+                    None => {
+                        tracing::debug!("Skipping {}: no matching mutation rule", relative_path);
+                        continue;
+                    }
+                };
 
                 // Read file from temp copy
                 let content = match tokio::fs::read_to_string(&file_path).await {
@@ -1488,14 +1662,16 @@ impl Daemon {
                         break;
                     }
 
-                    // Execute the mutation test on the project root (not repo root)
-                    // This ensures tests run from the correct working directory
+                    // Execute the mutation test using configured commands
                     let result = match execute_mutation_test(
                         &current_client,
                         &project.root,
                         mutation,
                         &content,
                         &config,
+                        &rule.build_command,
+                        &rule.test_command,
+                        rule.timeout_seconds,
                     )
                     .await
                     {

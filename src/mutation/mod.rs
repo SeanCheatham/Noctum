@@ -80,7 +80,8 @@ pub struct MutationTestResult {
 pub struct MutationConfig {
     /// Maximum mutations to test per file
     pub max_mutations_per_file: usize,
-    /// Test timeout in seconds
+    /// Test timeout in seconds (fallback, overridden by repo config rules)
+    #[allow(dead_code)]
     pub test_timeout_seconds: u64,
     /// Maximum test output to store (bytes)
     pub max_test_output_bytes: usize,
