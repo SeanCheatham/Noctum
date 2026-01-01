@@ -34,30 +34,188 @@ fn compute_hash(content: &str) -> String {
 ///
 /// Returns the TempDir handle (which auto-cleans on drop) and the path to the
 /// copied repository within it.
-async fn copy_repo_to_temp(repo_path: &Path) -> anyhow::Result<tempfile::TempDir> {
+///
+/// The `ignore_patterns` parameter allows excluding files/directories matching
+/// glob patterns (e.g., `["node_modules", "target", ".git"]`).
+async fn copy_repo_to_temp(
+    repo_path: &Path,
+    ignore_patterns: &[String],
+) -> anyhow::Result<tempfile::TempDir> {
     let repo_path = repo_path.to_path_buf();
+    let ignore_patterns = ignore_patterns.to_vec();
 
-    // Use spawn_blocking since fs_extra::dir::copy is synchronous
+    // Use spawn_blocking since file I/O is synchronous
     let temp_dir = tokio::task::spawn_blocking(move || -> anyhow::Result<tempfile::TempDir> {
         let temp_dir = tempfile::TempDir::with_prefix("noctum-")?;
 
-        let options = fs_extra::dir::CopyOptions {
-            overwrite: false,
-            skip_exist: false,
-            buffer_size: 64 * 1024, // 64KB buffer
-            copy_inside: true,      // Copy contents into dest, not as subdirectory
-            content_only: true,     // Copy only contents, not the directory itself
-            depth: 0,               // Unlimited depth
-        };
-
-        fs_extra::dir::copy(&repo_path, temp_dir.path(), &options)
-            .map_err(|e| anyhow::anyhow!("Failed to copy repository: {}", e))?;
+        copy_dir_with_ignore(&repo_path, temp_dir.path(), &ignore_patterns)?;
 
         Ok(temp_dir)
     })
     .await??;
 
     Ok(temp_dir)
+}
+
+/// Copy a directory recursively, excluding paths matching ignore patterns.
+///
+/// Ignore patterns are matched against the relative path from the source root.
+/// Patterns like `node_modules` will match any path component named `node_modules`.
+fn copy_dir_with_ignore(src: &Path, dest: &Path, ignore_patterns: &[String]) -> anyhow::Result<()> {
+    use std::fs;
+    use walkdir::WalkDir;
+
+    for entry in WalkDir::new(src).min_depth(1) {
+        let entry = entry.map_err(|e| anyhow::anyhow!("Failed to read directory entry: {}", e))?;
+        let src_path = entry.path();
+
+        // Get relative path from source root
+        let relative_path = src_path
+            .strip_prefix(src)
+            .map_err(|e| anyhow::anyhow!("Failed to strip prefix: {}", e))?;
+
+        let relative_str = relative_path.to_string_lossy();
+
+        // Check if this path matches any ignore pattern
+        let should_ignore = ignore_patterns.iter().any(|pattern| {
+            // Match against the full relative path
+            if glob_match::glob_match(pattern, &relative_str) {
+                return true;
+            }
+            // Also match against individual path components (e.g., "node_modules" anywhere)
+            relative_path.components().any(|component| {
+                if let std::path::Component::Normal(name) = component {
+                    glob_match::glob_match(pattern, &name.to_string_lossy())
+                } else {
+                    false
+                }
+            })
+        });
+
+        if should_ignore {
+            // Skip this entry and all its children (for directories)
+            if entry.file_type().is_dir() {
+                // WalkDir will still try to descend; we handle this by checking parent paths
+                continue;
+            }
+            continue;
+        }
+
+        // Check if any parent directory was ignored
+        let parent_ignored = relative_path.ancestors().skip(1).any(|ancestor| {
+            if ancestor.as_os_str().is_empty() {
+                return false;
+            }
+            let ancestor_str = ancestor.to_string_lossy();
+            ignore_patterns.iter().any(|pattern| {
+                if glob_match::glob_match(pattern, &ancestor_str) {
+                    return true;
+                }
+                ancestor.components().any(|component| {
+                    if let std::path::Component::Normal(name) = component {
+                        glob_match::glob_match(pattern, &name.to_string_lossy())
+                    } else {
+                        false
+                    }
+                })
+            })
+        });
+
+        if parent_ignored {
+            continue;
+        }
+
+        let dest_path = dest.join(relative_path);
+
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&dest_path).map_err(|e| {
+                anyhow::anyhow!("Failed to create directory {:?}: {}", dest_path, e)
+            })?;
+        } else if entry.file_type().is_file() {
+            // Ensure parent directory exists
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    anyhow::anyhow!("Failed to create parent directory {:?}: {}", parent, e)
+                })?;
+            }
+            fs::copy(src_path, &dest_path).map_err(|e| {
+                anyhow::anyhow!("Failed to copy {:?} to {:?}: {}", src_path, dest_path, e)
+            })?;
+        } else if entry.file_type().is_symlink() {
+            // For symlinks, copy the target file/directory content instead of the symlink
+            // This fixes issues with broken symlinks in node_modules/.bin/
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    anyhow::anyhow!("Failed to create parent directory {:?}: {}", parent, e)
+                })?;
+            }
+
+            let target = fs::read_link(src_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read symlink {:?}: {}", src_path, e))?;
+
+            // Resolve the symlink target relative to the symlink's parent
+            let resolved_target = if target.is_relative() {
+                src_path.parent().unwrap_or(src).join(&target)
+            } else {
+                target.clone()
+            };
+
+            if resolved_target.is_file() {
+                fs::copy(&resolved_target, &dest_path).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to copy symlink target {:?} to {:?}: {}",
+                        resolved_target,
+                        dest_path,
+                        e
+                    )
+                })?;
+            } else if resolved_target.is_dir() {
+                // For directory symlinks, create the directory and copy contents
+                // This is a recursive operation, but we don't apply ignore patterns here
+                // since these are typically small tool directories
+                copy_dir_recursive(&resolved_target, &dest_path)?;
+            }
+            // If the target doesn't exist (broken symlink), skip it silently
+        }
+    }
+
+    Ok(())
+}
+
+/// Copy a directory recursively without ignore patterns.
+/// Used for copying symlink targets.
+fn copy_dir_recursive(src: &Path, dest: &Path) -> anyhow::Result<()> {
+    use std::fs;
+    use walkdir::WalkDir;
+
+    fs::create_dir_all(dest)
+        .map_err(|e| anyhow::anyhow!("Failed to create directory {:?}: {}", dest, e))?;
+
+    for entry in WalkDir::new(src).min_depth(1) {
+        let entry = entry.map_err(|e| anyhow::anyhow!("Failed to read directory entry: {}", e))?;
+        let src_path = entry.path();
+        let relative_path = src_path
+            .strip_prefix(src)
+            .map_err(|e| anyhow::anyhow!("Failed to strip prefix: {}", e))?;
+        let dest_path = dest.join(relative_path);
+
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&dest_path).map_err(|e| {
+                anyhow::anyhow!("Failed to create directory {:?}: {}", dest_path, e)
+            })?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    anyhow::anyhow!("Failed to create parent directory {:?}: {}", parent, e)
+                })?;
+            }
+            fs::copy(src_path, &dest_path).map_err(|e| {
+                anyhow::anyhow!("Failed to copy {:?} to {:?}: {}", src_path, dest_path, e)
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Translate a path from the temp copy back to the original repository path.
@@ -462,13 +620,26 @@ impl Daemon {
             return Ok(false);
         }
 
+        // Load repository-level configuration from original path first
+        // (needed for copy_ignore patterns before copying)
+        let repo_config = RepoConfig::load(original_repo_path).unwrap_or_default();
+
+        // Log ignore patterns if any
+        if !repo_config.copy_ignore.is_empty() {
+            tracing::info!(
+                "Repository {} has copy_ignore patterns: {:?}",
+                repo.name,
+                repo_config.copy_ignore
+            );
+        }
+
         // Copy repository to temp directory for isolated analysis
         // This ensures the original repo is never modified during mutation testing
         tracing::info!(
             "Copying repository {} to temp directory for analysis",
             repo.name
         );
-        let temp_dir = match copy_repo_to_temp(original_repo_path).await {
+        let temp_dir = match copy_repo_to_temp(original_repo_path, &repo_config.copy_ignore).await {
             Ok(dir) => dir,
             Err(e) => {
                 tracing::error!("Failed to copy repository to temp: {}", e);
@@ -480,9 +651,6 @@ impl Daemon {
             "Repository copied to temp directory: {}",
             temp_repo_path.display()
         );
-
-        // Load repository-level configuration
-        let repo_config = RepoConfig::load(temp_repo_path).unwrap_or_default();
 
         // Log which features are enabled
         tracing::info!(
@@ -1545,11 +1713,11 @@ impl Daemon {
                     .await;
             if !build_result.success {
                 tracing::warn!(
-                    "Excluding rule '{}' from mutation testing: baseline build '{}' failed",
+                    "Excluding rule '{}' from mutation testing: baseline build '{}' failed\nOutput:\n{}",
                     rule.glob,
-                    rule.build_command
+                    rule.build_command,
+                    build_result.output
                 );
-                tracing::debug!("Build output:\n{}", build_result.output);
                 continue;
             }
 
@@ -1559,11 +1727,11 @@ impl Daemon {
                     .await;
             if !test_result.success {
                 tracing::warn!(
-                    "Excluding rule '{}' from mutation testing: baseline test '{}' failed",
+                    "Excluding rule '{}' from mutation testing: baseline test '{}' failed\nOutput:\n{}",
                     rule.glob,
-                    rule.test_command
+                    rule.test_command,
+                    test_result.output
                 );
-                tracing::debug!("Test output:\n{}", test_result.output);
                 continue;
             }
 
@@ -1782,6 +1950,17 @@ impl Daemon {
                             result.mutation.description
                         );
                         continue;
+                    }
+
+                    // Log killed mutations with test output for debugging
+                    if result.outcome == crate::mutation::TestOutcome::Killed {
+                        tracing::info!(
+                            "Mutation KILLED in {}: {}\nKilling test: {}\nOutput:\n{}",
+                            original_file_path_str,
+                            result.mutation.description,
+                            result.killing_test.as_deref().unwrap_or("unknown"),
+                            result.test_output.as_deref().unwrap_or("(no output)")
+                        );
                     }
 
                     // Build replacements JSON with all replacement info
@@ -2271,5 +2450,157 @@ mod tests {
         assert!(!files
             .iter()
             .any(|f| f.to_string_lossy().contains(".hidden")));
+    }
+
+    // =========================================================================
+    // copy_dir_with_ignore tests
+    // =========================================================================
+
+    #[test]
+    fn test_copy_dir_with_ignore_no_patterns() {
+        let src = tempfile::TempDir::new().unwrap();
+        let dest = tempfile::TempDir::new().unwrap();
+
+        // Create source structure
+        std::fs::write(src.path().join("file.txt"), "content").unwrap();
+        std::fs::create_dir_all(src.path().join("subdir")).unwrap();
+        std::fs::write(src.path().join("subdir/nested.txt"), "nested").unwrap();
+
+        copy_dir_with_ignore(src.path(), dest.path(), &[]).unwrap();
+
+        // Verify files were copied
+        assert!(dest.path().join("file.txt").exists());
+        assert!(dest.path().join("subdir/nested.txt").exists());
+    }
+
+    #[test]
+    fn test_copy_dir_with_ignore_simple_pattern() {
+        let src = tempfile::TempDir::new().unwrap();
+        let dest = tempfile::TempDir::new().unwrap();
+
+        // Create source structure with node_modules
+        std::fs::write(src.path().join("index.js"), "console.log('hi')").unwrap();
+        std::fs::create_dir_all(src.path().join("node_modules/lodash")).unwrap();
+        std::fs::write(
+            src.path().join("node_modules/lodash/index.js"),
+            "module.exports = {}",
+        )
+        .unwrap();
+
+        let ignore_patterns = vec!["node_modules".to_string()];
+        copy_dir_with_ignore(src.path(), dest.path(), &ignore_patterns).unwrap();
+
+        // Verify index.js was copied but node_modules was not
+        assert!(dest.path().join("index.js").exists());
+        assert!(!dest.path().join("node_modules").exists());
+    }
+
+    #[test]
+    fn test_copy_dir_with_ignore_nested_node_modules() {
+        let src = tempfile::TempDir::new().unwrap();
+        let dest = tempfile::TempDir::new().unwrap();
+
+        // Create nested node_modules (common in monorepos)
+        std::fs::write(src.path().join("package.json"), "{}").unwrap();
+        std::fs::create_dir_all(src.path().join("packages/frontend/node_modules")).unwrap();
+        std::fs::write(
+            src.path().join("packages/frontend/node_modules/react.js"),
+            "react",
+        )
+        .unwrap();
+        std::fs::write(
+            src.path().join("packages/frontend/index.js"),
+            "import React from 'react'",
+        )
+        .unwrap();
+
+        let ignore_patterns = vec!["node_modules".to_string()];
+        copy_dir_with_ignore(src.path(), dest.path(), &ignore_patterns).unwrap();
+
+        // Verify structure without node_modules
+        assert!(dest.path().join("package.json").exists());
+        assert!(dest.path().join("packages/frontend/index.js").exists());
+        assert!(!dest.path().join("packages/frontend/node_modules").exists());
+    }
+
+    #[test]
+    fn test_copy_dir_with_ignore_multiple_patterns() {
+        let src = tempfile::TempDir::new().unwrap();
+        let dest = tempfile::TempDir::new().unwrap();
+
+        // Create source with multiple ignorable directories
+        std::fs::write(src.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::create_dir_all(src.path().join("target/debug")).unwrap();
+        std::fs::write(src.path().join("target/debug/binary"), "binary").unwrap();
+        std::fs::create_dir_all(src.path().join("node_modules")).unwrap();
+        std::fs::write(src.path().join("node_modules/pkg.js"), "pkg").unwrap();
+        std::fs::create_dir_all(src.path().join(".git/objects")).unwrap();
+        std::fs::write(src.path().join(".git/objects/abc"), "git obj").unwrap();
+
+        let ignore_patterns = vec![
+            "target".to_string(),
+            "node_modules".to_string(),
+            ".git".to_string(),
+        ];
+        copy_dir_with_ignore(src.path(), dest.path(), &ignore_patterns).unwrap();
+
+        // Verify only main.rs was copied
+        assert!(dest.path().join("main.rs").exists());
+        assert!(!dest.path().join("target").exists());
+        assert!(!dest.path().join("node_modules").exists());
+        assert!(!dest.path().join(".git").exists());
+    }
+
+    #[test]
+    fn test_copy_dir_with_ignore_glob_pattern() {
+        let src = tempfile::TempDir::new().unwrap();
+        let dest = tempfile::TempDir::new().unwrap();
+
+        // Create source with various dist directories
+        std::fs::create_dir_all(src.path().join("src")).unwrap();
+        std::fs::write(src.path().join("src/main.ts"), "export {}").unwrap();
+        std::fs::create_dir_all(src.path().join("dist")).unwrap();
+        std::fs::write(src.path().join("dist/main.js"), "compiled").unwrap();
+
+        let ignore_patterns = vec!["dist".to_string()];
+        copy_dir_with_ignore(src.path(), dest.path(), &ignore_patterns).unwrap();
+
+        assert!(dest.path().join("src/main.ts").exists());
+        assert!(!dest.path().join("dist").exists());
+    }
+
+    #[tokio::test]
+    async fn test_copy_repo_to_temp_with_ignore() {
+        let src = tempfile::TempDir::new().unwrap();
+
+        // Create source structure
+        std::fs::write(src.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::create_dir_all(src.path().join("target")).unwrap();
+        std::fs::write(src.path().join("target/binary"), "binary data").unwrap();
+
+        let ignore_patterns = vec!["target".to_string()];
+        let temp_dir = copy_repo_to_temp(src.path(), &ignore_patterns)
+            .await
+            .unwrap();
+
+        // Verify main.rs was copied but target was not
+        assert!(temp_dir.path().join("main.rs").exists());
+        assert!(!temp_dir.path().join("target").exists());
+    }
+
+    #[tokio::test]
+    async fn test_copy_repo_to_temp_empty_ignore() {
+        let src = tempfile::TempDir::new().unwrap();
+
+        // Create source structure
+        std::fs::write(src.path().join("file.txt"), "content").unwrap();
+        std::fs::create_dir_all(src.path().join("subdir")).unwrap();
+        std::fs::write(src.path().join("subdir/nested.txt"), "nested").unwrap();
+
+        let temp_dir = copy_repo_to_temp(src.path(), &[]).await.unwrap();
+
+        // Verify all files were copied
+        assert!(temp_dir.path().join("file.txt").exists());
+        assert!(temp_dir.path().join("subdir/nested.txt").exists());
     }
 }

@@ -144,6 +144,72 @@ Noctum looks for a config file at `~/.config/noctum/config.toml`. See [`config.e
 | `schedule.end_hour` | `6` | End hour (0-23) of the analysis window |
 | `schedule.check_interval_seconds` | `60` | How often to check schedule (seconds) |
 
+## Repository Configuration (`.noctum.toml`)
+
+Each repository you want Noctum to analyze must contain a `.noctum.toml` file in its root directory. This file controls which analysis features are enabled and how mutation testing is configured.
+
+### Basic Example
+
+```toml
+# Enable the features you want
+enable_code_analysis = true
+enable_architecture_analysis = true
+enable_diagram_creation = true
+enable_mutation_testing = true
+
+# Exclude directories from being copied to the temp directory
+# This speeds up analysis and avoids issues with symlinks (e.g., node_modules/.bin)
+copy_ignore = ["node_modules", "target", ".git", "dist"]
+
+# Mutation testing rules (required if enable_mutation_testing = true)
+[[mutation.rules]]
+glob = "src/**/*.rs"
+build_command = "cargo check"
+test_command = "cargo test"
+timeout_seconds = 300
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable_code_analysis` | bool | `false` | Enable per-file code analysis |
+| `enable_architecture_analysis` | bool | `false` | Enable architectural summary generation |
+| `enable_diagram_creation` | bool | `false` | Enable system diagram generation |
+| `enable_mutation_testing` | bool | `false` | Enable mutation testing |
+| `copy_ignore` | array | `[]` | Glob patterns for files/directories to exclude when copying to temp directory |
+
+### Mutation Rules
+
+Each `[[mutation.rules]]` section defines how to test files matching a glob pattern:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `glob` | string | Yes | Glob pattern to match files (e.g., `"**/*.rs"`, `"src/**/*.ts"`) |
+| `build_command` | string | Yes | Command to verify the code compiles |
+| `test_command` | string | Yes | Command to run tests |
+| `timeout_seconds` | integer | No | Test timeout in seconds (default: 300) |
+
+### TypeScript/Node.js Projects
+
+For TypeScript projects, use `copy_ignore` to exclude `node_modules` and reinstall dependencies as part of your build command:
+
+```toml
+enable_mutation_testing = true
+copy_ignore = ["node_modules", "dist", ".git"]
+
+[[mutation.rules]]
+glob = "src/**/*.ts"
+build_command = "npm ci && npm run build"
+test_command = "npm test"
+timeout_seconds = 600
+```
+
+This approach:
+1. Avoids copying large `node_modules` directories (faster)
+2. Prevents broken symlinks in `node_modules/.bin`
+3. Ensures dependencies are properly installed in the temp directory
+
 ## Architecture
 
 Noctum is a daemon-based application written in Rust. It features a web UI/dashboard for configuration, management, and results analysis. It depends on Ollama to run inference and the Rust toolchain to interact with your project.
