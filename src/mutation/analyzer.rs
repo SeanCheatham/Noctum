@@ -196,6 +196,9 @@ RULES:
 - The "replace" text should differ by only ONE small change
 - Skip comments, type definitions, and test code
 - Each mutation has a "replacements" array - use multiple replacements if you need to add imports
+- Do not mutate existing test cases.
+- Do not introduce changes that would fail to compile
+- Do not change type signatures of functions or methods.
 
 File: {file_path}
 
