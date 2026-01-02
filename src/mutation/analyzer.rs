@@ -271,7 +271,12 @@ fn truncate_error(error: &str, max_len: usize) -> &str {
     if error.len() <= max_len {
         error
     } else {
-        &error[..max_len]
+        // Find a valid UTF-8 char boundary at or before max_len
+        let mut end = max_len;
+        while end > 0 && !error.is_char_boundary(end) {
+            end -= 1;
+        }
+        &error[..end]
     }
 }
 

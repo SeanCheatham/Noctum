@@ -30,6 +30,19 @@ fn compute_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Truncate a string at a valid UTF-8 char boundary
+fn truncate_at_char_boundary(s: &str, max_len: usize) -> &str {
+    if s.len() <= max_len {
+        s
+    } else {
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
+    }
+}
+
 /// Copy a repository to a temporary directory for isolated mutation testing.
 ///
 /// Returns the TempDir handle (which auto-cleans on drop) and the path to the
@@ -1394,7 +1407,7 @@ impl Daemon {
         let truncated = if extractions.len() > 50000 {
             format!(
                 "{}...\n\n(truncated, {} files total)",
-                &extractions[..50000],
+                truncate_at_char_boundary(&extractions, 50000),
                 included_count
             )
         } else {
@@ -1596,7 +1609,7 @@ impl Daemon {
         let truncated_code = if file_summaries.len() > 45000 {
             format!(
                 "{}...\n\n(truncated, {} files total)",
-                &file_summaries[..45000],
+                truncate_at_char_boundary(&file_summaries, 45000),
                 included_count
             )
         } else {
@@ -1605,7 +1618,10 @@ impl Daemon {
 
         // Truncate doc context if needed (keep under ~5k chars)
         let truncated_docs = if doc_context.len() > 5000 {
-            format!("{}...\n\n(documentation truncated)", &doc_context[..5000])
+            format!(
+                "{}...\n\n(documentation truncated)",
+                truncate_at_char_boundary(&doc_context, 5000)
+            )
         } else {
             doc_context
         };
