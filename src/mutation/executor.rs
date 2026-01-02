@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn test_truncate_output_tail_keeps_end() {
         let content = "start_middle_end";
-        let truncated = truncate_output_tail(&content, 5);
+        let truncated = truncate_output_tail(content, 5);
         // Last 5 chars of "start_middle_end" are "e_end"
         assert!(truncated.ends_with("e_end"));
         assert!(truncated.starts_with("(truncated)..."));
