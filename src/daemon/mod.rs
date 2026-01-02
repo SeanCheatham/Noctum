@@ -1755,6 +1755,27 @@ impl Daemon {
             );
         }
 
+        // Run setup command once before baseline verification (if specified)
+        if let Some(setup_cmd) = &repo_config.setup_command {
+            tracing::info!("Running setup command for {}: '{}'", repo.name, setup_cmd);
+            // Use a reasonable default timeout for setup (5 minutes)
+            let setup_result = run_command_with_timeout(temp_repo_path, setup_cmd, 300).await;
+            if !setup_result.success {
+                tracing::warn!(
+                    "Setup command '{}' failed for {}, skipping mutation testing\nOutput:\n{}",
+                    setup_cmd,
+                    repo.name,
+                    setup_result.output
+                );
+                return Ok(());
+            }
+            tracing::info!(
+                "Setup command passed for {} ({}ms)",
+                repo.name,
+                setup_result.duration_ms
+            );
+        }
+
         // Run baseline verification for each rule (both build and test commands)
         // Rules that fail baseline are excluded from mutation testing
         let mut valid_rules: Vec<&crate::repo_config::MutationRule> = Vec::new();
@@ -1773,7 +1794,7 @@ impl Daemon {
                 rule.test_command
             );
 
-            // Run build command first
+            // Run build command
             let build_result =
                 run_command_with_timeout(temp_repo_path, &rule.build_command, rule.timeout_seconds)
                     .await;

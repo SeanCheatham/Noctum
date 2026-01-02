@@ -17,7 +17,7 @@ This project is still in development. It's not "production-ready" yet. While the
 
 ## What does it actually do?
 
-Install the app/service, and specify at least one local code repository and one Ollama endpoint in the web dashboard. With the default configuration, Noctum will run from 10pm to 6am, and analyze the codebase during that time.
+Install the CLI app, and specify at least one local code repository and one Ollama endpoint in the web dashboard. With the default configuration, Noctum will run from 10pm to 6am, and analyze the codebase during that time.
 
 During this window, Noctum will step through each repository and:
 - Copy the repository to a temporary directory
@@ -73,6 +73,8 @@ To uninstall (removes binary, preserves config/data):
 curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh | sh -s -- --uninstall
 ```
 
+NOTE: Due to complexity with environment management, the install script does not install a "service" to run Noctum in the background. You'll need to manually start Noctum using the CLI app.
+
 ### Pre-built Binaries
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/SeanCheatham/Noctum/releases):
@@ -120,7 +122,7 @@ cargo install --path .
    http://localhost:8420
    ```
 
-5. **Add a repository** to analyze via the dashboard UI
+5. **Add a repository** to analyze via the dashboard UI. Be sure the repository contains a `noctum.toml` file.
 
 Noctum will run in the background, analyzing your code according to a configured schedule.
 
@@ -138,26 +140,41 @@ Noctum looks for a config file at `~/.config/noctum/config.toml`. See [`config.e
 
 ## Repository Configuration (`noctum.toml`)
 
-Each repository you want Noctum to analyze must contain a `noctum.toml` file in its root directory. This file controls which analysis features are enabled and how mutation testing is configured.
+Each repository you want Noctum to analyze must contain a `noctum.toml` file in its root directory. This file controls which analysis features are enabled and how mutation testing is configured. This repository contains its own [`noctum.toml`](noctum.toml) file for reference.
 
 ### Basic Example
 
 ```toml
 # Enable the features you want
+# When enabled, the background worker will perform code quality analysis
 enable_code_analysis = true
+# When enabled, the background worker will build an architectural summary of the project
 enable_architecture_analysis = true
+# When enabled, the background worker will generate diagrams for the project
 enable_diagram_creation = true
+# When enabled, the background worker will perform mutation tests (NOTE: Requires [[mutation.rules]])
 enable_mutation_testing = true
 
 # Exclude directories from being copied to the temp directory
 # This speeds up analysis and avoids issues with symlinks (e.g., node_modules/.bin)
 copy_ignore = ["node_modules", "target", ".git", "dist"]
 
+# Run this command once before baseline verification, usually to install dependencies
+# CAUTION: This command is run as-is
+setup_command = "cargo build"
+
 # Mutation testing rules (required if enable_mutation_testing = true)
 [[mutation.rules]]
+# Files which match this pattern will invoke this rule   
 glob = "src/**/*.rs"
+# Before each mutation test, run this command to ensure the mutated code compiles. Mutations that don't compile are skipped.
+# These commands are run from the repository root
+# CAUTION: This command is run as-is
 build_command = "cargo check"
+# Run the test and output its result
+# CAUTION: This command is run as-is
 test_command = "cargo test"
+# Timeout in seconds for test execution (defaults to 300)
 timeout_seconds = 300
 ```
 
@@ -170,6 +187,7 @@ timeout_seconds = 300
 | `enable_diagram_creation` | bool | `false` | Enable system diagram generation |
 | `enable_mutation_testing` | bool | `false` | Enable mutation testing |
 | `copy_ignore` | array | `[]` | Glob patterns for files/directories to exclude when copying to temp directory |
+| `setup_command` | string | `null` | Command to run once before baseline verification (e.g., `"npm ci"`) |
 
 ### Mutation Rules
 
@@ -184,15 +202,16 @@ Each `[[mutation.rules]]` section defines how to test files matching a glob patt
 
 ### TypeScript/Node.js Projects
 
-For TypeScript projects, use `copy_ignore` to exclude `node_modules` and reinstall dependencies as part of your build command:
+For TypeScript projects, use `copy_ignore` to exclude `node_modules` and use `setup_command` to reinstall dependencies:
 
 ```toml
 enable_mutation_testing = true
 copy_ignore = ["node_modules", "dist", ".git"]
+setup_command = "npm ci"
 
 [[mutation.rules]]
 glob = "src/**/*.ts"
-build_command = "npm ci && npm run build"
+build_command = "npm run build"
 test_command = "npm test"
 timeout_seconds = 600
 ```

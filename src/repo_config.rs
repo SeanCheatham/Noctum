@@ -131,6 +131,11 @@ pub struct RepoConfig {
     #[serde(default)]
     pub copy_ignore: Vec<String>,
 
+    /// Optional command to run setup (e.g., `"npm ci"` to install dependencies).
+    /// Runs once before baseline verification, not for each mutation.
+    #[serde(default)]
+    pub setup_command: Option<String>,
+
     /// Mutation testing configuration.
     #[serde(default)]
     pub mutation: MutationRepoConfig,
@@ -519,6 +524,41 @@ enable_mutation_testing = true
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.copy_ignore.is_empty());
+    }
+
+    #[test]
+    fn test_load_setup_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_content = r#"
+enable_mutation_testing = true
+setup_command = "npm ci"
+
+[[mutation.rules]]
+glob = "src/**/*.ts"
+build_command = "npm run build"
+test_command = "npm test"
+"#;
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
+
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
+        assert_eq!(config.setup_command, Some("npm ci".to_string()));
+        assert_eq!(config.mutation.rules.len(), 1);
+        assert_eq!(config.mutation.rules[0].build_command, "npm run build");
+    }
+
+    #[test]
+    fn test_load_setup_command_defaults_to_none() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_content = r#"
+[[mutation.rules]]
+glob = "**/*.rs"
+build_command = "cargo check"
+test_command = "cargo test"
+"#;
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
+
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
+        assert_eq!(config.setup_command, None);
     }
 
     #[cfg(unix)]

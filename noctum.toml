@@ -9,13 +9,17 @@ enable_diagram_creation = false
 # When enabled, the background worker will perform mutation tests (NOTE: Requires [[mutation.rules]])
 enable_mutation_testing = true
 
+# CAUTION: This command is run as-is
+setup_command = "cargo build"
+
 # Define which files to mutate during testing and how to test those mutations
 [[mutation.rules]]
 # Files which match this pattern will invoke this rule
 glob = "src/**/*.rs"
 # Before each mutation test, run this command to ensure the mutated code compiles. Mutations that don't compile are skipped.
 # These commands are run from the repository root
-# CAUTION: These commands are run as-is
-build_command = "cargo install && cargo check"
+# CAUTION: This command is run as-is
+build_command = "cargo check"
 # Run the test and output its result
+# CAUTION: This command is run as-is
 test_command = "cargo test"
