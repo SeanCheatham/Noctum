@@ -135,19 +135,15 @@ pub async fn execute_mutation_test(
                 last_compile_error = Some(compile_error.clone());
 
                 if attempt < MAX_COMPILE_RETRIES {
-                    tracing::info!(
+                    tracing::debug!(
                         "Mutation compile error (attempt {}/{}), re-prompting LLM: {}",
                         attempt,
                         MAX_COMPILE_RETRIES,
                         current_mutation.description
                     );
 
-                    // Log first few lines of the error
-                    let error_preview: String = compile_error
-                        .lines()
-                        .take(10)
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    // Log last portion of the error (most relevant info is usually at the end)
+                    let error_preview = truncate_output_tail(&compile_error, 500);
                     tracing::debug!("Compile error preview:\n{}", error_preview);
 
                     // Re-prompt LLM to fix the mutation
@@ -471,6 +467,22 @@ fn truncate_output(output: &str, max_bytes: usize) -> String {
     }
 }
 
+/// Truncate output from the beginning, keeping the tail (last N bytes).
+pub fn truncate_output_tail(output: &str, max_bytes: usize) -> String {
+    if output.len() <= max_bytes {
+        output.to_string()
+    } else {
+        let start = output.len() - max_bytes;
+        // Find a safe UTF-8 boundary
+        let start = output
+            .char_indices()
+            .map(|(i, _)| i)
+            .find(|&i| i >= start)
+            .unwrap_or(start);
+        format!("(truncated)...{}", &output[start..])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +519,45 @@ mod tests {
         let truncated = truncate_output(&content, 50);
         assert!(truncated.starts_with(&"a".repeat(50)));
         assert!(truncated.ends_with("...(truncated)"));
+    }
+
+    // =========================================================================
+    // truncate_output_tail tests
+    // =========================================================================
+
+    #[test]
+    fn test_truncate_output_tail_short() {
+        let short = "hello";
+        assert_eq!(truncate_output_tail(short, 100), "hello");
+    }
+
+    #[test]
+    fn test_truncate_output_tail_long() {
+        let long = "abcdefghij".repeat(10); // 100 chars
+        let truncated = truncate_output_tail(&long, 50);
+        assert!(truncated.starts_with("(truncated)..."));
+        assert!(truncated.ends_with("abcdefghij"));
+        assert!(truncated.len() < 100);
+    }
+
+    #[test]
+    fn test_truncate_output_tail_exact_boundary() {
+        let exact = "a".repeat(50);
+        assert_eq!(truncate_output_tail(&exact, 50), exact);
+    }
+
+    #[test]
+    fn test_truncate_output_tail_empty() {
+        assert_eq!(truncate_output_tail("", 100), "");
+    }
+
+    #[test]
+    fn test_truncate_output_tail_keeps_end() {
+        let content = "start_middle_end";
+        let truncated = truncate_output_tail(&content, 5);
+        // Last 5 chars of "start_middle_end" are "e_end"
+        assert!(truncated.ends_with("e_end"));
+        assert!(truncated.starts_with("(truncated)..."));
     }
 
     // =========================================================================

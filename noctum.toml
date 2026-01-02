@@ -1,5 +1,5 @@
 # A list of directory names to NOT copy to the tmp analysis directory
-copy_ignore = ["target"]
+copy_ignore = []
 # When enabled, the background worker will perform code quality analysis
 enable_code_analysis = false
 # When enabled, the background worker will build an architectural summary of the project
@@ -22,4 +22,4 @@ glob = "src/**/*.rs"
 build_command = "cargo check"
 # Run the test and output its result
 # CAUTION: This command is run as-is
-test_command = "cargo test"
+test_command = "cargo test --quiet --message-format short"

@@ -7,7 +7,9 @@ use crate::diagram::{
 };
 use crate::language::Language;
 use crate::mutation::{
-    analyze_and_generate_mutations, executor::execute_mutation_test, MutationConfig,
+    analyze_and_generate_mutations,
+    executor::{execute_mutation_test, truncate_output_tail},
+    MutationConfig,
 };
 use crate::project::discover_projects;
 use crate::repo_config::RepoConfig;
@@ -2046,15 +2048,30 @@ impl Daemon {
                         continue;
                     }
 
-                    // Log killed mutations with test output for debugging
-                    if result.outcome == crate::mutation::TestOutcome::Killed {
-                        tracing::info!(
-                            "Mutation KILLED in {}: {}\nKilling test: {}\nOutput:\n{}",
-                            original_file_path_str,
-                            result.mutation.description,
-                            result.killing_test.as_deref().unwrap_or("unknown"),
-                            result.test_output.as_deref().unwrap_or("(no output)")
-                        );
+                    // Log mutation outcome
+                    match result.outcome {
+                        crate::mutation::TestOutcome::Killed => {
+                            tracing::info!(
+                                "Mutation KILLED in {}: {} (by {})",
+                                original_file_path_str,
+                                result.mutation.description,
+                                result.killing_test.as_deref().unwrap_or("unknown"),
+                            );
+                            if let Some(output) = &result.test_output {
+                                tracing::debug!(
+                                    "Test output:\n{}",
+                                    truncate_output_tail(output, 500)
+                                );
+                            }
+                        }
+                        crate::mutation::TestOutcome::Survived => {
+                            tracing::info!(
+                                "Mutation SURVIVED in {}: {}",
+                                original_file_path_str,
+                                result.mutation.description,
+                            );
+                        }
+                        _ => {}
                     }
 
                     // Build replacements JSON with all replacement info
