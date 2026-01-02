@@ -1892,10 +1892,7 @@ impl Daemon {
                     .to_string_lossy();
 
                 // Find matching rule from validated rules only - skip file if no rule matches
-                let rule = match valid_rules
-                    .iter()
-                    .find(|r| glob_match::glob_match(&r.glob, &relative_path))
-                {
+                let rule = match valid_rules.iter().find(|r| r.matches(&relative_path)) {
                     Some(r) => *r,
                     None => {
                         tracing::debug!("Skipping {}: no matching mutation rule", relative_path);

@@ -155,6 +155,10 @@ pub struct MutationRepoConfig {
 pub struct MutationRule {
     /// Glob pattern to match file paths (e.g., `"**/*.rs"`, `"src/**/*.ts"`).
     pub glob: String,
+    /// Optional glob pattern to exclude files that matched `glob`.
+    /// Useful for excluding test files (e.g., `"**/*.test.ts"`).
+    #[serde(default)]
+    pub glob_ignore: Option<String>,
     /// Command to run for build/compile checking.
     pub build_command: String,
     /// Command to run tests.
@@ -166,6 +170,24 @@ pub struct MutationRule {
 
 fn default_timeout() -> u64 {
     300
+}
+
+impl MutationRule {
+    /// Check if this rule matches the given file path.
+    ///
+    /// Returns `true` if the file matches `glob` and does NOT match `glob_ignore`.
+    pub fn matches(&self, file_path: &str) -> bool {
+        if !glob_match::glob_match(&self.glob, file_path) {
+            return false;
+        }
+        // If glob_ignore is set and matches, exclude this file
+        if let Some(ref ignore_pattern) = self.glob_ignore {
+            if glob_match::glob_match(ignore_pattern, file_path) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 impl RepoConfig {
@@ -264,12 +286,11 @@ impl RepoConfig {
 impl MutationRepoConfig {
     /// Find the first rule matching the given file path.
     ///
+    /// A rule matches if the file matches `glob` and does NOT match `glob_ignore`.
     /// Returns `None` if no rule matches, indicating the file should be skipped.
     #[allow(dead_code)]
     pub fn find_rule(&self, file_path: &str) -> Option<&MutationRule> {
-        self.rules
-            .iter()
-            .find(|rule| glob_match::glob_match(&rule.glob, file_path))
+        self.rules.iter().find(|rule| rule.matches(file_path))
     }
 }
 
@@ -366,6 +387,7 @@ timeout_seconds = 600
         let config = MutationRepoConfig {
             rules: vec![MutationRule {
                 glob: "**/*.rs".to_string(),
+                glob_ignore: None,
                 build_command: "cargo check".to_string(),
                 test_command: "cargo test".to_string(),
                 timeout_seconds: 300,
@@ -383,6 +405,7 @@ timeout_seconds = 600
         let config = MutationRepoConfig {
             rules: vec![MutationRule {
                 glob: "packages/frontend/**/*.tsx".to_string(),
+                glob_ignore: None,
                 build_command: "npm run build".to_string(),
                 test_command: "npm test".to_string(),
                 timeout_seconds: 300,
@@ -403,12 +426,14 @@ timeout_seconds = 600
             rules: vec![
                 MutationRule {
                     glob: "src/special/**/*.rs".to_string(),
+                    glob_ignore: None,
                     build_command: "special check".to_string(),
                     test_command: "special test".to_string(),
                     timeout_seconds: 100,
                 },
                 MutationRule {
                     glob: "**/*.rs".to_string(),
+                    glob_ignore: None,
                     build_command: "cargo check".to_string(),
                     test_command: "cargo test".to_string(),
                     timeout_seconds: 300,
@@ -430,6 +455,7 @@ timeout_seconds = 600
         let config = MutationRepoConfig {
             rules: vec![MutationRule {
                 glob: "**/*.rs".to_string(),
+                glob_ignore: None,
                 build_command: "cargo check".to_string(),
                 test_command: "cargo test".to_string(),
                 timeout_seconds: 300,
@@ -601,5 +627,131 @@ test_command = "cargo test"
         let result = check_config_security(&config_path);
         assert!(matches!(result, ConfigSecurityCheck::MetadataError(_)));
         assert!(!result.is_safe());
+    }
+
+    #[test]
+    fn test_glob_ignore_excludes_test_files() {
+        let config = MutationRepoConfig {
+            rules: vec![MutationRule {
+                glob: "**/*.ts".to_string(),
+                glob_ignore: Some("**/*.test.ts".to_string()),
+                build_command: "npm run build".to_string(),
+                test_command: "npm test".to_string(),
+                timeout_seconds: 300,
+            }],
+        };
+
+        // Should match regular .ts files
+        assert!(config.find_rule("src/utils.ts").is_some());
+        assert!(config.find_rule("src/components/Button.ts").is_some());
+
+        // Should NOT match .test.ts files
+        assert!(config.find_rule("src/utils.test.ts").is_none());
+        assert!(config.find_rule("src/components/Button.test.ts").is_none());
+    }
+
+    #[test]
+    fn test_glob_ignore_excludes_spec_files() {
+        let config = MutationRepoConfig {
+            rules: vec![MutationRule {
+                glob: "**/*.ts".to_string(),
+                glob_ignore: Some("**/*.spec.ts".to_string()),
+                build_command: "npm run build".to_string(),
+                test_command: "npm test".to_string(),
+                timeout_seconds: 300,
+            }],
+        };
+
+        assert!(config.find_rule("src/service.ts").is_some());
+        assert!(config.find_rule("src/service.spec.ts").is_none());
+    }
+
+    #[test]
+    fn test_glob_ignore_excludes_directory() {
+        let config = MutationRepoConfig {
+            rules: vec![MutationRule {
+                glob: "**/*.ts".to_string(),
+                glob_ignore: Some("**/test/**".to_string()),
+                build_command: "npm run build".to_string(),
+                test_command: "npm test".to_string(),
+                timeout_seconds: 300,
+            }],
+        };
+
+        assert!(config.find_rule("src/utils.ts").is_some());
+        assert!(config.find_rule("src/test/utils.ts").is_none());
+        assert!(config.find_rule("test/integration.ts").is_none());
+    }
+
+    #[test]
+    fn test_glob_ignore_none_matches_all() {
+        let config = MutationRepoConfig {
+            rules: vec![MutationRule {
+                glob: "**/*.ts".to_string(),
+                glob_ignore: None,
+                build_command: "npm run build".to_string(),
+                test_command: "npm test".to_string(),
+                timeout_seconds: 300,
+            }],
+        };
+
+        // Without glob_ignore, all .ts files should match
+        assert!(config.find_rule("src/utils.ts").is_some());
+        assert!(config.find_rule("src/utils.test.ts").is_some());
+        assert!(config.find_rule("test/integration.ts").is_some());
+    }
+
+    #[test]
+    fn test_mutation_rule_matches_method() {
+        let rule = MutationRule {
+            glob: "**/*.ts".to_string(),
+            glob_ignore: Some("**/*.test.ts".to_string()),
+            build_command: "npm run build".to_string(),
+            test_command: "npm test".to_string(),
+            timeout_seconds: 300,
+        };
+
+        assert!(rule.matches("src/utils.ts"));
+        assert!(!rule.matches("src/utils.test.ts"));
+        assert!(!rule.matches("src/main.rs")); // wrong extension
+    }
+
+    #[test]
+    fn test_load_glob_ignore_from_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_content = r#"
+[[mutation.rules]]
+glob = "**/*.ts"
+glob_ignore = "**/*.test.ts"
+build_command = "npm run build"
+test_command = "npm test"
+"#;
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
+
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
+        assert_eq!(config.mutation.rules.len(), 1);
+        assert_eq!(
+            config.mutation.rules[0].glob_ignore,
+            Some("**/*.test.ts".to_string())
+        );
+
+        // Verify it works correctly
+        assert!(config.mutation.find_rule("src/utils.ts").is_some());
+        assert!(config.mutation.find_rule("src/utils.test.ts").is_none());
+    }
+
+    #[test]
+    fn test_load_glob_ignore_defaults_to_none() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_content = r#"
+[[mutation.rules]]
+glob = "**/*.ts"
+build_command = "npm run build"
+test_command = "npm test"
+"#;
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
+
+        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
+        assert_eq!(config.mutation.rules[0].glob_ignore, None);
     }
 }

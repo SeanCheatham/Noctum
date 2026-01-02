@@ -196,13 +196,14 @@ Each `[[mutation.rules]]` section defines how to test files matching a glob patt
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `glob` | string | Yes | Glob pattern to match files (e.g., `"**/*.rs"`, `"src/**/*.ts"`) |
+| `glob_ignore` | string | No | Glob pattern to exclude files that matched `glob` (e.g., `"**/*.test.ts"`) |
 | `build_command` | string | Yes | Command to verify the code compiles |
 | `test_command` | string | Yes | Command to run tests |
 | `timeout_seconds` | integer | No | Test timeout in seconds (default: 300) |
 
 ### TypeScript/Node.js Projects
 
-For TypeScript projects, use `copy_ignore` to exclude `node_modules` and use `setup_command` to reinstall dependencies:
+For TypeScript projects, use `copy_ignore` to exclude `node_modules`, `glob_ignore` to skip test files, and `setup_command` to reinstall dependencies:
 
 ```toml
 enable_mutation_testing = true
@@ -211,6 +212,7 @@ setup_command = "npm ci"
 
 [[mutation.rules]]
 glob = "src/**/*.ts"
+glob_ignore = "**/*.test.ts"
 build_command = "npm run build"
 test_command = "npm test"
 timeout_seconds = 600
