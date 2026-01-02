@@ -409,7 +409,15 @@ async fn run_tests_with_command(
         }
     };
 
-    // Use LLM to analyze test output for more accurate classification
+    // Optimization: exit code 0 means tests passed - skip LLM analysis
+    // This saves an inference call for every surviving mutation
+    if exit_code == Some(0) {
+        return TestResult::Passed;
+    }
+
+    // For non-zero exit codes, use LLM to analyze test output
+    // This helps extract the specific failing test name and distinguish
+    // between test failures vs. compile errors
     let truncated_output = truncate_output(&output, config.max_test_output_bytes);
 
     match analyze_test_output(client, &truncated_output, exit_code).await {
