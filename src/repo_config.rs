@@ -1,12 +1,12 @@
 //! Repository-level configuration.
 //!
-//! Handles loading and parsing `.noctum.toml` configuration files from repositories.
+//! Handles loading and parsing `noctum.toml` configuration files from repositories.
 //! This configuration controls which analysis features are enabled and defines
 //! build/test commands for mutation testing.
 //!
 //! # Security
 //!
-//! The `.noctum.toml` file can specify arbitrary shell commands that will be executed
+//! The `noctum.toml` file can specify arbitrary shell commands that will be executed
 //! during mutation testing. This is a security-sensitive operation. Before loading
 //! a config file, we validate:
 //!
@@ -104,7 +104,7 @@ pub fn check_config_security(_config_path: &Path) -> ConfigSecurityCheck {
     ConfigSecurityCheck::NotSupported
 }
 
-/// Repository-level configuration loaded from `.noctum.toml`.
+/// Repository-level configuration loaded from `noctum.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RepoConfig {
     /// Enable code analysis (File Analysis tab). Default: false.
@@ -164,12 +164,12 @@ fn default_timeout() -> u64 {
 }
 
 impl RepoConfig {
-    /// Check if `.noctum.toml` exists in the repository.
+    /// Check if `noctum.toml` exists in the repository.
     pub fn exists(repo_path: &Path) -> bool {
-        repo_path.join(".noctum.toml").exists()
+        repo_path.join("noctum.toml").exists()
     }
 
-    /// Load configuration from `.noctum.toml`.
+    /// Load configuration from `noctum.toml`.
     ///
     /// Returns `Some(config)` if the file exists, passes security checks, and is valid.
     /// Returns `None` if:
@@ -199,7 +199,7 @@ impl RepoConfig {
     }
 
     fn load_internal(repo_path: &Path, check_security: bool) -> Option<Self> {
-        let config_path = repo_path.join(".noctum.toml");
+        let config_path = repo_path.join("noctum.toml");
         if !config_path.exists() {
             return None;
         }
@@ -216,7 +216,7 @@ impl RepoConfig {
                     actual_uid,
                 } => {
                     tracing::warn!(
-                        "Rejecting .noctum.toml at {:?}: file is owned by uid {} but current user is uid {}. \
+                        "Rejecting noctum.toml at {:?}: file is owned by uid {} but current user is uid {}. \
                          Config files with shell commands must be owned by the current user for security.",
                         config_path,
                         actual_uid,
@@ -226,7 +226,7 @@ impl RepoConfig {
                 }
                 ConfigSecurityCheck::WorldWritable => {
                     tracing::warn!(
-                        "Rejecting .noctum.toml at {:?}: file is world-writable. \
+                        "Rejecting noctum.toml at {:?}: file is world-writable. \
                          Config files with shell commands must not be world-writable for security. \
                          Fix with: chmod o-w {:?}",
                         config_path,
@@ -236,7 +236,7 @@ impl RepoConfig {
                 }
                 ConfigSecurityCheck::MetadataError(e) => {
                     tracing::warn!(
-                        "Rejecting .noctum.toml at {:?}: could not read file metadata: {}",
+                        "Rejecting noctum.toml at {:?}: could not read file metadata: {}",
                         config_path,
                         e
                     );
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_exists_returns_true_when_present() {
         let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".noctum.toml"), "").unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), "").unwrap();
         assert!(RepoConfig::exists(temp_dir.path()));
     }
 
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn test_load_empty_file_returns_default() {
         let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".noctum.toml"), "").unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), "").unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.mutation.rules.is_empty());
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn test_load_whitespace_only_returns_default() {
         let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".noctum.toml"), "   \n\n  ").unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), "   \n\n  ").unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.mutation.rules.is_empty());
@@ -330,7 +330,7 @@ build_command = "npm run build"
 test_command = "npm test"
 timeout_seconds = 600
 "#;
-        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert_eq!(config.mutation.rules.len(), 2);
@@ -351,7 +351,7 @@ timeout_seconds = 600
     #[test]
     fn test_load_invalid_toml_returns_none() {
         let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".noctum.toml"), "invalid {{{{ toml").unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), "invalid {{{{ toml").unwrap();
 
         assert!(RepoConfig::load_unchecked(temp_dir.path()).is_none());
     }
@@ -460,7 +460,7 @@ glob = "**/*.rs"
 build_command = "cargo check"
 test_command = "cargo test"
 "#;
-        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.enable_code_analysis);
@@ -477,7 +477,7 @@ test_command = "cargo test"
         let config_content = r#"
 enable_code_analysis = true
 "#;
-        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.enable_code_analysis);
@@ -498,7 +498,7 @@ glob = "**/*.ts"
 build_command = "npm run build"
 test_command = "npm test"
 "#;
-        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.enable_mutation_testing);
@@ -515,7 +515,7 @@ test_command = "npm test"
         let config_content = r#"
 enable_mutation_testing = true
 "#;
-        std::fs::write(temp_dir.path().join(".noctum.toml"), config_content).unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
 
         let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
         assert!(config.copy_ignore.is_empty());
@@ -525,7 +525,7 @@ enable_mutation_testing = true
     #[test]
     fn test_security_check_safe_file() {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".noctum.toml");
+        let config_path = temp_dir.path().join("noctum.toml");
         std::fs::write(&config_path, "enable_code_analysis = true").unwrap();
 
         // File created by current user should be safe
@@ -539,7 +539,7 @@ enable_mutation_testing = true
         use std::os::unix::fs::PermissionsExt;
 
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".noctum.toml");
+        let config_path = temp_dir.path().join("noctum.toml");
         std::fs::write(&config_path, "enable_code_analysis = true").unwrap();
 
         // Make the file world-writable
@@ -556,7 +556,7 @@ enable_mutation_testing = true
     #[test]
     fn test_security_check_nonexistent_file() {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".noctum.toml");
+        let config_path = temp_dir.path().join("noctum.toml");
 
         let result = check_config_security(&config_path);
         assert!(matches!(result, ConfigSecurityCheck::MetadataError(_)));

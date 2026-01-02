@@ -136,9 +136,9 @@ Noctum looks for a config file at `~/.config/noctum/config.toml`. See [`config.e
 | `schedule.end_hour` | `6` | End hour (0-23) of the analysis window |
 | `schedule.check_interval_seconds` | `60` | How often to check schedule (seconds) |
 
-## Repository Configuration (`.noctum.toml`)
+## Repository Configuration (`noctum.toml`)
 
-Each repository you want Noctum to analyze must contain a `.noctum.toml` file in its root directory. This file controls which analysis features are enabled and how mutation testing is configured.
+Each repository you want Noctum to analyze must contain a `noctum.toml` file in its root directory. This file controls which analysis features are enabled and how mutation testing is configured.
 
 ### Basic Example
 

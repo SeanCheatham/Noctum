@@ -197,15 +197,15 @@ impl Database {
 
     /// Add a new repository.
     ///
-    /// The repository must contain a `.noctum.toml` configuration file.
+    /// The repository must contain a `noctum.toml` configuration file.
     /// An empty file is acceptable, but the file must exist.
     pub async fn add_repository(&self, path: &str, name: &str) -> Result<i64> {
-        // Validate .noctum.toml exists
+        // Validate noctum.toml exists
         let repo_path = std::path::Path::new(path);
         if !crate::repo_config::RepoConfig::exists(repo_path) {
             anyhow::bail!(
-                "Repository must contain a .noctum.toml configuration file. \
-                 Create one at: {}/.noctum.toml",
+                "Repository must contain a noctum.toml configuration file. \
+                 Create one at: {}/noctum.toml",
                 path
             );
         }
@@ -613,16 +613,16 @@ mod tests {
         (db, temp_dir)
     }
 
-    /// Create a temporary repo directory with a .noctum.toml file.
+    /// Create a temporary repo directory with a noctum.toml file.
     /// Returns the TempDir (must be kept alive for the path to remain valid).
     fn create_test_repo() -> TempDir {
         let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join(".noctum.toml"), "").unwrap();
+        std::fs::write(temp_dir.path().join("noctum.toml"), "").unwrap();
         temp_dir
     }
 
     /// Helper to add a test repository to the database.
-    /// Creates a temp directory with .noctum.toml and adds it to the db.
+    /// Creates a temp directory with noctum.toml and adds it to the db.
     async fn add_test_repo(db: &Database, name: &str) -> (i64, TempDir) {
         let repo_dir = create_test_repo();
         let repo_id = db

@@ -1,0 +1,21 @@
+# A list of directory names to NOT copy to the tmp analysis directory
+copy_ignore = ["target"]
+# When enabled, the background worker will perform code quality analysis
+enable_code_analysis = false
+# When enabled, the background worker will build an architectural summary of the project
+enable_architecture_analysis = false
+# When enabled, the background worker will generate diagrams for the project
+enable_diagram_creation = false
+# When enabled, the background worker will perform mutation tests (NOTE: Requires [[mutation.rules]])
+enable_mutation_testing = true
+
+# Define which files to mutate during testing and how to test those mutations
+[[mutation.rules]]
+# Files which match this pattern will invoke this rule
+glob = "src/**/*.rs"
+# Before each mutation test, run this command to ensure the mutated code compiles. Mutations that don't compile are skipped.
+# These commands are run from the repository root
+# CAUTION: These commands are run as-is
+build_command = "cargo install && cargo check"
+# Run the test and output its result
+test_command = "cargo test"

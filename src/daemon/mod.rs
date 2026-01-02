@@ -1710,7 +1710,7 @@ impl Daemon {
     /// The temp copy is created by `analyze_repository_parallel()` before any analysis,
     /// ensuring the original repository is never modified.
     ///
-    /// Requires a `.noctum.toml` configuration file in the repository with mutation rules.
+    /// Requires a `noctum.toml` configuration file in the repository with mutation rules.
     /// Files without a matching rule are skipped. Baseline tests must pass before mutations.
     async fn run_mutation_testing(
         &self,
@@ -1738,9 +1738,9 @@ impl Daemon {
         }
 
         // Security notice: Log that we're about to execute user-defined commands
-        // The .noctum.toml file has already passed ownership/permission checks in RepoConfig::load()
+        // The noctum.toml file has already passed ownership/permission checks in RepoConfig::load()
         tracing::info!(
-            "Executing shell commands from .noctum.toml for {} ({} rule(s)). \
+            "Executing shell commands from noctum.toml for {} ({} rule(s)). \
              Commands are executed in an isolated temp directory copy of the repository.",
             repo.name,
             repo_config.mutation.rules.len()
