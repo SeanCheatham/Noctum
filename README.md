@@ -15,6 +15,13 @@ Noctum is different. Noctum doesn't work in realtime. It works asynchronously wh
 
 This project is still in development. It's not "production-ready" yet. While the project is still in alpha, releases will be backwards-incompatible.
 
+## Security Considerations
+
+- The commands defined in a repository's `noctum.toml` file are run as-is. Be careful what you put in there, especially if this file is checked into version control.
+- Noctum does not sandbox its execution environment. Commands are run in the same environment as Noctum itself, with the same user and permissions.
+- A mutation test could inadverantly modify the codebase in ways that are not intended. For example, a function which deletes a directory could be mutated to delete your home directory instead.
+- The frontend is not password-protected.
+
 ## What does it actually do?
 
 Install the CLI app, and specify at least one local code repository and one Ollama endpoint in the web dashboard. With the default configuration, Noctum will run from 10pm to 6am, and analyze the codebase during that time.

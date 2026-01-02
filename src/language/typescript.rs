@@ -98,15 +98,7 @@ impl TypeScriptLanguage {
             };
 
             match tokio::time::timeout(timeout, check_future).await {
-                Ok(Ok(output)) => {
-                    if output.status.success() {
-                        Ok(())
-                    } else {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        Err(format!("{}\n{}", stdout, stderr))
-                    }
-                }
+                Ok(Ok(output)) => process_compile_output(output),
                 Ok(Err(e)) => Err(format!("Failed to run tsc --noEmit: {}", e)),
                 Err(_) => Err("TypeScript type check timed out".to_string()),
             }
@@ -590,6 +582,17 @@ fn extract_failing_test(output: &str) -> Option<String> {
     None
 }
 
+/// Process the output of a compile command and return Ok or Err based on success.
+fn process_compile_output(output: std::process::Output) -> Result<(), String> {
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Err(format!("{}\n{}", stdout, stderr))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,5 +706,39 @@ mod tests {
         let failing = extract_failing_test(output);
 
         assert_eq!(failing, Some("should work correctly".to_string()));
+    }
+
+    #[test]
+    fn test_process_compile_output_success() {
+        // Run a command that succeeds to get a valid ExitStatus
+        let output = std::process::Command::new("true").output().unwrap();
+        assert!(output.status.success());
+
+        let result = process_compile_output(output);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_compile_output_failure() {
+        // Run a command that fails to get a failure ExitStatus
+        let output = std::process::Command::new("false").output().unwrap();
+        assert!(!output.status.success());
+
+        let result = process_compile_output(output);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_compile_output_failure_contains_output() {
+        // Run a command that fails and produces stderr
+        let output = std::process::Command::new("sh")
+            .args(["-c", "echo 'error message' >&2; exit 1"])
+            .output()
+            .unwrap();
+
+        let result = process_compile_output(output);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("error message"));
     }
 }

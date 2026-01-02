@@ -176,4 +176,74 @@ mod tests {
         let response: GenerateResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.response, "test response");
     }
+
+    #[tokio::test]
+    async fn test_generate_handles_4xx_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/generate"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("Bad Request"))
+            .mount(&mock_server)
+            .await;
+
+        let client = OllamaClient::new(&mock_server.uri(), "test-model");
+        let result = client.generate("test prompt").await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("400"), "Error should contain status code 400");
+        assert!(err.contains("Bad Request"), "Error should contain body");
+    }
+
+    #[tokio::test]
+    async fn test_generate_handles_5xx_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/generate"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+            .mount(&mock_server)
+            .await;
+
+        let client = OllamaClient::new(&mock_server.uri(), "test-model");
+        let result = client.generate("test prompt").await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("500"),
+            "Error should contain status code 500, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_success() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/generate"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"response": "Hello world"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = OllamaClient::new(&mock_server.uri(), "test-model");
+        let result = client.generate("test prompt").await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Hello world");
+    }
 }

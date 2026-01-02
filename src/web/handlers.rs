@@ -532,7 +532,7 @@ pub async fn api_trigger_scan(State(state): State<Arc<AppState>>) -> impl IntoRe
 }
 
 /// A minimal mutation result for clipboard export
-#[derive(Serialize)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct SurvivedMutation {
     pub file_path: String,
     pub description: String,
@@ -540,25 +540,19 @@ pub struct SurvivedMutation {
     pub replacements: serde_json::Value,
 }
 
-/// API: Get survived mutations for a repository (for clipboard export)
-pub async fn api_survived_mutations(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let repository = match get_repo_or_error(&state.db, id).await {
-        Ok(repo) => repo,
-        Err(response) => return response,
-    };
-
-    let raw_results = state.db.get_mutation_results(id).await.unwrap_or_default();
-
-    let survived: Vec<SurvivedMutation> = raw_results
+/// Filter mutation results to only "survived" ones and convert to API format.
+/// This function is extracted for testability.
+fn filter_survived_mutations(
+    results: Vec<crate::db::MutationResult>,
+    repo_path: &str,
+) -> Vec<SurvivedMutation> {
+    results
         .into_iter()
         .filter(|r| r.test_outcome == "survived")
         .map(|r| {
             let relative_path = r
                 .file_path
-                .strip_prefix(&repository.path)
+                .strip_prefix(repo_path)
                 .map(|p| p.trim_start_matches('/'))
                 .unwrap_or(&r.file_path)
                 .to_string();
@@ -573,7 +567,113 @@ pub async fn api_survived_mutations(
                 replacements,
             }
         })
-        .collect();
+        .collect()
+}
+
+/// API: Get survived mutations for a repository (for clipboard export)
+pub async fn api_survived_mutations(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let repository = match get_repo_or_error(&state.db, id).await {
+        Ok(repo) => repo,
+        Err(response) => return response,
+    };
+
+    let raw_results = state.db.get_mutation_results(id).await.unwrap_or_default();
+    let survived = filter_survived_mutations(raw_results, &repository.path);
 
     Json(survived).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::MutationResult;
+
+    fn make_mutation_result(
+        file_path: &str,
+        description: &str,
+        test_outcome: &str,
+        replacements_json: &str,
+    ) -> MutationResult {
+        MutationResult {
+            id: 1,
+            repository_id: 1,
+            file_path: file_path.to_string(),
+            description: description.to_string(),
+            reasoning: "test reasoning".to_string(),
+            replacements_json: replacements_json.to_string(),
+            test_outcome: test_outcome.to_string(),
+            killing_test: None,
+            test_output: None,
+            execution_time_ms: None,
+            content_hash: None,
+            created_at: "2024-01-01".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_filter_survived_mutations_filters_correctly() {
+        let results = vec![
+            make_mutation_result("/repo/src/main.rs", "desc1", "survived", "[]"),
+            make_mutation_result("/repo/src/lib.rs", "desc2", "killed", "[]"),
+            make_mutation_result("/repo/src/test.rs", "desc3", "survived", "[]"),
+        ];
+
+        let survived = filter_survived_mutations(results, "/repo");
+
+        assert_eq!(survived.len(), 2);
+        assert!(survived.iter().all(|m| m.test_outcome == "survived"));
+    }
+
+    #[test]
+    fn test_filter_survived_mutations_strips_repo_prefix() {
+        let results = vec![make_mutation_result(
+            "/home/user/project/src/main.rs",
+            "desc",
+            "survived",
+            "[]",
+        )];
+
+        let survived = filter_survived_mutations(results, "/home/user/project");
+
+        assert_eq!(survived.len(), 1);
+        assert_eq!(survived[0].file_path, "src/main.rs");
+    }
+
+    #[test]
+    fn test_filter_survived_mutations_parses_replacements() {
+        let replacements = r#"[{"line": 10, "find": "x > 0", "replace": "x >= 0"}]"#;
+        let results = vec![make_mutation_result(
+            "/repo/file.rs",
+            "Changed > to >=",
+            "survived",
+            replacements,
+        )];
+
+        let survived = filter_survived_mutations(results, "/repo");
+
+        assert_eq!(survived.len(), 1);
+        assert!(survived[0].replacements.is_array());
+        assert_eq!(survived[0].replacements.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_filter_survived_mutations_empty_input() {
+        let results: Vec<MutationResult> = vec![];
+        let survived = filter_survived_mutations(results, "/repo");
+        assert!(survived.is_empty());
+    }
+
+    #[test]
+    fn test_filter_survived_mutations_no_survived() {
+        let results = vec![
+            make_mutation_result("/repo/a.rs", "desc1", "killed", "[]"),
+            make_mutation_result("/repo/b.rs", "desc2", "timeout", "[]"),
+        ];
+
+        let survived = filter_survived_mutations(results, "/repo");
+        assert!(survived.is_empty());
+    }
 }
