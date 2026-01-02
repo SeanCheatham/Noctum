@@ -117,6 +117,11 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> anyhow
         .route("/api/config/reload", post(handlers::api_reload_config))
         // Scan API
         .route("/api/scan/trigger", post(handlers::api_trigger_scan))
+        // Mutations API
+        .route(
+            "/api/repositories/:id/mutations/survived",
+            get(handlers::api_survived_mutations),
+        )
         // Static files (embedded in binary)
         .route("/static/*path", get(serve_static))
         // State

@@ -530,3 +530,50 @@ pub async fn api_trigger_scan(State(state): State<Arc<AppState>>) -> impl IntoRe
         Json(serde_json::json!({ "success": true, "message": "Scan triggered" })),
     )
 }
+
+/// A minimal mutation result for clipboard export
+#[derive(Serialize)]
+pub struct SurvivedMutation {
+    pub file_path: String,
+    pub description: String,
+    pub test_outcome: String,
+    pub replacements: serde_json::Value,
+}
+
+/// API: Get survived mutations for a repository (for clipboard export)
+pub async fn api_survived_mutations(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let repository = match get_repo_or_error(&state.db, id).await {
+        Ok(repo) => repo,
+        Err(response) => return response,
+    };
+
+    let raw_results = state.db.get_mutation_results(id).await.unwrap_or_default();
+
+    let survived: Vec<SurvivedMutation> = raw_results
+        .into_iter()
+        .filter(|r| r.test_outcome == "survived")
+        .map(|r| {
+            let relative_path = r
+                .file_path
+                .strip_prefix(&repository.path)
+                .map(|p| p.trim_start_matches('/'))
+                .unwrap_or(&r.file_path)
+                .to_string();
+
+            let replacements: serde_json::Value =
+                serde_json::from_str(&r.replacements_json).unwrap_or(serde_json::json!([]));
+
+            SurvivedMutation {
+                file_path: relative_path,
+                description: r.description,
+                test_outcome: r.test_outcome,
+                replacements,
+            }
+        })
+        .collect();
+
+    Json(survived).into_response()
+}

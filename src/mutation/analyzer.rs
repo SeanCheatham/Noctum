@@ -181,7 +181,7 @@ fn add_line_numbers(code: &str) -> String {
 fn analysis_prompt(file_path: &str, code: &str) -> String {
     let numbered_code = add_line_numbers(code);
     format!(
-        r#"You are a mutation testing expert. Analyze this Rust code and generate up to 3 small, targeted mutations.
+        r#"You are a mutation testing expert. Analyze this Rust code and generate up to 3 small, targeted mutations. Focus on business logic and important functionality.
 
 VALID mutation types:
 - Comparison operators: > to >=, < to <=, == to !=, etc.

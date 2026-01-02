@@ -99,6 +99,21 @@
         font-size: 0.875rem;
         margin-left: auto;
     }
+    .copy-btn {
+        background: var(--accent);
+        color: white;
+        border: none;
+        padding: 0.375rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.875rem;
+        cursor: pointer;
+    }
+    .copy-btn:hover {
+        opacity: 0.9;
+    }
+    .copy-btn.copied {
+        background: #3fb950;
+    }
 
     .mutation-table {
         width: 100%;
@@ -334,6 +349,9 @@
             <span id="visible-count">0</span> of
             <span id="total-count">0</span> mutations
         </div>
+        <button id="copy-btn" class="copy-btn" onclick="copySurvivedMutations()">
+            Copy Survived Mutations
+        </button>
     </div>
     <div class="table-container">
         <table class="mutation-table" id="mutation-table">
@@ -470,6 +488,31 @@
                 /`([^`]+)`/g,
                 "<code style=\"background: var(--bg-tertiary); padding: 0.125rem 0.375rem; border-radius: 3px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 0.8125rem;\">$1</code>",
             );
+        }
+
+        async function copySurvivedMutations() {
+            const btn = document.getElementById('copy-btn');
+            const originalText = btn.textContent;
+
+            try {
+                btn.textContent = 'Loading...';
+                const response = await fetch('/api/repositories/{{ repository.id }}/mutations/survived');
+                const mutations = await response.json();
+
+                await navigator.clipboard.writeText(JSON.stringify(mutations, null, 2));
+
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 2000);
+            } catch (e) {
+                btn.textContent = 'Error';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            }
         }
 
         function applyFilters() {
