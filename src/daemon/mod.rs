@@ -5,7 +5,7 @@ use crate::diagram::{
     clean_dot_output, render_dot_to_svg, validate_dot_syntax, DiagramExtractor, DiagramGenerator,
     DiagramType,
 };
-use crate::language::Language;
+use crate::language;
 use crate::mutation::{
     analyze_and_generate_mutations,
     executor::{execute_mutation_test, truncate_output_tail},
@@ -408,8 +408,6 @@ struct AnalysisTask {
     content: String,
     content_hash: String,
     task_type: AnalysisTaskType,
-    /// The programming language of the file being analyzed.
-    language: Language,
 }
 
 /// Handle for controlling the daemon from outside (e.g., web handlers).
@@ -735,68 +733,63 @@ impl Daemon {
             projects.iter().map(|p| &p.name).collect::<Vec<_>>()
         );
 
-        // Collect source files from all projects with their language
-        // file_data now includes: (original_path, content, hash, language)
-        let mut file_data: Vec<(PathBuf, String, String, Language)> = Vec::new();
-        let mut context_file_data: Vec<(PathBuf, String, String, Language)> = Vec::new();
+        // Collect source files using config-based file discovery
+        // file_data now includes: (original_path, content, hash)
+        let mut file_data: Vec<(PathBuf, String, String)> = Vec::new();
+        let mut context_file_data: Vec<(PathBuf, String, String)> = Vec::new();
 
-        for project in &projects {
-            // Find source files for this project
-            let source_files = project.language.find_source_files(&project.root)?;
+        // Use file discovery config (with auto-detected defaults if not specified)
+        let source_files = repo_config
+            .file_discovery
+            .find_source_files(temp_repo_path)?;
+        let min_size = repo_config.file_discovery.min_file_size;
+        let max_size = repo_config.file_discovery.max_file_size;
 
-            for file_path in source_files {
-                let content = match tokio::fs::read_to_string(&file_path).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("Failed to read file {:?}: {}", file_path, e);
-                        continue;
-                    }
-                };
-
-                // Use language-specific size limits
-                let min_size = project.language.min_file_size();
-                let max_size = project.language.max_file_size();
-                if content.len() > max_size || content.len() < min_size {
-                    tracing::debug!("Skipping file due to size: {:?}", file_path);
+        for file_path in source_files {
+            let content = match tokio::fs::read_to_string(&file_path).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to read file {:?}: {}", file_path, e);
                     continue;
                 }
+            };
 
-                let original_file_path =
-                    translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
-                let content_hash = compute_hash(&content);
-
-                file_data.push((original_file_path, content, content_hash, project.language));
+            // Use config-based size limits
+            if content.len() > max_size || content.len() < min_size {
+                tracing::debug!("Skipping file due to size: {:?}", file_path);
+                continue;
             }
 
-            // Find context files for this project
-            let ctx_files = project.language.find_context_files(&project.root)?;
+            let original_file_path =
+                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
+            let content_hash = compute_hash(&content);
 
-            for file_path in ctx_files {
-                let content = match tokio::fs::read_to_string(&file_path).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("Failed to read context file {:?}: {}", file_path, e);
-                        continue;
-                    }
-                };
+            file_data.push((original_file_path, content, content_hash));
+        }
 
-                // Context files have different size limits
-                if content.len() > project.language.max_file_size() {
-                    tracing::debug!("Skipping context file due to size: {:?}", file_path);
+        // Find context files using generic helper
+        let ctx_files = language::find_context_files(temp_repo_path)?;
+
+        for file_path in ctx_files {
+            let content = match tokio::fs::read_to_string(&file_path).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to read context file {:?}: {}", file_path, e);
                     continue;
                 }
+            };
 
-                let original_file_path =
-                    translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
-                let content_hash = compute_hash(&content);
-
-                context_file_data.push((
-                    original_file_path,
-                    content,
-                    content_hash,
-                    project.language,
-                ));
+            // Context files have same max size limit
+            if content.len() > max_size {
+                tracing::debug!("Skipping context file due to size: {:?}", file_path);
+                continue;
             }
+
+            let original_file_path =
+                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
+            let content_hash = compute_hash(&content);
+
+            context_file_data.push((original_file_path, content, content_hash));
         }
 
         if file_data.is_empty() {
@@ -818,7 +811,7 @@ impl Daemon {
         // Compute combined hash for diagram change detection
         let combined_hash = {
             let mut hasher = Sha256::new();
-            for (_, _, hash, _) in &file_data {
+            for (_, _, hash) in &file_data {
                 hasher.update(hash.as_bytes());
             }
             format!("{:x}", hasher.finalize())
@@ -997,7 +990,7 @@ impl Daemon {
     async fn run_code_understanding_analysis(
         &self,
         repo: &crate::db::Repository,
-        file_data: &[(PathBuf, String, String, Language)],
+        file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
         let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
@@ -1020,7 +1013,7 @@ impl Daemon {
         let repository_id = repo.id;
         let mut tasks_sent = 0;
 
-        for (file_path, content, content_hash, language) in file_data {
+        for (file_path, content, content_hash) in file_data {
             if self.should_stop.load(Ordering::SeqCst) {
                 break;
             }
@@ -1048,7 +1041,6 @@ impl Daemon {
                 content: content.clone(),
                 content_hash: content_hash.clone(),
                 task_type: AnalysisTaskType::CodeUnderstanding,
-                language: *language,
             };
 
             if tx.send(task).await.is_err() {
@@ -1072,7 +1064,7 @@ impl Daemon {
     async fn run_architecture_file_analysis(
         &self,
         repo: &crate::db::Repository,
-        file_data: &[(PathBuf, String, String, Language)],
+        file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
         let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
@@ -1095,7 +1087,7 @@ impl Daemon {
         let repository_id = repo.id;
         let mut tasks_sent = 0;
 
-        for (file_path, content, content_hash, language) in file_data {
+        for (file_path, content, content_hash) in file_data {
             if self.should_stop.load(Ordering::SeqCst) {
                 break;
             }
@@ -1123,7 +1115,6 @@ impl Daemon {
                 content: content.clone(),
                 content_hash: content_hash.clone(),
                 task_type: AnalysisTaskType::ArchitectureFileAnalysis,
-                language: *language,
             };
 
             if tx.send(task).await.is_err() {
@@ -1147,7 +1138,7 @@ impl Daemon {
     async fn run_diagram_extractions(
         &self,
         repo: &crate::db::Repository,
-        file_data: &[(PathBuf, String, String, Language)],
+        file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
         let (tx, rx) = mpsc::channel::<AnalysisTask>(100);
@@ -1174,7 +1165,7 @@ impl Daemon {
         for diagram_type in DiagramType::all() {
             let analysis_type_str = format!("diagram_extraction_{}", diagram_type.as_str());
 
-            for (file_path, content, content_hash, language) in file_data {
+            for (file_path, content, content_hash) in file_data {
                 if self.should_stop.load(Ordering::SeqCst) {
                     break;
                 }
@@ -1198,7 +1189,6 @@ impl Daemon {
                     content: content.clone(),
                     content_hash: content_hash.clone(),
                     task_type: AnalysisTaskType::DiagramExtraction(*diagram_type),
-                    language: *language,
                 };
 
                 if tx.send(task).await.is_err() {
@@ -1223,7 +1213,7 @@ impl Daemon {
     async fn run_documentation_analysis(
         &self,
         repo: &crate::db::Repository,
-        context_file_data: &[(PathBuf, String, String, Language)],
+        context_file_data: &[(PathBuf, String, String)],
         endpoints: &[OllamaEndpoint],
     ) -> anyhow::Result<bool> {
         if context_file_data.is_empty() {
@@ -1250,7 +1240,7 @@ impl Daemon {
         let repository_id = repo.id;
         let mut tasks_sent = 0;
 
-        for (file_path, content, content_hash, language) in context_file_data {
+        for (file_path, content, content_hash) in context_file_data {
             if self.should_stop.load(Ordering::SeqCst) {
                 break;
             }
@@ -1278,7 +1268,6 @@ impl Daemon {
                 content: content.clone(),
                 content_hash: content_hash.clone(),
                 task_type: AnalysisTaskType::DocumentationAnalysis,
-                language: *language,
             };
 
             if tx.send(task).await.is_err() {
@@ -1640,7 +1629,7 @@ impl Daemon {
         };
 
         let prompt = format!(
-            "You are analyzing a Rust codebase called '{}'.\n\n\
+            "You are analyzing a codebase called '{}'.\n\n\
              {}\
              # Code Architecture Analyses\n\
              Below are architecture-focused analyses of individual source files:\n{}\n\n\
@@ -1864,9 +1853,6 @@ impl Daemon {
             }
         };
 
-        // Discover projects to run mutation testing per-project
-        let projects = discover_projects(temp_repo_path)?;
-
         let mut total_mutations = 0;
         let mut current_client = client;
         let mut current_endpoint_idx = endpoints
@@ -1874,252 +1860,241 @@ impl Daemon {
             .position(|e| e.name == endpoint_name)
             .unwrap_or(0);
 
-        for project in projects {
+        // Use config-based file discovery for mutation testing
+        let source_files = repo_config
+            .file_discovery
+            .find_source_files(temp_repo_path)?;
+        let min_size = repo_config.file_discovery.min_mutation_file_size;
+        let max_size = repo_config.file_discovery.max_mutation_file_size;
+
+        for file_path in source_files {
             if self.should_stop.load(Ordering::SeqCst) {
                 break;
             }
 
-            // Find source files for this project
-            let source_files = project.language.find_source_files(&project.root)?;
+            // Get relative path for glob matching
+            let relative_path = file_path
+                .strip_prefix(temp_repo_path)
+                .unwrap_or(&file_path)
+                .to_string_lossy();
 
-            for file_path in source_files {
+            // Find matching rule from validated rules only - skip file if no rule matches
+            let rule = match valid_rules.iter().find(|r| r.matches(&relative_path)) {
+                Some(r) => *r,
+                None => {
+                    tracing::debug!("Skipping {}: no matching mutation rule", relative_path);
+                    continue;
+                }
+            };
+
+            // Read file from temp copy
+            let content = match tokio::fs::read_to_string(&file_path).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            // Use config-based size limits for mutations
+            if content.len() < min_size || content.len() > max_size {
+                continue;
+            }
+
+            let content_hash = compute_hash(&content);
+
+            // Keep temp path for file operations (analyzer and executor)
+            let temp_file_path_str = file_path.to_string_lossy().to_string();
+
+            // Translate temp path back to original for DB lookups and storage
+            let original_file_path =
+                translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
+            let original_file_path_str = original_file_path.to_string_lossy().to_string();
+
+            // Check if already tested with this hash (using original path for DB lookup)
+            if self
+                .db
+                .has_mutation_results_for_hash(repo.id, &original_file_path_str, &content_hash)
+                .await
+                .unwrap_or(false)
+            {
+                tracing::debug!(
+                    "Skipping mutation testing for unchanged file: {}",
+                    original_file_path_str
+                );
+                continue;
+            }
+
+            // Analyze and generate mutations, with endpoint fallback
+            // Pass temp path so mutations store temp paths for executor to use
+            tracing::debug!("Analyzing mutations for {}", original_file_path_str);
+            let mutations = match analyze_and_generate_mutations(
+                &current_client,
+                &temp_file_path_str,
+                &content,
+                config.max_mutations_per_file,
+            )
+            .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to analyze mutations in {} with current endpoint: {}",
+                        original_file_path_str,
+                        e
+                    );
+
+                    // Try to find another endpoint
+                    let remaining = &endpoints[current_endpoint_idx + 1..];
+                    if let Some((new_client, new_name)) = find_available_endpoint(remaining).await {
+                        tracing::info!("Switching to endpoint {} for mutation analysis", new_name);
+                        current_client = new_client;
+                        current_endpoint_idx = endpoints
+                            .iter()
+                            .position(|ep| ep.name == new_name)
+                            .unwrap_or(current_endpoint_idx);
+
+                        // Retry with new endpoint
+                        match analyze_and_generate_mutations(
+                            &current_client,
+                            &temp_file_path_str,
+                            &content,
+                            config.max_mutations_per_file,
+                        )
+                        .await
+                        {
+                            Ok(m) => m,
+                            Err(e2) => {
+                                tracing::warn!(
+                                    "Retry also failed for {}: {}",
+                                    original_file_path_str,
+                                    e2
+                                );
+                                continue;
+                            }
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+            };
+
+            if mutations.is_empty() {
+                tracing::debug!("No mutations generated for {}", original_file_path_str);
+                continue;
+            }
+
+            tracing::info!(
+                "Generated {} mutations for {}",
+                mutations.len(),
+                original_file_path_str
+            );
+
+            // Pre-compute original lines for building replacement details
+            let original_lines: Vec<&str> = content.lines().collect();
+
+            for mutation in mutations {
                 if self.should_stop.load(Ordering::SeqCst) {
                     break;
                 }
 
-                // Get relative path for glob matching
-                let relative_path = file_path
-                    .strip_prefix(temp_repo_path)
-                    .unwrap_or(&file_path)
-                    .to_string_lossy();
-
-                // Find matching rule from validated rules only - skip file if no rule matches
-                let rule = match valid_rules.iter().find(|r| r.matches(&relative_path)) {
-                    Some(r) => *r,
-                    None => {
-                        tracing::debug!("Skipping {}: no matching mutation rule", relative_path);
+                // Execute the mutation test using configured commands
+                // Use temp_repo_path as the project root for mutation testing
+                let result = match execute_mutation_test(
+                    &current_client,
+                    temp_repo_path,
+                    mutation,
+                    &content,
+                    &config,
+                    &rule.build_command,
+                    &rule.test_command,
+                    rule.timeout_seconds,
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!("Failed to execute mutation test: {}", e);
                         continue;
                     }
                 };
 
-                // Read file from temp copy
-                let content = match tokio::fs::read_to_string(&file_path).await {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-
-                // Use language-specific size limits for mutations
-                let min_size = project.language.min_mutation_file_size();
-                let max_size = project.language.max_mutation_file_size();
-                if content.len() < min_size || content.len() > max_size {
-                    continue;
-                }
-
-                let content_hash = compute_hash(&content);
-
-                // Keep temp path for file operations (analyzer and executor)
-                let temp_file_path_str = file_path.to_string_lossy().to_string();
-
-                // Translate temp path back to original for DB lookups and storage
-                let original_file_path =
-                    translate_temp_to_original(temp_repo_path, original_repo_path, &file_path);
-                let original_file_path_str = original_file_path.to_string_lossy().to_string();
-
-                // Check if already tested with this hash (using original path for DB lookup)
-                if self
-                    .db
-                    .has_mutation_results_for_hash(repo.id, &original_file_path_str, &content_hash)
-                    .await
-                    .unwrap_or(false)
-                {
+                // Skip compile errors - they're not useful to the user
+                // Just log them for debugging purposes
+                if result.outcome == crate::mutation::TestOutcome::CompileError {
                     tracing::debug!(
-                        "Skipping mutation testing for unchanged file: {}",
-                        original_file_path_str
+                        "Mutation compile error (not saving): {} - {}",
+                        original_file_path_str,
+                        result.mutation.description
                     );
                     continue;
                 }
 
-                // Analyze and generate mutations, with endpoint fallback
-                // Pass temp path so mutations store temp paths for executor to use
-                tracing::debug!("Analyzing mutations for {}", original_file_path_str);
-                let mutations = match analyze_and_generate_mutations(
-                    &current_client,
-                    &temp_file_path_str,
-                    &content,
-                    config.max_mutations_per_file,
-                )
-                .await
-                {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to analyze mutations in {} with current endpoint: {}",
+                // Log mutation outcome
+                match result.outcome {
+                    crate::mutation::TestOutcome::Killed => {
+                        tracing::info!(
+                            "Mutation KILLED in {}: {} (by {})",
                             original_file_path_str,
-                            e
+                            result.mutation.description,
+                            result.killing_test.as_deref().unwrap_or("unknown"),
                         );
-
-                        // Try to find another endpoint
-                        let remaining = &endpoints[current_endpoint_idx + 1..];
-                        if let Some((new_client, new_name)) =
-                            find_available_endpoint(remaining).await
-                        {
-                            tracing::info!(
-                                "Switching to endpoint {} for mutation analysis",
-                                new_name
-                            );
-                            current_client = new_client;
-                            current_endpoint_idx = endpoints
-                                .iter()
-                                .position(|ep| ep.name == new_name)
-                                .unwrap_or(current_endpoint_idx);
-
-                            // Retry with new endpoint
-                            match analyze_and_generate_mutations(
-                                &current_client,
-                                &temp_file_path_str,
-                                &content,
-                                config.max_mutations_per_file,
-                            )
-                            .await
-                            {
-                                Ok(m) => m,
-                                Err(e2) => {
-                                    tracing::warn!(
-                                        "Retry also failed for {}: {}",
-                                        original_file_path_str,
-                                        e2
-                                    );
-                                    continue;
-                                }
-                            }
-                        } else {
-                            continue;
+                        if let Some(output) = &result.test_output {
+                            tracing::debug!("Test output:\n{}", truncate_output_tail(output, 500));
                         }
                     }
-                };
-
-                if mutations.is_empty() {
-                    tracing::debug!("No mutations generated for {}", original_file_path_str);
-                    continue;
+                    crate::mutation::TestOutcome::Survived => {
+                        tracing::info!(
+                            "Mutation SURVIVED in {}: {}",
+                            original_file_path_str,
+                            result.mutation.description,
+                        );
+                    }
+                    _ => {}
                 }
 
-                tracing::info!(
-                    "Generated {} mutations for {}",
-                    mutations.len(),
-                    original_file_path_str
-                );
+                // Build replacements JSON with all replacement info
+                // Each replacement has: line_number, find, replace
+                // We also include the original lines for context
+                let replacements_with_context: Vec<serde_json::Value> = result
+                    .mutation
+                    .replacements
+                    .iter()
+                    .map(|r| {
+                        let original_line = original_lines
+                            .get(r.line_number.saturating_sub(1))
+                            .unwrap_or(&"")
+                            .to_string();
+                        serde_json::json!({
+                            "line_number": r.line_number,
+                            "find": r.find,
+                            "replace": r.replace,
+                            "original_line": original_line
+                        })
+                    })
+                    .collect();
 
-                // Pre-compute original lines for building replacement details
-                let original_lines: Vec<&str> = content.lines().collect();
+                let replacements_json = serde_json::to_string(&replacements_with_context)
+                    .unwrap_or_else(|_| "[]".to_string());
 
-                for mutation in mutations {
-                    if self.should_stop.load(Ordering::SeqCst) {
-                        break;
-                    }
-
-                    // Execute the mutation test using configured commands
-                    let result = match execute_mutation_test(
-                        &current_client,
-                        &project.root,
-                        mutation,
-                        &content,
-                        &config,
-                        &rule.build_command,
-                        &rule.test_command,
-                        rule.timeout_seconds,
+                // Save result with original path (not temp path) for UI display
+                if let Err(e) = self
+                    .db
+                    .save_mutation_result(
+                        repo.id,
+                        &original_file_path_str,
+                        &result.mutation.description,
+                        &result.mutation.reasoning,
+                        &replacements_json,
+                        &result.outcome.to_string(),
+                        result.killing_test.as_deref(),
+                        result.test_output.as_deref(),
+                        Some(result.execution_time_ms as i32),
+                        Some(&content_hash),
                     )
                     .await
-                    {
-                        Ok(r) => r,
-                        Err(e) => {
-                            tracing::warn!("Failed to execute mutation test: {}", e);
-                            continue;
-                        }
-                    };
-
-                    // Skip compile errors - they're not useful to the user
-                    // Just log them for debugging purposes
-                    if result.outcome == crate::mutation::TestOutcome::CompileError {
-                        tracing::debug!(
-                            "Mutation compile error (not saving): {} - {}",
-                            original_file_path_str,
-                            result.mutation.description
-                        );
-                        continue;
-                    }
-
-                    // Log mutation outcome
-                    match result.outcome {
-                        crate::mutation::TestOutcome::Killed => {
-                            tracing::info!(
-                                "Mutation KILLED in {}: {} (by {})",
-                                original_file_path_str,
-                                result.mutation.description,
-                                result.killing_test.as_deref().unwrap_or("unknown"),
-                            );
-                            if let Some(output) = &result.test_output {
-                                tracing::debug!(
-                                    "Test output:\n{}",
-                                    truncate_output_tail(output, 500)
-                                );
-                            }
-                        }
-                        crate::mutation::TestOutcome::Survived => {
-                            tracing::info!(
-                                "Mutation SURVIVED in {}: {}",
-                                original_file_path_str,
-                                result.mutation.description,
-                            );
-                        }
-                        _ => {}
-                    }
-
-                    // Build replacements JSON with all replacement info
-                    // Each replacement has: line_number, find, replace
-                    // We also include the original lines for context
-                    let replacements_with_context: Vec<serde_json::Value> = result
-                        .mutation
-                        .replacements
-                        .iter()
-                        .map(|r| {
-                            let original_line = original_lines
-                                .get(r.line_number.saturating_sub(1))
-                                .unwrap_or(&"")
-                                .to_string();
-                            serde_json::json!({
-                                "line_number": r.line_number,
-                                "find": r.find,
-                                "replace": r.replace,
-                                "original_line": original_line
-                            })
-                        })
-                        .collect();
-
-                    let replacements_json = serde_json::to_string(&replacements_with_context)
-                        .unwrap_or_else(|_| "[]".to_string());
-
-                    // Save result with original path (not temp path) for UI display
-                    if let Err(e) = self
-                        .db
-                        .save_mutation_result(
-                            repo.id,
-                            &original_file_path_str,
-                            &result.mutation.description,
-                            &result.mutation.reasoning,
-                            &replacements_json,
-                            &result.outcome.to_string(),
-                            result.killing_test.as_deref(),
-                            result.test_output.as_deref(),
-                            Some(result.execution_time_ms as i32),
-                            Some(&content_hash),
-                        )
-                        .await
-                    {
-                        tracing::warn!("Failed to save mutation result: {}", e);
-                    }
-
-                    total_mutations += 1;
+                {
+                    tracing::warn!("Failed to save mutation result: {}", e);
                 }
+
+                total_mutations += 1;
             }
         }
 
@@ -2192,37 +2167,26 @@ async fn analysis_worker(
 
         let file_path_str = task.file_path.to_string_lossy().to_string();
 
-        // Build the appropriate prompt based on task type and language
+        // Build the appropriate prompt based on task type (language-agnostic)
         let (prompt, analysis_type_str) = match task.task_type {
             AnalysisTaskType::ArchitectureFileAnalysis => {
-                let prompt = DiagramExtractor::architecture_file_analysis_prompt(
-                    &file_path_str,
-                    &task.content,
-                    task.language,
-                );
+                let prompt =
+                    language::architecture_file_analysis_prompt(&file_path_str, &task.content);
                 (prompt, AnalysisType::ArchitectureFileAnalysis.to_string())
             }
             AnalysisTaskType::DiagramExtraction(diagram_type) => {
-                let prompt = DiagramExtractor::prompt_for_type(
-                    diagram_type,
-                    &file_path_str,
-                    &task.content,
-                    task.language,
-                );
+                let prompt =
+                    DiagramExtractor::prompt_for_type(diagram_type, &file_path_str, &task.content);
                 let analysis_type = format!("diagram_extraction_{}", diagram_type.as_str());
                 (prompt, analysis_type)
             }
             AnalysisTaskType::CodeUnderstanding => {
-                // Use language-specific analysis prompt
-                let prompt = task.language.analysis_prompt(&file_path_str, &task.content);
+                // Use generic analysis prompt (LLM infers language from code)
+                let prompt = language::analysis_prompt(&file_path_str, &task.content);
                 (prompt, AnalysisType::CodeUnderstanding.to_string())
             }
             AnalysisTaskType::DocumentationAnalysis => {
-                let prompt = DiagramExtractor::documentation_analysis_prompt(
-                    &file_path_str,
-                    &task.content,
-                    task.language,
-                );
+                let prompt = language::documentation_prompt(&file_path_str, &task.content);
                 (prompt, AnalysisType::Documentation.to_string())
             }
         };
@@ -2499,24 +2463,35 @@ mod tests {
     }
 
     // =========================================================================
-    // Language::Rust.find_source_files tests
+    // FileDiscoveryConfig.find_source_files tests
     // =========================================================================
+
+    /// Helper to create a test config for .rs files
+    fn test_file_discovery_config() -> crate::repo_config::FileDiscoveryConfig {
+        crate::repo_config::FileDiscoveryConfig {
+            include: vec!["**/*.rs".to_string()],
+            exclude: vec!["**/target/**".to_string()],
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_find_source_files_empty_dir() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let files = Language::Rust.find_source_files(temp_dir.path()).unwrap();
+        let config = test_file_discovery_config();
+        let files = config.find_source_files(temp_dir.path()).unwrap();
         assert_eq!(files.len(), 0);
     }
 
     #[test]
     fn test_find_source_files_with_files() {
-        let temp_dir = tempfile::TempDir::with_prefix("test_rust_files").unwrap();
+        let temp_dir = tempfile::TempDir::with_prefix("test_files").unwrap();
         std::fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
         std::fs::write(temp_dir.path().join("lib.rs"), "pub fn lib() {}").unwrap();
-        std::fs::write(temp_dir.path().join("test.txt"), "not rust").unwrap();
+        std::fs::write(temp_dir.path().join("test.txt"), "not source").unwrap();
 
-        let files = Language::Rust.find_source_files(temp_dir.path()).unwrap();
+        let config = test_file_discovery_config();
+        let files = config.find_source_files(temp_dir.path()).unwrap();
 
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|f| f.ends_with("main.rs")));
@@ -2526,12 +2501,13 @@ mod tests {
 
     #[test]
     fn test_find_source_files_recursive() {
-        let temp_dir = tempfile::TempDir::with_prefix("test_rust_files").unwrap();
+        let temp_dir = tempfile::TempDir::with_prefix("test_files").unwrap();
         let subdir = temp_dir.path().join("src");
         std::fs::create_dir_all(&subdir).unwrap();
         std::fs::write(subdir.join("main.rs"), "fn main() {}").unwrap();
 
-        let files = Language::Rust.find_source_files(temp_dir.path()).unwrap();
+        let config = test_file_discovery_config();
+        let files = config.find_source_files(temp_dir.path()).unwrap();
 
         assert_eq!(files.len(), 1);
         assert!(files[0].ends_with("src/main.rs"));
@@ -2544,7 +2520,8 @@ mod tests {
         std::fs::create_dir_all(target_dir.join("debug")).unwrap();
         std::fs::write(target_dir.join("debug").join("lib.rs"), "fn test() {}").unwrap();
 
-        let files = Language::Rust.find_source_files(temp_dir.path()).unwrap();
+        let config = test_file_discovery_config();
+        let files = config.find_source_files(temp_dir.path()).unwrap();
 
         assert!(!files.iter().any(|f| f.to_string_lossy().contains("target")));
     }
@@ -2556,7 +2533,8 @@ mod tests {
         std::fs::create_dir_all(&hidden_dir).unwrap();
         std::fs::write(hidden_dir.join("lib.rs"), "fn test() {}").unwrap();
 
-        let files = Language::Rust.find_source_files(temp_dir.path()).unwrap();
+        let config = test_file_discovery_config();
+        let files = config.find_source_files(temp_dir.path()).unwrap();
 
         assert!(!files
             .iter()

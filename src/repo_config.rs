@@ -16,7 +16,7 @@
 //! If these checks fail, the config file is rejected and a warning is logged.
 
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Result of validating a config file's security properties.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,9 +136,210 @@ pub struct RepoConfig {
     #[serde(default)]
     pub setup_command: Option<String>,
 
+    /// File discovery configuration for source files.
+    /// If not specified, defaults are auto-detected based on project markers.
+    #[serde(default)]
+    pub file_discovery: FileDiscoveryConfig,
+
     /// Mutation testing configuration.
     #[serde(default)]
     pub mutation: MutationRepoConfig,
+}
+
+/// Configuration for discovering source files.
+///
+/// Uses glob patterns to specify which files to include/exclude.
+/// If not specified in config, sensible defaults are auto-detected based on
+/// project marker files (Cargo.toml → Rust patterns, package.json → TypeScript patterns).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileDiscoveryConfig {
+    /// Glob patterns for files to include in analysis.
+    /// Example: `["**/*.rs"]` for Rust, `["**/*.ts", "**/*.tsx"]` for TypeScript.
+    #[serde(default)]
+    pub include: Vec<String>,
+
+    /// Glob patterns for files/directories to exclude.
+    /// Example: `["**/target/**", "**/node_modules/**", "**/*.test.ts"]`
+    #[serde(default)]
+    pub exclude: Vec<String>,
+
+    /// Minimum file size (bytes) for analysis. Default: 50.
+    #[serde(default = "default_min_file_size")]
+    pub min_file_size: usize,
+
+    /// Maximum file size (bytes) for analysis. Default: 100,000.
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: usize,
+
+    /// Minimum file size (bytes) for mutation testing. Default: 100.
+    #[serde(default = "default_min_mutation_file_size")]
+    pub min_mutation_file_size: usize,
+
+    /// Maximum file size (bytes) for mutation testing. Default: 50,000.
+    #[serde(default = "default_max_mutation_file_size")]
+    pub max_mutation_file_size: usize,
+}
+
+fn default_min_file_size() -> usize {
+    50
+}
+
+fn default_max_file_size() -> usize {
+    100_000
+}
+
+fn default_min_mutation_file_size() -> usize {
+    100
+}
+
+fn default_max_mutation_file_size() -> usize {
+    50_000
+}
+
+impl Default for FileDiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            include: Vec::new(),
+            exclude: Vec::new(),
+            min_file_size: default_min_file_size(),
+            max_file_size: default_max_file_size(),
+            min_mutation_file_size: default_min_mutation_file_size(),
+            max_mutation_file_size: default_max_mutation_file_size(),
+        }
+    }
+}
+
+impl FileDiscoveryConfig {
+    /// Auto-detect sensible defaults based on project marker files.
+    ///
+    /// Looks for common project marker files and returns appropriate glob patterns:
+    /// - `Cargo.toml` → `**/*.rs` with `target/` excluded
+    /// - `package.json` → `**/*.ts`, `**/*.js`, etc. with `node_modules/` excluded
+    /// - Otherwise → empty defaults (requires explicit `[file_discovery]` config)
+    pub fn auto_detect(repo_path: &Path) -> Self {
+        if repo_path.join("Cargo.toml").exists() {
+            return Self {
+                include: vec!["**/*.rs".to_string()],
+                exclude: vec!["**/target/**".to_string(), "**/node_modules/**".to_string()],
+                ..Default::default()
+            };
+        }
+        if repo_path.join("package.json").exists() {
+            return Self {
+                include: vec![
+                    "**/*.ts".to_string(),
+                    "**/*.tsx".to_string(),
+                    "**/*.js".to_string(),
+                    "**/*.jsx".to_string(),
+                    "**/*.mjs".to_string(),
+                    "**/*.cjs".to_string(),
+                ],
+                exclude: vec![
+                    "**/node_modules/**".to_string(),
+                    "**/dist/**".to_string(),
+                    "**/build/**".to_string(),
+                    "**/.next/**".to_string(),
+                    "**/coverage/**".to_string(),
+                ],
+                ..Default::default()
+            };
+        }
+        Self::default()
+    }
+
+    /// Get effective include patterns, using auto-detected defaults if empty.
+    pub fn effective_include(&self, repo_path: &Path) -> Vec<String> {
+        if self.include.is_empty() {
+            Self::auto_detect(repo_path).include
+        } else {
+            self.include.clone()
+        }
+    }
+
+    /// Get effective exclude patterns, using auto-detected defaults if empty.
+    pub fn effective_exclude(&self, repo_path: &Path) -> Vec<String> {
+        if self.exclude.is_empty() && self.include.is_empty() {
+            // Only use auto-detected excludes if include is also empty
+            Self::auto_detect(repo_path).exclude
+        } else {
+            self.exclude.clone()
+        }
+    }
+
+    /// Find source files matching the include/exclude patterns.
+    ///
+    /// Uses effective patterns (auto-detected if not specified).
+    pub fn find_source_files(&self, repo_path: &Path) -> anyhow::Result<Vec<PathBuf>> {
+        let include_patterns = self.effective_include(repo_path);
+        let exclude_patterns = self.effective_exclude(repo_path);
+
+        if include_patterns.is_empty() {
+            tracing::warn!(
+                "No file discovery patterns configured for {}",
+                repo_path.display()
+            );
+            return Ok(Vec::new());
+        }
+
+        find_files_by_globs(repo_path, &include_patterns, &exclude_patterns)
+    }
+}
+
+/// Find files matching include globs while excluding files matching exclude globs.
+pub fn find_files_by_globs(
+    root: &Path,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+
+    // Collect all files matching include patterns
+    for pattern in include_patterns {
+        let full_pattern = root.join(pattern);
+        let pattern_str = full_pattern.to_string_lossy();
+
+        match glob::glob(&pattern_str) {
+            Ok(entries) => {
+                for entry in entries.filter_map(Result::ok) {
+                    if entry.is_file() {
+                        files.push(entry);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Invalid glob pattern '{}': {}", pattern, e);
+            }
+        }
+    }
+
+    // Filter out files matching exclude patterns
+    if !exclude_patterns.is_empty() {
+        files.retain(|file| {
+            let relative = file
+                .strip_prefix(root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| file.to_string_lossy().to_string());
+
+            !exclude_patterns
+                .iter()
+                .any(|pattern| glob_match::glob_match(pattern, &relative))
+        });
+    }
+
+    // Also filter out hidden files/directories
+    files.retain(|file| {
+        !file.components().any(|c| {
+            c.as_os_str()
+                .to_str()
+                .is_some_and(|s| s.starts_with('.') && s != ".")
+        })
+    });
+
+    // Sort for deterministic ordering
+    files.sort();
+    files.dedup();
+
+    Ok(files)
 }
 
 /// Mutation testing configuration section.

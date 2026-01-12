@@ -53,18 +53,16 @@ Before running Noctum, you'll need:
    - Pull a code analysis model: `ollama pull qwen2.5-coder` (or your preferred model, but this has been the model used in testing)
    - Ollama must be running before starting Noctum
 
-### Rust Projects
-1. **Rust Toolchain** (1.70+)
-   - Install via [rustup](https://rustup.rs/)
-   - Used for analyzing Rust codebases and running mutation tests
+### Language Toolchains
 
-### JS/TS Projects
-1. **Node.js** (18+)
-   - Install via [Node.js](https://nodejs.org/)
-   - Used for analyzing JavaScript/TypeScript codebases and running mutation tests
+Noctum is language-agnostic - it supports any language that can be configured via `noctum.toml`. You'll need the appropriate toolchain for your project:
 
-### Other Languages
-Coming "soon"
+- **Rust**: Install via [rustup](https://rustup.rs/)
+- **Node.js/TypeScript**: Install via [nodejs.org](https://nodejs.org/)
+- **F#/.NET**: Install via [dotnet.microsoft.com](https://dotnet.microsoft.com/)
+- **Go**: Install via [go.dev](https://go.dev/)
+- **Python**: Install via [python.org](https://python.org/)
+- **Any other language**: Ensure its compiler/interpreter and test runner are available
 
 ## Installation
 
@@ -196,6 +194,21 @@ timeout_seconds = 300
 | `copy_ignore` | array | `[]` | Glob patterns for files/directories to exclude when copying to temp directory |
 | `setup_command` | string | `null` | Command to run once before baseline verification (e.g., `"npm ci"`) |
 
+### File Discovery Configuration
+
+The optional `[file_discovery]` section controls which source files are analyzed:
+
+```toml
+[file_discovery]
+include = ["src/**/*.rs", "lib/**/*.rs"]  # Glob patterns for files to analyze
+exclude = ["**/tests/**", "**/*_test.rs"]  # Patterns to skip
+```
+
+If not specified, Noctum auto-detects sensible defaults based on the project type:
+- **Rust projects** (Cargo.toml present): `**/*.rs` with `target/` excluded
+- **Node.js/TypeScript** (package.json present): `**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.jsx` with `node_modules/` excluded
+- **Other projects**: Explicit `[file_discovery]` configuration required
+
 ### Mutation Rules
 
 Each `[[mutation.rules]]` section defines how to test files matching a glob pattern:
@@ -230,9 +243,70 @@ This approach:
 2. Prevents broken symlinks in `node_modules/.bin`
 3. Ensures dependencies are properly installed in the temp directory
 
+### F#/.NET Projects
+
+```toml
+enable_mutation_testing = true
+copy_ignore = ["bin", "obj", ".git", "packages"]
+
+[file_discovery]
+include = ["**/*.fs", "**/*.fsx"]
+exclude = ["**/bin/**", "**/obj/**", "**/*Tests.fs"]
+
+[[mutation.rules]]
+glob = "**/*.fs"
+glob_ignore = "**/*Tests.fs"
+build_command = "dotnet build"
+test_command = "dotnet test"
+timeout_seconds = 300
+```
+
+### Go Projects
+
+```toml
+enable_mutation_testing = true
+copy_ignore = [".git"]
+
+[file_discovery]
+include = ["**/*.go"]
+exclude = ["**/*_test.go", "**/vendor/**"]
+
+[[mutation.rules]]
+glob = "**/*.go"
+glob_ignore = "**/*_test.go"
+build_command = "go build ./..."
+test_command = "go test ./..."
+timeout_seconds = 300
+```
+
+### Monorepo Configuration
+
+For repositories with multiple languages:
+
+```toml
+enable_mutation_testing = true
+copy_ignore = ["target", "node_modules", ".git"]
+
+[file_discovery]
+include = ["backend/**/*.rs", "frontend/**/*.ts", "frontend/**/*.tsx"]
+exclude = ["**/tests/**", "**/*.test.ts"]
+
+[[mutation.rules]]
+glob = "backend/**/*.rs"
+glob_ignore = "**/tests/**"
+build_command = "cargo check"
+test_command = "cargo test"
+
+[[mutation.rules]]
+glob = "frontend/**/*.ts"
+glob_ignore = "**/*.test.ts"
+build_command = "npm run build"
+test_command = "npm test"
+```
+
 ## Architecture
 
-Noctum is a daemon-based application written in Rust. It features a web UI/dashboard for configuration, management, and results analysis. It depends on Ollama to run inference and the Rust toolchain to interact with your project.
+Noctum is a daemon-based application written in Rust. It features a web UI/dashboard for configuration, management, and results analysis. It uses Ollama for LLM inference and is language-agnostic - supporting any programming language through configuration.
 
 A SQLite database stores configurations, plans, internal notes, and results. From the dashboard, you configure repository directories for analysis.
 

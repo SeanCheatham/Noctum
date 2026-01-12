@@ -1,7 +1,7 @@
 //! LLM-driven mutation testing module.
 //!
 //! This module provides functionality for:
-//! - Analyzing Rust code to find and generate mutations in a single LLM call
+//! - Analyzing code to find and generate mutations in a single LLM call
 //! - Executing tests against mutations and recording results
 
 pub mod analyzer;

@@ -3,24 +3,24 @@
 //! This module provides functionality to discover sub-projects within a repository,
 //! supporting workspaces (Cargo workspaces, npm workspaces) and mixed-language repos.
 
-use crate::language::Language;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 /// A discovered project within a repository.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields may be used for future per-project analysis
 pub struct Project {
     /// Absolute path to the project root.
     pub root: PathBuf,
     /// Path relative to repository root (e.g., "packages/api").
     /// Empty string for root-level projects.
     pub relative_path: String,
-    /// Detected language for this project.
-    pub language: Language,
     /// Project name (from manifest or directory name).
     pub name: String,
     /// Type of project (standalone, workspace member, etc.).
     pub project_type: ProjectType,
+    /// The marker file type that identified this project.
+    pub marker: ProjectMarker,
 }
 
 /// The type of project structure.
@@ -34,11 +34,20 @@ pub enum ProjectType {
     WorkspaceRoot,
 }
 
+/// The marker file type that identified a project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectMarker {
+    /// Cargo.toml - Rust project
+    CargoToml,
+    /// package.json - Node.js/TypeScript project
+    PackageJson,
+}
+
 /// Marker file found during directory scan.
 #[derive(Debug)]
 struct MarkerFile {
     path: PathBuf,
-    language: Language,
+    marker: ProjectMarker,
 }
 
 /// Discover all projects within a repository.
@@ -65,7 +74,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
     // Process Rust projects (Cargo.toml)
     let rust_markers: Vec<_> = markers
         .iter()
-        .filter(|m| m.language == Language::Rust)
+        .filter(|m| m.marker == ProjectMarker::CargoToml)
         .collect();
 
     // Collect all workspace member paths first to avoid mis-classification
@@ -86,7 +95,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
                 projects.push(Project {
                     root: project_root.to_path_buf(),
                     relative_path: relative,
-                    language: Language::Rust,
+                    marker: ProjectMarker::CargoToml,
                     name,
                     project_type: ProjectType::WorkspaceRoot,
                 });
@@ -108,7 +117,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
                         projects.push(Project {
                             root: member_path,
                             relative_path: member_relative,
-                            language: Language::Rust,
+                            marker: ProjectMarker::CargoToml,
                             name: member_name,
                             project_type: ProjectType::WorkspaceMember,
                         });
@@ -145,7 +154,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
         projects.push(Project {
             root: project_root.to_path_buf(),
             relative_path: relative,
-            language: Language::Rust,
+            marker: ProjectMarker::CargoToml,
             name,
             project_type: ProjectType::Standalone,
         });
@@ -154,7 +163,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
     // Process TypeScript/JavaScript projects (package.json)
     let ts_markers: Vec<_> = markers
         .iter()
-        .filter(|m| m.language == Language::TypeScript)
+        .filter(|m| m.marker == ProjectMarker::PackageJson)
         .collect();
 
     // Collect all npm workspace member paths first
@@ -177,7 +186,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
             projects.push(Project {
                 root: project_root.to_path_buf(),
                 relative_path: relative,
-                language: Language::TypeScript,
+                marker: ProjectMarker::PackageJson,
                 name,
                 project_type: ProjectType::WorkspaceRoot,
             });
@@ -198,7 +207,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
                         projects.push(Project {
                             root: member_path,
                             relative_path: member_relative,
-                            language: Language::TypeScript,
+                            marker: ProjectMarker::PackageJson,
                             name: member_name,
                             project_type: ProjectType::WorkspaceMember,
                         });
@@ -233,7 +242,7 @@ pub fn discover_projects(repo_path: &Path) -> Result<Vec<Project>> {
         projects.push(Project {
             root: project_root.to_path_buf(),
             relative_path: relative,
-            language: Language::TypeScript,
+            marker: ProjectMarker::PackageJson,
             name,
             project_type: ProjectType::Standalone,
         });
@@ -292,7 +301,7 @@ fn find_marker_files(repo_path: &Path) -> Result<Vec<MarkerFile>> {
         if file_name == "Cargo.toml" {
             markers.push(MarkerFile {
                 path: path.to_path_buf(),
-                language: Language::Rust,
+                marker: ProjectMarker::CargoToml,
             });
         }
 
@@ -300,7 +309,7 @@ fn find_marker_files(repo_path: &Path) -> Result<Vec<MarkerFile>> {
         if file_name == "package.json" {
             markers.push(MarkerFile {
                 path: path.to_path_buf(),
-                language: Language::TypeScript,
+                marker: ProjectMarker::PackageJson,
             });
         }
     }
@@ -450,7 +459,7 @@ edition = "2021"
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].name, "myproject");
         assert_eq!(projects[0].project_type, ProjectType::Standalone);
-        assert_eq!(projects[0].language, Language::Rust);
+        assert_eq!(projects[0].marker, ProjectMarker::CargoToml);
         assert!(projects[0].relative_path.is_empty());
     }
 

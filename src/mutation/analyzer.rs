@@ -177,19 +177,22 @@ fn add_line_numbers(code: &str) -> String {
         .join("\n")
 }
 
-/// Generate the analysis prompt
+/// Generate the analysis prompt (language-agnostic - LLM infers from code)
 fn analysis_prompt(file_path: &str, code: &str) -> String {
     let numbered_code = add_line_numbers(code);
     format!(
-        r#"You are a mutation testing expert. Analyze this Rust code and generate up to 3 small, targeted mutations. Focus on business logic and important functionality.
+        r#"You are a mutation testing expert. Analyze this code and generate up to 3 small, targeted mutations. Focus on business logic and important functionality.
 
-VALID mutation types:
+Infer the programming language from the file extension and code content.
+
+VALID mutation types (adapt to the language):
 - Comparison operators: > to >=, < to <=, == to !=, etc.
 - Boolean literals: true to false, false to true
 - Arithmetic operators: + to -, * to /, etc.
 - Boundary values: n to n+1, n to n-1
-- Return values: Ok(x) to Err(...), Some(x) to None
+- Return values: success to failure returns (Ok to Err in Rust, throw in JS/TS, etc.)
 - Numeric constants: 0 to 1, 1 to 0
+- Null/optional handling: Some to None, value to null/undefined, etc.
 
 RULES:
 - The "find" text must be copied EXACTLY from the code (same spacing, same characters)
@@ -198,7 +201,7 @@ RULES:
 - Each mutation has a "replacements" array - use multiple replacements if you need to add imports
 - Do not mutate test cases or existing test code.
 - If the file appears to be a test file (based on file path or content), do not mutate it.
-- Do not introduce changes that would fail to compile
+- Do not introduce changes that would fail to compile or type-check
 - Do not change type signatures of functions or methods.
 
 File: {file_path}
@@ -210,18 +213,7 @@ File: {file_path}
 For each mutation provide:
 - replacements: Array of {{line_number, find, replace}} objects
 - reasoning: Why this tests important logic
-- description: What changed (e.g., "Changed > to >=")
-
-Example for line `   42 |     if count > 0 {{`:
-  replacements: [{{"line_number": 42, "find": "count > 0", "replace": "count >= 0"}}]
-  description: "Changed > to >="
-
-Example mutation requiring an import:
-  replacements: [
-    {{"line_number": 3, "find": "use std::io;", "replace": "use std::io;\nuse std::fs;"}},
-    {{"line_number": 42, "find": "io::stdin()", "replace": "fs::File::open(\"x\")"}}
-  ]
-  description: "Changed stdin to file read""#
+- description: What changed (e.g., "Changed > to >=")"#
     )
 }
 
