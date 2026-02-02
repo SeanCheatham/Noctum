@@ -23,13 +23,16 @@
   ],
   "license": "MIT OR Apache-2.0",
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^22.0.0",
     "eslint": "^9.39.0",
     "prettier": "^3.8.0",
     "typescript": "^5.9.0",
+    "typescript-eslint": "^8.54.0",
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@noctum/web": "*",
     "commander": "^14.0.0"
   }
 }
