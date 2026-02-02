@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { AgentOutput as OutputItem, AgentStatus } from "../hooks/useAgent";
 import { QuestionCard } from "./QuestionCard";
 import { PermissionCard } from "./PermissionCard";
@@ -15,12 +16,20 @@ export function AgentOutput({
   onRespondQuestion,
   onRespondPermission,
 }: AgentOutputProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [output]);
+
   if (output.length === 0 && status === "idle") {
     return <div className="agent-output-empty">Click "Run" to start the agent</div>;
   }
 
   return (
-    <div className="agent-output">
+    <div className="agent-output" ref={containerRef}>
       {output.map((item, index) => {
         if (item.type === "question" && item.questionId) {
           return (
