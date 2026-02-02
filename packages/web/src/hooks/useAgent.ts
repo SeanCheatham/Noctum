@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type AgentStatus = "idle" | "running" | "completed" | "error";
+export type AgentStatus = "idle" | "running" | "completed" | "error" | "waiting_for_input";
 
 interface AgentTextEvent {
   type: "text";
@@ -26,24 +26,71 @@ interface AgentErrorEvent {
   error: string;
 }
 
-type AgentEvent = AgentTextEvent | AgentToolEvent | AgentStatusEvent | AgentErrorEvent;
+interface AgentQuestionEvent {
+  type: "question";
+  timestamp: number;
+  questionId: string;
+  question: string;
+  options?: Array<{ label: string; description: string }>;
+}
+
+interface AgentPermissionEvent {
+  type: "permission";
+  timestamp: number;
+  permissionId: string;
+  toolName: "Write" | "Bash";
+  description: string;
+  command?: string;
+}
+
+type AgentEvent =
+  | AgentTextEvent
+  | AgentToolEvent
+  | AgentStatusEvent
+  | AgentErrorEvent
+  | AgentQuestionEvent
+  | AgentPermissionEvent;
 
 export interface AgentOutput {
-  type: "text" | "tool" | "error";
+  type: "text" | "tool" | "error" | "question" | "permission";
   content: string;
   timestamp: number;
+  questionId?: string;
+  permissionId?: string;
+  options?: Array<{ label: string; description: string }>;
+  command?: string;
+  status?: "pending" | "answered" | "approved" | "denied";
+}
+
+export interface PendingQuestion {
+  questionId: string;
+  question: string;
+  options?: Array<{ label: string; description: string }>;
+}
+
+export interface PendingPermission {
+  permissionId: string;
+  toolName: "Write" | "Bash";
+  description: string;
+  command?: string;
 }
 
 interface UseAgentReturn {
   status: AgentStatus;
   output: AgentOutput[];
+  pendingQuestion: PendingQuestion | null;
+  pendingPermission: PendingPermission | null;
   run: () => Promise<void>;
   clear: () => void;
+  respondToQuestion: (questionId: string, answer: string) => Promise<void>;
+  respondToPermission: (permissionId: string, approved: boolean) => Promise<void>;
 }
 
 export function useAgent(): UseAgentReturn {
   const [status, setStatus] = useState<AgentStatus>("idle");
   const [output, setOutput] = useState<AgentOutput[]>([]);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
+  const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -79,6 +126,43 @@ export function useAgent(): UseAgentReturn {
             { type: "error", content: agentEvent.error, timestamp: agentEvent.timestamp },
           ]);
           break;
+        case "question":
+          setPendingQuestion({
+            questionId: agentEvent.questionId,
+            question: agentEvent.question,
+            options: agentEvent.options,
+          });
+          setOutput((prev) => [
+            ...prev,
+            {
+              type: "question",
+              content: agentEvent.question,
+              timestamp: agentEvent.timestamp,
+              questionId: agentEvent.questionId,
+              options: agentEvent.options,
+              status: "pending",
+            },
+          ]);
+          break;
+        case "permission":
+          setPendingPermission({
+            permissionId: agentEvent.permissionId,
+            toolName: agentEvent.toolName,
+            description: agentEvent.description,
+            command: agentEvent.command,
+          });
+          setOutput((prev) => [
+            ...prev,
+            {
+              type: "permission",
+              content: agentEvent.description,
+              timestamp: agentEvent.timestamp,
+              permissionId: agentEvent.permissionId,
+              command: agentEvent.command,
+              status: "pending",
+            },
+          ]);
+          break;
       }
     };
 
@@ -93,6 +177,8 @@ export function useAgent(): UseAgentReturn {
 
   const run = useCallback(async () => {
     setOutput([]);
+    setPendingQuestion(null);
+    setPendingPermission(null);
     try {
       const response = await fetch("/api/agent/run", {
         method: "POST",
@@ -117,7 +203,78 @@ export function useAgent(): UseAgentReturn {
 
   const clear = useCallback(() => {
     setOutput([]);
+    setPendingQuestion(null);
+    setPendingPermission(null);
   }, []);
 
-  return { status, output, run, clear };
+  const respondToQuestion = useCallback(async (questionId: string, answer: string) => {
+    try {
+      const response = await fetch("/api/agent/respond-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId, answer }),
+      });
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error || "Failed to respond to question");
+      }
+      setPendingQuestion(null);
+      setOutput((prev) =>
+        prev.map((item) =>
+          item.questionId === questionId ? { ...item, status: "answered" as const } : item
+        )
+      );
+    } catch (err) {
+      setOutput((prev) => [
+        ...prev,
+        {
+          type: "error",
+          content: err instanceof Error ? err.message : "Failed to respond",
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  }, []);
+
+  const respondToPermission = useCallback(async (permissionId: string, approved: boolean) => {
+    try {
+      const response = await fetch("/api/agent/respond-permission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissionId, approved }),
+      });
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error || "Failed to respond to permission");
+      }
+      setPendingPermission(null);
+      setOutput((prev) =>
+        prev.map((item) =>
+          item.permissionId === permissionId
+            ? { ...item, status: approved ? ("approved" as const) : ("denied" as const) }
+            : item
+        )
+      );
+    } catch (err) {
+      setOutput((prev) => [
+        ...prev,
+        {
+          type: "error",
+          content: err instanceof Error ? err.message : "Failed to respond",
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  }, []);
+
+  return {
+    status,
+    output,
+    pendingQuestion,
+    pendingPermission,
+    run,
+    clear,
+    respondToQuestion,
+    respondToPermission,
+  };
 }

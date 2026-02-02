@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { agentService } from "./service.js";
 import { sendJson } from "../routes.js";
+import type { QuestionResponse, PermissionResponse } from "./types.js";
 
 export function handleAgentStatus(_req: IncomingMessage, res: ServerResponse): void {
   const state = agentService.getState();
@@ -28,11 +29,83 @@ export async function handleAgentRun(req: IncomingMessage, res: ServerResponse):
   }
 
   try {
-    const sessionId = await agentService.runPlan(workingDirectory);
+    const sessionId = await agentService.runWorkflow(workingDirectory);
     sendJson(res, 200, { success: true, data: { sessionId } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to start agent";
     sendJson(res, 500, { success: false, error: message });
+  }
+}
+
+export async function handleRespondQuestion(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body = "";
+  for await (const chunk of req) {
+    body += chunk;
+  }
+
+  if (!body) {
+    sendJson(res, 400, { success: false, error: "Missing request body" });
+    return;
+  }
+
+  let parsed: QuestionResponse;
+  try {
+    parsed = JSON.parse(body) as QuestionResponse;
+  } catch {
+    sendJson(res, 400, { success: false, error: "Invalid JSON body" });
+    return;
+  }
+
+  if (!parsed.questionId || typeof parsed.answer !== "string") {
+    sendJson(res, 400, { success: false, error: "Missing questionId or answer" });
+    return;
+  }
+
+  try {
+    await agentService.respondToQuestion(parsed);
+    sendJson(res, 200, { success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to respond to question";
+    sendJson(res, 400, { success: false, error: message });
+  }
+}
+
+export async function handleRespondPermission(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body = "";
+  for await (const chunk of req) {
+    body += chunk;
+  }
+
+  if (!body) {
+    sendJson(res, 400, { success: false, error: "Missing request body" });
+    return;
+  }
+
+  let parsed: PermissionResponse;
+  try {
+    parsed = JSON.parse(body) as PermissionResponse;
+  } catch {
+    sendJson(res, 400, { success: false, error: "Invalid JSON body" });
+    return;
+  }
+
+  if (!parsed.permissionId || typeof parsed.approved !== "boolean") {
+    sendJson(res, 400, { success: false, error: "Missing permissionId or approved" });
+    return;
+  }
+
+  try {
+    await agentService.respondToPermission(parsed);
+    sendJson(res, 200, { success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to respond to permission";
+    sendJson(res, 400, { success: false, error: message });
   }
 }
 

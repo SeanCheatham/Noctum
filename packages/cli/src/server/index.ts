@@ -1,6 +1,12 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { handleAgentRun, handleAgentStatus, handleAgentStream } from "./agent/index.js";
+import {
+  handleAgentRun,
+  handleAgentStatus,
+  handleAgentStream,
+  handleRespondQuestion,
+  handleRespondPermission,
+} from "./agent/index.js";
 import { handleHealth, handleNotFound } from "./routes.js";
 import { serveStaticFile } from "./static.js";
 import type { ServerConfig, ServerInfo } from "./types.js";
@@ -31,6 +37,16 @@ function createHandler() {
 
     if (path === "/api/agent/stream" && method === "GET") {
       handleAgentStream(req, res);
+      return;
+    }
+
+    if (path === "/api/agent/respond-question" && method === "POST") {
+      await handleRespondQuestion(req, res);
+      return;
+    }
+
+    if (path === "/api/agent/respond-permission" && method === "POST") {
+      await handleRespondPermission(req, res);
       return;
     }
 

@@ -17,7 +17,7 @@ interface ApiResponse<T> {
 export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { status, output, run, clear } = useAgent();
+  const { status, output, run, clear, respondToQuestion, respondToPermission } = useAgent();
 
   useEffect(() => {
     async function fetchHealth() {
@@ -39,7 +39,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const isRunning = status === "running";
+  const isRunning = status === "running" || status === "waiting_for_input";
 
   return (
     <main className="container">
@@ -80,7 +80,12 @@ export default function App() {
             </button>
           </div>
         </div>
-        <AgentOutput output={output} status={status} />
+        <AgentOutput
+          output={output}
+          status={status}
+          onRespondQuestion={respondToQuestion}
+          onRespondPermission={respondToPermission}
+        />
       </div>
     </main>
   );
