@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { agentService } from "./service.js";
 import { sendJson } from "../routes.js";
 import type { QuestionResponse, PermissionResponse } from "./types.js";
+import type { WorkflowType } from "./workflow.js";
 
 export function handleAgentStatus(_req: IncomingMessage, res: ServerResponse): void {
   const state = agentService.getState();
@@ -16,11 +17,19 @@ export async function handleAgentRun(req: IncomingMessage, res: ServerResponse):
   }
 
   let workingDirectory = process.cwd();
+  let workflow: WorkflowType = "run-containers";
+
   if (body) {
     try {
-      const parsed = JSON.parse(body) as { workingDirectory?: string };
+      const parsed = JSON.parse(body) as {
+        workingDirectory?: string;
+        workflow?: WorkflowType;
+      };
       if (parsed.workingDirectory) {
         workingDirectory = parsed.workingDirectory;
+      }
+      if (parsed.workflow) {
+        workflow = parsed.workflow;
       }
     } catch {
       sendJson(res, 400, { success: false, error: "Invalid JSON body" });
@@ -29,7 +38,7 @@ export async function handleAgentRun(req: IncomingMessage, res: ServerResponse):
   }
 
   try {
-    const sessionId = await agentService.runWorkflow(workingDirectory);
+    const sessionId = await agentService.runWorkflow(workingDirectory, workflow);
     sendJson(res, 200, { success: true, data: { sessionId } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to start agent";

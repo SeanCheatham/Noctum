@@ -394,3 +394,214 @@ dd {
 .btn-deny:hover:not(:disabled) {
   background: #dc2626;
 }
+
+/* Onboarding Wizard */
+.onboarding-wizard {
+  padding: 1rem;
+}
+
+.onboarding-progress {
+  margin-bottom: 2rem;
+}
+
+.progress-indicator {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+}
+
+.progress-indicator::before {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border);
+  z-index: 0;
+}
+
+.progress-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.step-marker {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.progress-step.active .step-marker {
+  background: var(--primary);
+  color: white;
+}
+
+.progress-step.completed .step-marker {
+  background: var(--success);
+  color: white;
+}
+
+.step-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.progress-step.active .step-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Step Content */
+.step-content {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.step-content.compose-generation {
+  text-align: left;
+  padding: 1rem 0;
+}
+
+.step-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 auto 1rem;
+}
+
+.step-icon.warning {
+  background: #f59e0b;
+}
+
+.step-icon.success {
+  background: var(--success);
+}
+
+.step-content h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.step-content p {
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.step-content code {
+  background: var(--bg);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.step-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  color: var(--text-muted);
+}
+
+.step-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  color: var(--text);
+}
+
+.changed-files {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  text-align: left;
+}
+
+.changed-files p {
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.changed-files ul {
+  list-style: none;
+  margin: 0;
+}
+
+.changed-files li {
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  font-size: 0.875rem;
+  padding: 0.25rem 0;
+  color: var(--text);
+}
+
+.changed-files .more {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.noctum-overview {
+  text-align: left;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+}
+
+.noctum-overview p {
+  color: var(--text);
+}
+
+.feature-list {
+  list-style: none;
+  margin: 1rem 0;
+}
+
+.feature-list li {
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+  color: var(--text);
+}
+
+.feature-list li::before {
+  content: "\2713";
+  position: absolute;
+  left: 0;
+  color: var(--success);
+}
+
+.btn-large {
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+}
+
+.onboarding-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  color: var(--error);
+}

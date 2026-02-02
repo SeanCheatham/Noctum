@@ -75,12 +75,18 @@ export interface PendingPermission {
   command?: string;
 }
 
+export type WorkflowType = "compose-generation" | "run-containers";
+
+interface RunOptions {
+  workflow?: WorkflowType;
+}
+
 interface UseAgentReturn {
   status: AgentStatus;
   output: AgentOutput[];
   pendingQuestion: PendingQuestion | null;
   pendingPermission: PendingPermission | null;
-  run: () => Promise<void>;
+  run: (options?: RunOptions) => Promise<void>;
   clear: () => void;
   respondToQuestion: (questionId: string, answer: string) => Promise<void>;
   respondToPermission: (permissionId: string, approved: boolean) => Promise<void>;
@@ -175,7 +181,7 @@ export function useAgent(): UseAgentReturn {
     };
   }, []);
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (options?: RunOptions) => {
     setOutput([]);
     setPendingQuestion(null);
     setPendingPermission(null);
@@ -183,7 +189,7 @@ export function useAgent(): UseAgentReturn {
       const response = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ workflow: options?.workflow }),
       });
       if (!response.ok) {
         const error = (await response.json()) as { error?: string };

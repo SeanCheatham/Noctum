@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AgentOutput } from "./components/AgentOutput";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { useAgent } from "./hooks/useAgent";
+import { useOnboarding } from "./hooks/useOnboarding";
 
 interface HealthData {
   status: string;
@@ -18,6 +20,7 @@ export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { status, output, run, clear, respondToQuestion, respondToPermission } = useAgent();
+  const onboarding = useOnboarding();
 
   useEffect(() => {
     async function fetchHealth() {
@@ -39,7 +42,21 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleStartComposeGeneration = useCallback(() => {
+    run({ workflow: "compose-generation" });
+  }, [run]);
+
+  const handleRun = useCallback(() => {
+    run({ workflow: "run-containers" });
+  }, [run]);
+
+  const handleReset = useCallback(() => {
+    clear();
+    onboarding.reset();
+  }, [clear, onboarding]);
+
   const isRunning = status === "running" || status === "waiting_for_input";
+  const showOnboarding = onboarding.state.step !== "ready" || status === "idle";
 
   return (
     <main className="container">
@@ -66,26 +83,38 @@ export default function App() {
 
       <div className="agent-card">
         <div className="agent-header">
-          <h2>Simulation Plan</h2>
+          <h2>Simulation Setup</h2>
           <div className="agent-controls">
-            <button className="btn btn-primary" onClick={run} disabled={isRunning}>
-              {isRunning ? "Running..." : "Run"}
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={clear}
-              disabled={isRunning || output.length === 0}
-            >
-              Clear
+            <button className="btn btn-secondary" onClick={handleReset} disabled={isRunning}>
+              Reset
             </button>
           </div>
         </div>
-        <AgentOutput
-          output={output}
-          status={status}
-          onRespondQuestion={respondToQuestion}
-          onRespondPermission={respondToPermission}
-        />
+
+        {showOnboarding ? (
+          <OnboardingWizard
+            state={onboarding.state}
+            onCheckGitStatus={onboarding.checkGitStatus}
+            onProceedFromGitWarning={onboarding.proceedFromGitWarning}
+            onCheckDirectory={onboarding.checkDirectory}
+            onCreateDirectory={onboarding.createDirectoryAndProceed}
+            onCheckCompose={onboarding.checkCompose}
+            onStartComposeGeneration={handleStartComposeGeneration}
+            onComposeComplete={onboarding.markComposeComplete}
+            onRun={handleRun}
+            agentOutput={output}
+            agentStatus={status}
+            onRespondQuestion={respondToQuestion}
+            onRespondPermission={respondToPermission}
+          />
+        ) : (
+          <AgentOutput
+            output={output}
+            status={status}
+            onRespondQuestion={respondToQuestion}
+            onRespondPermission={respondToPermission}
+          />
+        )}
       </div>
     </main>
   );

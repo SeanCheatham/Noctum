@@ -9,7 +9,7 @@ import type {
   QuestionResponse,
   PermissionResponse,
 } from "./types.js";
-import { WORKFLOW_PROMPT } from "./workflow.js";
+import { getWorkflowPrompt, type WorkflowType } from "./workflow.js";
 
 type EventCallback = (event: AgentEvent) => void;
 
@@ -178,7 +178,7 @@ export class AgentService {
     return { behavior: "allow" };
   }
 
-  async runWorkflow(workingDirectory: string): Promise<string> {
+  async runWorkflow(workingDirectory: string, workflow: WorkflowType): Promise<string> {
     if (this.state.status === "running" || this.state.status === "waiting_for_input") {
       throw new Error("Agent is already running");
     }
@@ -194,9 +194,11 @@ export class AgentService {
 
     this.setStatus("running");
 
+    const prompt = getWorkflowPrompt(workflow);
+
     try {
       for await (const message of query({
-        prompt: WORKFLOW_PROMPT,
+        prompt,
         options: {
           allowedTools: ["Read", "Glob", "Grep", "Write", "Bash", "AskUserQuestion"],
           cwd: workingDirectory,

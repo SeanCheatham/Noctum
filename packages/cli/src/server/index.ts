@@ -7,6 +7,12 @@ import {
   handleRespondQuestion,
   handleRespondPermission,
 } from "./agent/index.js";
+import {
+  handleGitStatus,
+  handleCheckDirectory,
+  handleCreateDirectory,
+  handleCheckCompose,
+} from "./onboarding/index.js";
 import { handleHealth, handleNotFound } from "./routes.js";
 import { serveStaticFile } from "./static.js";
 import type { ServerConfig, ServerInfo } from "./types.js";
@@ -47,6 +53,27 @@ function createHandler() {
 
     if (path === "/api/agent/respond-permission" && method === "POST") {
       await handleRespondPermission(req, res);
+      return;
+    }
+
+    // Onboarding routes
+    if (path === "/api/onboarding/git-status" && method === "GET") {
+      handleGitStatus(req, res);
+      return;
+    }
+
+    if (path === "/api/onboarding/check-directory" && method === "GET") {
+      handleCheckDirectory(req, res);
+      return;
+    }
+
+    if (path === "/api/onboarding/create-directory" && method === "POST") {
+      handleCreateDirectory(req, res);
+      return;
+    }
+
+    if (path === "/api/onboarding/check-compose" && method === "GET") {
+      handleCheckCompose(req, res);
       return;
     }
 
