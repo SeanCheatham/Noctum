@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { agentService } from "./service.js";
 import { sendJson } from "../routes.js";
 import type { QuestionResponse, PermissionResponse } from "./types.js";
-import type { WorkflowType } from "./workflow.js";
+import { validateSandboxConfig, type WorkflowType } from "./workflow.js";
 
 export function handleAgentStatus(_req: IncomingMessage, res: ServerResponse): void {
   const state = agentService.getState();
@@ -33,6 +33,15 @@ export async function handleAgentRun(req: IncomingMessage, res: ServerResponse):
       }
     } catch {
       sendJson(res, 400, { success: false, error: "Invalid JSON body" });
+      return;
+    }
+  }
+
+  // Validate sandbox configuration before running containers
+  if (workflow === "run-containers") {
+    const validation = await validateSandboxConfig(workingDirectory);
+    if (!validation.valid) {
+      sendJson(res, 400, { success: false, error: validation.error });
       return;
     }
   }
@@ -127,10 +136,19 @@ export function handleAgentStream(_req: IncomingMessage, res: ServerResponse): v
 
   const subscriberId = randomUUID();
 
-  const state = agentService.getState();
-  res.write(
-    `data: ${JSON.stringify({ type: "status", timestamp: Date.now(), status: state.status })}\n\n`
-  );
+  // Send full event history on connect for session recovery
+  const history = agentService.getEventHistory();
+  for (const event of history) {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+
+  // Send current status if no history (idle state)
+  if (history.length === 0) {
+    const state = agentService.getState();
+    res.write(
+      `data: ${JSON.stringify({ type: "status", timestamp: Date.now(), status: state.status })}\n\n`
+    );
+  }
 
   const unsubscribe = agentService.subscribe(subscriberId, (event) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -139,4 +157,9 @@ export function handleAgentStream(_req: IncomingMessage, res: ServerResponse): v
   _req.on("close", () => {
     unsubscribe();
   });
+}
+
+export function handleAgentReset(_req: IncomingMessage, res: ServerResponse): void {
+  agentService.reset();
+  sendJson(res, 200, { success: true });
 }

@@ -5,7 +5,7 @@ import { GitStatusStep } from "./steps/GitStatusStep";
 import { DirectoryCheckStep } from "./steps/DirectoryCheckStep";
 import { ComposeCheckStep } from "./steps/ComposeCheckStep";
 import { ComposeGenerationStep } from "./steps/ComposeGenerationStep";
-import { ReadyStep } from "./steps/ReadyStep";
+import { RunStep } from "./steps/ReadyStep";
 
 interface OnboardingWizardProps {
   state: OnboardingState;
@@ -16,7 +16,7 @@ interface OnboardingWizardProps {
   onCheckCompose: () => void;
   onStartComposeGeneration: () => void;
   onComposeComplete: () => void;
-  onRun: () => void;
+  onStartRun: () => void;
   agentOutput: AgentOutputType[];
   agentStatus: AgentStatus;
   onRespondQuestion: (id: string, answer: string) => Promise<void>;
@@ -32,7 +32,7 @@ export function OnboardingWizard({
   onCheckCompose,
   onStartComposeGeneration,
   onComposeComplete,
-  onRun,
+  onStartRun,
   agentOutput,
   agentStatus,
   onRespondQuestion,
@@ -84,7 +84,15 @@ export function OnboardingWizard({
           />
         )}
 
-        {state.step === "ready" && <ReadyStep onRun={onRun} />}
+        {state.step === "ready" && (
+          <RunStep
+            agentOutput={agentOutput}
+            agentStatus={agentStatus}
+            onStart={onStartRun}
+            onRespondQuestion={onRespondQuestion}
+            onRespondPermission={onRespondPermission}
+          />
+        )}
       </div>
     </div>
   );

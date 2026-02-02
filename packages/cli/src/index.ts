@@ -22,13 +22,19 @@ program
   .description("Start the Noctum web dashboard")
   .option("-p, --port <number>", "Port to listen on (0 for random)", "0")
   .option("--host <address>", "Host to bind to", "127.0.0.1")
+  .option("-d, --dir <path>", "Target project directory", process.cwd())
   .action(async (options) => {
     const port = parseInt(options.port, 10);
     const host = options.host;
+    const projectDir = options.dir;
+
+    // Change to the target project directory
+    process.chdir(projectDir);
 
     try {
       const { info, shutdown } = await startServer({ port, host });
       console.log(`Noctum dashboard running at ${info.url}`);
+      console.log(`Project directory: ${process.cwd()}`);
       console.log("Press Ctrl+C to stop");
 
       const handleSignal = async () => {

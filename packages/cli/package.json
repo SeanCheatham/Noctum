@@ -7,7 +7,7 @@
     "noctum": "./dist/index.js"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts serve",
+    "dev": "tsx watch src/index.ts serve --dir ../..",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",

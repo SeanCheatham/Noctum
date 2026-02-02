@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { AgentOutput } from "./components/AgentOutput";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { useAgent } from "./hooks/useAgent";
 import { useOnboarding } from "./hooks/useOnboarding";
@@ -56,7 +55,6 @@ export default function App() {
   }, [clear, onboarding]);
 
   const isRunning = status === "running" || status === "waiting_for_input";
-  const showOnboarding = onboarding.state.step !== "ready" || status === "idle";
 
   return (
     <main className="container">
@@ -98,30 +96,21 @@ export default function App() {
           </div>
         </div>
 
-        {showOnboarding ? (
-          <OnboardingWizard
-            state={onboarding.state}
-            onCheckGitStatus={onboarding.checkGitStatus}
-            onProceedFromGitWarning={onboarding.proceedFromGitWarning}
-            onCheckDirectory={onboarding.checkDirectory}
-            onCreateDirectory={onboarding.createDirectoryAndProceed}
-            onCheckCompose={onboarding.checkCompose}
-            onStartComposeGeneration={handleStartComposeGeneration}
-            onComposeComplete={onboarding.markComposeComplete}
-            onRun={handleRun}
-            agentOutput={output}
-            agentStatus={status}
-            onRespondQuestion={respondToQuestion}
-            onRespondPermission={respondToPermission}
-          />
-        ) : (
-          <AgentOutput
-            output={output}
-            status={status}
-            onRespondQuestion={respondToQuestion}
-            onRespondPermission={respondToPermission}
-          />
-        )}
+        <OnboardingWizard
+          state={onboarding.state}
+          onCheckGitStatus={onboarding.checkGitStatus}
+          onProceedFromGitWarning={onboarding.proceedFromGitWarning}
+          onCheckDirectory={onboarding.checkDirectory}
+          onCreateDirectory={onboarding.createDirectoryAndProceed}
+          onCheckCompose={onboarding.checkCompose}
+          onStartComposeGeneration={handleStartComposeGeneration}
+          onComposeComplete={onboarding.markComposeComplete}
+          onStartRun={handleRun}
+          agentOutput={output}
+          agentStatus={status}
+          onRespondQuestion={respondToQuestion}
+          onRespondPermission={respondToPermission}
+        />
       </div>
     </main>
   );

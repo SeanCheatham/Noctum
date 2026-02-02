@@ -43,13 +43,29 @@ interface AgentPermissionEvent {
   command?: string;
 }
 
+interface AgentQuestionAnsweredEvent {
+  type: "question_answered";
+  timestamp: number;
+  questionId: string;
+  answer: string;
+}
+
+interface AgentPermissionRespondedEvent {
+  type: "permission_responded";
+  timestamp: number;
+  permissionId: string;
+  approved: boolean;
+}
+
 type AgentEvent =
   | AgentTextEvent
   | AgentToolEvent
   | AgentStatusEvent
   | AgentErrorEvent
   | AgentQuestionEvent
-  | AgentPermissionEvent;
+  | AgentPermissionEvent
+  | AgentQuestionAnsweredEvent
+  | AgentPermissionRespondedEvent;
 
 export interface AgentOutput {
   type: "text" | "tool" | "error" | "question" | "permission";
@@ -102,6 +118,13 @@ export function useAgent(): UseAgentReturn {
   useEffect(() => {
     const eventSource = new EventSource("/api/agent/stream");
     eventSourceRef.current = eventSource;
+
+    // Clear state on connection open to handle reconnects
+    eventSource.onopen = () => {
+      setOutput([]);
+      setPendingQuestion(null);
+      setPendingPermission(null);
+    };
 
     eventSource.onmessage = (event) => {
       const agentEvent: AgentEvent = JSON.parse(event.data);
@@ -169,6 +192,29 @@ export function useAgent(): UseAgentReturn {
             },
           ]);
           break;
+        case "question_answered":
+          setPendingQuestion(null);
+          setOutput((prev) =>
+            prev.map((item) =>
+              item.questionId === agentEvent.questionId
+                ? { ...item, status: "answered" as const }
+                : item
+            )
+          );
+          break;
+        case "permission_responded":
+          setPendingPermission(null);
+          setOutput((prev) =>
+            prev.map((item) =>
+              item.permissionId === agentEvent.permissionId
+                ? {
+                    ...item,
+                    status: agentEvent.approved ? ("approved" as const) : ("denied" as const),
+                  }
+                : item
+            )
+          );
+          break;
       }
     };
 
@@ -207,7 +253,13 @@ export function useAgent(): UseAgentReturn {
     }
   }, []);
 
-  const clear = useCallback(() => {
+  const clear = useCallback(async () => {
+    try {
+      await fetch("/api/agent/reset", { method: "POST" });
+    } catch {
+      // Ignore reset errors
+    }
+    setStatus("idle");
     setOutput([]);
     setPendingQuestion(null);
     setPendingPermission(null);

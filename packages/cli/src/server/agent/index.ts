@@ -3,6 +3,7 @@ export {
   handleAgentStatus,
   handleAgentRun,
   handleAgentStream,
+  handleAgentReset,
   handleRespondQuestion,
   handleRespondPermission,
 } from "./routes.js";

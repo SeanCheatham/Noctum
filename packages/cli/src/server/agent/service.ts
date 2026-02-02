@@ -28,11 +28,27 @@ export class AgentService {
     pendingPermission: null,
   };
 
+  private eventHistory: AgentEvent[] = [];
   private listeners = new Map<string, EventCallback>();
   private pendingResolvers = new Map<string, PendingResolver>();
 
   getState(): AgentState {
     return { ...this.state };
+  }
+
+  getEventHistory(): AgentEvent[] {
+    return [...this.eventHistory];
+  }
+
+  reset(): void {
+    this.state = {
+      status: "idle",
+      startedAt: null,
+      sessionId: null,
+      pendingQuestion: null,
+      pendingPermission: null,
+    };
+    this.eventHistory = [];
   }
 
   subscribe(id: string, callback: EventCallback): () => void {
@@ -43,6 +59,7 @@ export class AgentService {
   }
 
   private emit(event: AgentEvent): void {
+    this.eventHistory.push(event);
     for (const callback of this.listeners.values()) {
       callback(event);
     }
@@ -62,6 +79,13 @@ export class AgentService {
     clearTimeout(resolver.timeoutId);
     this.pendingResolvers.delete(response.questionId);
     this.state.pendingQuestion = null;
+
+    this.emit({
+      type: "question_answered",
+      timestamp: Date.now(),
+      questionId: response.questionId,
+      answer: response.answer,
+    });
     this.setStatus("running");
 
     resolver.resolve(response.answer);
@@ -76,6 +100,13 @@ export class AgentService {
     clearTimeout(resolver.timeoutId);
     this.pendingResolvers.delete(response.permissionId);
     this.state.pendingPermission = null;
+
+    this.emit({
+      type: "permission_responded",
+      timestamp: Date.now(),
+      permissionId: response.permissionId,
+      approved: response.approved,
+    });
     this.setStatus("running");
 
     resolver.resolve(response.approved);
@@ -191,6 +222,7 @@ export class AgentService {
       pendingQuestion: null,
       pendingPermission: null,
     };
+    this.eventHistory = [];
 
     this.setStatus("running");
 

@@ -1,4 +1,4 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import type {
   OnboardingState,
   OnboardingStep,
@@ -7,8 +7,16 @@ import type {
   ComposeCheckData,
 } from "../types/onboarding";
 
+interface BackendOnboardingState {
+  step: OnboardingStep;
+  gitStatus: GitStatusData | null;
+  directoryStatus: DirectoryCheckData | null;
+  composeStatus: ComposeCheckData | null;
+}
+
 type OnboardingAction =
   | { type: "START_CHECK" }
+  | { type: "SYNC_STATE"; data: BackendOnboardingState }
   | { type: "GIT_STATUS_COMPLETE"; data: GitStatusData }
   | { type: "DIRECTORY_CHECK_COMPLETE"; data: DirectoryCheckData }
   | { type: "COMPOSE_CHECK_COMPLETE"; data: ComposeCheckData }
@@ -21,7 +29,7 @@ const initialState: OnboardingState = {
   gitStatus: null,
   directoryStatus: null,
   composeStatus: null,
-  isLoading: false,
+  isLoading: true,
   error: null,
 };
 
@@ -29,6 +37,15 @@ function reducer(state: OnboardingState, action: OnboardingAction): OnboardingSt
   switch (action.type) {
     case "START_CHECK":
       return { ...state, isLoading: true, error: null };
+    case "SYNC_STATE":
+      return {
+        ...state,
+        step: action.data.step,
+        gitStatus: action.data.gitStatus,
+        directoryStatus: action.data.directoryStatus,
+        composeStatus: action.data.composeStatus,
+        isLoading: false,
+      };
     case "GIT_STATUS_COMPLETE":
       return {
         ...state,
@@ -55,7 +72,7 @@ function reducer(state: OnboardingState, action: OnboardingAction): OnboardingSt
     case "SET_ERROR":
       return { ...state, error: action.error, isLoading: false };
     case "RESET":
-      return initialState;
+      return { ...initialState, isLoading: false };
     default:
       return state;
   }
@@ -69,6 +86,24 @@ interface ApiResponse<T> {
 
 export function useOnboarding() {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Fetch initial state on mount
+  useEffect(() => {
+    async function fetchState() {
+      try {
+        const res = await fetch("/api/onboarding/state");
+        const json: ApiResponse<BackendOnboardingState> = await res.json();
+        if (json.success && json.data) {
+          dispatch({ type: "SYNC_STATE", data: json.data });
+        } else {
+          dispatch({ type: "SET_ERROR", error: json.error || "Failed to fetch state" });
+        }
+      } catch {
+        dispatch({ type: "SET_ERROR", error: "Failed to fetch state" });
+      }
+    }
+    fetchState();
+  }, []);
 
   const checkGitStatus = useCallback(async () => {
     dispatch({ type: "START_CHECK" });
@@ -85,7 +120,16 @@ export function useOnboarding() {
     }
   }, []);
 
-  const proceedFromGitWarning = useCallback(() => {
+  const proceedFromGitWarning = useCallback(async () => {
+    try {
+      await fetch("/api/onboarding/step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step: "directory-check" }),
+      });
+    } catch {
+      // Ignore backend errors for step setting
+    }
     dispatch({ type: "SET_STEP", step: "directory-check" });
   }, []);
 
@@ -134,11 +178,25 @@ export function useOnboarding() {
     }
   }, []);
 
-  const markComposeComplete = useCallback(() => {
+  const markComposeComplete = useCallback(async () => {
+    try {
+      await fetch("/api/onboarding/step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step: "ready" }),
+      });
+    } catch {
+      // Ignore backend errors for step setting
+    }
     dispatch({ type: "SET_STEP", step: "ready" });
   }, []);
 
-  const reset = useCallback(() => {
+  const reset = useCallback(async () => {
+    try {
+      await fetch("/api/onboarding/reset", { method: "POST" });
+    } catch {
+      // Ignore reset errors
+    }
     dispatch({ type: "RESET" });
   }, []);
 

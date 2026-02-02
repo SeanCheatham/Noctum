@@ -59,10 +59,26 @@ export interface AgentPermissionEvent {
   command?: string;
 }
 
+export interface AgentQuestionAnsweredEvent {
+  type: "question_answered";
+  timestamp: number;
+  questionId: string;
+  answer: string;
+}
+
+export interface AgentPermissionRespondedEvent {
+  type: "permission_responded";
+  timestamp: number;
+  permissionId: string;
+  approved: boolean;
+}
+
 export type AgentEvent =
   | AgentTextEvent
   | AgentToolEvent
   | AgentStatusEvent
   | AgentErrorEvent
   | AgentQuestionEvent
-  | AgentPermissionEvent;
+  | AgentPermissionEvent
+  | AgentQuestionAnsweredEvent
+  | AgentPermissionRespondedEvent;

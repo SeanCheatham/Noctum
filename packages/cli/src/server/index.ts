@@ -4,10 +4,14 @@ import {
   handleAgentRun,
   handleAgentStatus,
   handleAgentStream,
+  handleAgentReset,
   handleRespondQuestion,
   handleRespondPermission,
 } from "./agent/index.js";
 import {
+  handleGetState,
+  handleSetStep,
+  handleResetState,
   handleGitStatus,
   handleCheckDirectory,
   handleCreateDirectory,
@@ -56,7 +60,27 @@ function createHandler() {
       return;
     }
 
+    if (path === "/api/agent/reset" && method === "POST") {
+      handleAgentReset(req, res);
+      return;
+    }
+
     // Onboarding routes
+    if (path === "/api/onboarding/state" && method === "GET") {
+      handleGetState(req, res);
+      return;
+    }
+
+    if (path === "/api/onboarding/step" && method === "POST") {
+      await handleSetStep(req, res);
+      return;
+    }
+
+    if (path === "/api/onboarding/reset" && method === "POST") {
+      handleResetState(req, res);
+      return;
+    }
+
     if (path === "/api/onboarding/git-status" && method === "GET") {
       handleGitStatus(req, res);
       return;

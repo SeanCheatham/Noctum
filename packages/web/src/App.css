@@ -201,6 +201,7 @@ dd {
   max-height: 400px;
   overflow-y: auto;
   scroll-behavior: smooth;
+  text-align: left;
 }
 
 .agent-output::-webkit-scrollbar {
@@ -229,6 +230,7 @@ dd {
 
 .output-item {
   margin-bottom: 0.75rem;
+  text-align: left;
 }
 
 .output-item pre {
