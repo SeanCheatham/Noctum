@@ -60,25 +60,32 @@ export default function App() {
 
   return (
     <main className="container">
-      <h1>Noctum</h1>
-      <p className="subtitle">AI-powered sandboxed simulation testing</p>
-
-      <div className="status-card">
-        <h2>Server Status</h2>
-        {error ? (
-          <p className="error">Error: {error}</p>
-        ) : health ? (
-          <dl>
-            <dt>Status</dt>
-            <dd className="status-ok">{health.status}</dd>
-            <dt>Version</dt>
-            <dd>{health.version}</dd>
-            <dt>Uptime</dt>
-            <dd>{health.uptime}s</dd>
-          </dl>
-        ) : (
-          <p>Loading...</p>
-        )}
+      <div className="top-bar">
+        <div className="top-bar-brand">
+          <h1>Noctum</h1>
+          <p className="subtitle">AI-powered sandboxed simulation testing</p>
+        </div>
+        <div className="top-bar-status">
+          {error ? (
+            <span className="error">{error}</span>
+          ) : health ? (
+            <>
+              <div className="top-bar-status-item">
+                <span className="label">Status</span>
+                <span className="value status-ok">{health.status}</span>
+              </div>
+              <div className="top-bar-status-item">
+                <span className="label">v{health.version}</span>
+              </div>
+              <div className="top-bar-status-item">
+                <span className="label">Uptime</span>
+                <span className="value">{health.uptime}s</span>
+              </div>
+            </>
+          ) : (
+            <span className="top-bar-status-item">Loading...</span>
+          )}
+        </div>
       </div>
 
       <div className="agent-card">

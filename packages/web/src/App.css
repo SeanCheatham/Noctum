@@ -23,9 +23,57 @@ body {
 }
 
 .container {
-  max-width: 800px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 4rem 2rem;
+  padding: 1rem 2rem;
+}
+
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.top-bar-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.top-bar-brand h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0;
+}
+
+.top-bar-brand .subtitle {
+  font-size: 0.875rem;
+  margin-bottom: 0;
+}
+
+.top-bar-status {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.top-bar-status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.top-bar-status-item .label {
+  color: var(--text-muted);
+}
+
+.top-bar-status-item .value {
+  font-weight: 500;
 }
 
 h1 {
@@ -604,4 +652,9 @@ dd {
   padding: 1rem;
   margin-bottom: 1rem;
   color: var(--error);
+}
+
+.step-actions {
+  margin-top: 1.5rem;
+  text-align: center;
 }
