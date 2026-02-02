@@ -1,0 +1,17 @@
+{
+  "name": "noctum",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "format": "npm run format --workspaces",
+    "format:check": "npm run format:check --workspaces"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,23 +1,26 @@
-# Rust build artifacts
-/target/
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
+.vscode/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Noctum data
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
 # Logs
 *.log
+npm-debug.log*
 
-CLAUDE.md
+# Test coverage
+coverage/
+
+# Environment
+.env
+.env.local
