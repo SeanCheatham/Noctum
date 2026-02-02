@@ -1,6 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { handleHealth, handleNotFound, sendJson } from "./routes.js";
+import { handleAgentRun, handleAgentStatus, handleAgentStream } from "./agent/index.js";
+import { handleHealth, handleNotFound } from "./routes.js";
 import { serveStaticFile } from "./static.js";
 import type { ServerConfig, ServerInfo } from "./types.js";
 
@@ -15,6 +16,21 @@ function createHandler() {
     // API routes
     if (path === "/api/health" && method === "GET") {
       handleHealth(req, res);
+      return;
+    }
+
+    if (path === "/api/agent/status" && method === "GET") {
+      handleAgentStatus(req, res);
+      return;
+    }
+
+    if (path === "/api/agent/run" && method === "POST") {
+      await handleAgentRun(req, res);
+      return;
+    }
+
+    if (path === "/api/agent/stream" && method === "GET") {
+      handleAgentStream(req, res);
       return;
     }
 

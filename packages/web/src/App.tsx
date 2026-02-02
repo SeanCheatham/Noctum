@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { AgentOutput } from "./components/AgentOutput";
+import { useAgent } from "./hooks/useAgent";
 
 interface HealthData {
   status: string;
@@ -15,6 +17,7 @@ interface ApiResponse<T> {
 export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { status, output, run, clear } = useAgent();
 
   useEffect(() => {
     async function fetchHealth() {
@@ -35,6 +38,8 @@ export default function App() {
     const interval = setInterval(fetchHealth, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  const isRunning = status === "running";
 
   return (
     <main className="container">
@@ -57,6 +62,25 @@ export default function App() {
         ) : (
           <p>Loading...</p>
         )}
+      </div>
+
+      <div className="agent-card">
+        <div className="agent-header">
+          <h2>Simulation Plan</h2>
+          <div className="agent-controls">
+            <button className="btn btn-primary" onClick={run} disabled={isRunning}>
+              {isRunning ? "Running..." : "Run"}
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={clear}
+              disabled={isRunning || output.length === 0}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        <AgentOutput output={output} status={status} />
       </div>
     </main>
   );

@@ -24,11 +24,32 @@ Noctum provides a sandboxed environment where an LLM can safely:
 4. **Success or failure is determined** — MVP: runs for a configured duration without crashing
 5. **Iterate** — if it fails, the LLM can analyze, suggest fixes, and re-test
 
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Start the web dashboard
+npx noctum serve
+```
+
+Open the displayed URL in your browser to access the dashboard.
+
 ## Status
 
-🚧 **Early Development** — This project is being rebuilt from scratch. Not yet functional.
+🚧 **Early Development** — Core infrastructure is in place, but simulation execution is not yet functional.
 
-## Planned Features
+### What Works
+
+- [x] Web dashboard with server health monitoring
+- [x] Claude Agent SDK integration for AI-powered planning
+- [x] "Run" button to generate Docker Compose simulation plans
+
+### Planned Features
 
 - [ ] Docker-based sandbox execution
 - [ ] Test harness scaffolding (LLM helps generate your test harness)
