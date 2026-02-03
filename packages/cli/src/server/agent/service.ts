@@ -9,7 +9,12 @@ import type {
   QuestionResponse,
   PermissionResponse,
 } from "./types.js";
-import { getWorkflowPrompt, type WorkflowType } from "./workflow.js";
+import {
+  getWorkflowPrompt,
+  runDockerSimulation,
+  RUN_CONTAINERS_PROMPT,
+  type WorkflowType,
+} from "./workflow.js";
 
 type EventCallback = (event: AgentEvent) => void;
 
@@ -226,44 +231,12 @@ export class AgentService {
 
     this.setStatus("running");
 
-    const prompt = getWorkflowPrompt(workflow);
-
     try {
-      for await (const message of query({
-        prompt,
-        options: {
-          allowedTools: ["Read", "Glob", "Grep", "Write", "Bash", "AskUserQuestion"],
-          cwd: workingDirectory,
-          canUseTool: async (
-            toolName: string,
-            input: Record<string, unknown>
-          ): Promise<
-            | { behavior: "allow"; updatedInput?: Record<string, unknown> }
-            | { behavior: "deny"; message: string }
-          > => {
-            if (toolName === "AskUserQuestion") {
-              return this.handleAskUserQuestion(input);
-            }
-
-            if (toolName === "Write" || toolName === "Bash") {
-              return this.handleToolPermission(toolName, input);
-            }
-
-            return { behavior: "allow" };
-          },
-        },
-      })) {
-        if (message.type === "assistant" && message.message?.content) {
-          for (const block of message.message.content) {
-            if ("text" in block && typeof block.text === "string") {
-              this.emit({ type: "text", timestamp: Date.now(), text: block.text });
-            } else if ("name" in block && typeof block.name === "string") {
-              this.emit({ type: "tool", timestamp: Date.now(), tool: block.name });
-            }
-          }
-        }
+      if (workflow === "run-containers") {
+        await this.runContainersWorkflow(workingDirectory);
+      } else {
+        await this.runAgentWorkflow(workingDirectory, workflow);
       }
-
       this.setStatus("completed");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
@@ -272,6 +245,80 @@ export class AgentService {
     }
 
     return sessionId;
+  }
+
+  private async runContainersWorkflow(workingDirectory: string): Promise<void> {
+    // Run docker commands automatically
+    const result = await runDockerSimulation(
+      workingDirectory,
+      (step, message) => {
+        this.emit({ type: "text", timestamp: Date.now(), text: `**${step}**: ${message}` });
+      },
+      (data) => {
+        this.emit({ type: "text", timestamp: Date.now(), text: data });
+      }
+    );
+
+    // Prepare the prompt with logs
+    const prompt = RUN_CONTAINERS_PROMPT.replace("{{SIMULATION_LOGS}}", result.combinedLogs);
+
+    // Run LLM to analyze logs
+    this.emit({ type: "text", timestamp: Date.now(), text: "\n---\n**Analyzing results...**\n" });
+
+    for await (const message of query({
+      prompt,
+      options: {
+        allowedTools: [],
+        cwd: workingDirectory,
+      },
+    })) {
+      if (message.type === "assistant" && message.message?.content) {
+        for (const block of message.message.content) {
+          if ("text" in block && typeof block.text === "string") {
+            this.emit({ type: "text", timestamp: Date.now(), text: block.text });
+          }
+        }
+      }
+    }
+  }
+
+  private async runAgentWorkflow(workingDirectory: string, workflow: WorkflowType): Promise<void> {
+    const prompt = getWorkflowPrompt(workflow);
+
+    for await (const message of query({
+      prompt,
+      options: {
+        allowedTools: ["Read", "Glob", "Grep", "Write", "Bash", "AskUserQuestion"],
+        cwd: workingDirectory,
+        canUseTool: async (
+          toolName: string,
+          input: Record<string, unknown>
+        ): Promise<
+          | { behavior: "allow"; updatedInput?: Record<string, unknown> }
+          | { behavior: "deny"; message: string }
+        > => {
+          if (toolName === "AskUserQuestion") {
+            return this.handleAskUserQuestion(input);
+          }
+
+          if (toolName === "Write" || toolName === "Bash") {
+            return this.handleToolPermission(toolName, input);
+          }
+
+          return { behavior: "allow" };
+        },
+      },
+    })) {
+      if (message.type === "assistant" && message.message?.content) {
+        for (const block of message.message.content) {
+          if ("text" in block && typeof block.text === "string") {
+            this.emit({ type: "text", timestamp: Date.now(), text: block.text });
+          } else if ("name" in block && typeof block.name === "string") {
+            this.emit({ type: "tool", timestamp: Date.now(), tool: block.name });
+          }
+        }
+      }
+    }
   }
 }
 

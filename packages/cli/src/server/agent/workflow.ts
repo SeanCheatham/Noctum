@@ -41,38 +41,27 @@ Write the configuration files to the \`noctum/\` directory.
 
 Report your progress clearly. Be concise but informative.`;
 
-export const RUN_CONTAINERS_PROMPT = `You are running the Docker simulation environment.
+export const RUN_CONTAINERS_PROMPT = `You are analyzing the logs from a Docker simulation environment run.
 
-The docker-compose.yml already exists at noctum/docker-compose.yml.
+The following logs were captured from running the simulation:
+- Cleanup: docker compose down --remove-orphans --volumes
+- Build: docker compose build
+- Run: docker compose up (with 2 minute timeout)
 
-## Step 1: Cleanup
-Run \`docker-compose -f noctum/docker-compose.yml down --remove-orphans --volumes\` to clean up any existing containers, networks, and volumes from previous runs.
+## Logs
 
-## Step 2: Build Containers
-Run \`docker-compose -f noctum/docker-compose.yml build\` to build the containers.
-- Report build progress to the user
-- If there are build errors, report them clearly
+{{SIMULATION_LOGS}}
 
-## Step 3: Run Containers
-Run the containers with a timeout of 2 minutes.
-- Use \`timeout 120 docker-compose -f noctum/docker-compose.yml up 2>&1\` or equivalent
-- Capture all output (stdout and stderr)
-- Success condition: containers run for 2 minutes without crashing
+## Your Task
 
-## Step 4: Analyze Results
-After the containers stop (timeout or crash), analyze the logs:
-- Identify any errors, exceptions, or warnings
-- Check if services started successfully
-- Look for connection issues or dependency problems
-- Summarize what happened during the run
+Analyze these logs and provide a clear summary:
 
-Provide a clear summary of:
-1. Whether the simulation succeeded or failed
-2. Key events that occurred
-3. Any issues that need attention
-4. Recommendations for next steps
+1. **Status**: Did the simulation succeed or fail?
+2. **Key Events**: What happened during the run?
+3. **Issues**: Any errors, exceptions, warnings, or connection problems?
+4. **Recommendations**: What should be done next?
 
-Report your progress clearly. Be concise but informative.`;
+Be concise but informative.`;
 
 export function getWorkflowPrompt(workflow: WorkflowType): string {
   switch (workflow) {
@@ -81,6 +70,182 @@ export function getWorkflowPrompt(workflow: WorkflowType): string {
     case "run-containers":
       return RUN_CONTAINERS_PROMPT;
   }
+}
+
+export interface SimulationStep {
+  name: string;
+  output: string;
+  exitCode: number | null;
+  timedOut: boolean;
+}
+
+export interface SimulationResult {
+  success: boolean;
+  steps: SimulationStep[];
+  combinedLogs: string;
+}
+
+type StepCallback = (step: string, output: string) => void;
+
+async function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  onOutput?: (data: string) => void
+): Promise<SimulationStep> {
+  const { spawn } = await import("node:child_process");
+
+  return new Promise((resolve) => {
+    const name = `${command} ${args.join(" ")}`;
+    let output = "";
+    let timedOut = false;
+
+    const proc = spawn(command, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGTERM");
+      setTimeout(() => proc.kill("SIGKILL"), 5000);
+    }, timeoutMs);
+
+    proc.stdout.on("data", (data: Buffer) => {
+      const text = data.toString();
+      output += text;
+      onOutput?.(text);
+    });
+
+    proc.stderr.on("data", (data: Buffer) => {
+      const text = data.toString();
+      output += text;
+      onOutput?.(text);
+    });
+
+    proc.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({ name, output, exitCode: code, timedOut });
+    });
+
+    proc.on("error", (err) => {
+      clearTimeout(timeout);
+      resolve({ name, output: output + `\nError: ${err.message}`, exitCode: 1, timedOut: false });
+    });
+  });
+}
+
+async function stopContainers(cwd: string, composePath: string): Promise<void> {
+  const { spawn } = await import("node:child_process");
+
+  return new Promise((resolve) => {
+    const proc = spawn("docker", ["compose", "-f", composePath, "down"], {
+      cwd,
+      stdio: "ignore",
+    });
+
+    const timeout = setTimeout(() => {
+      proc.kill("SIGKILL");
+      resolve();
+    }, 10000);
+
+    proc.on("close", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+
+    proc.on("error", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+export async function runDockerSimulation(
+  workingDirectory: string,
+  onStepStart?: StepCallback,
+  onOutput?: (data: string) => void
+): Promise<SimulationResult> {
+  const composePath = "noctum/docker-compose.yml";
+  const steps: SimulationStep[] = [];
+
+  // Step 1: Cleanup
+  onStepStart?.("cleanup", "Cleaning up existing containers...");
+  const cleanup = await runCommand(
+    "docker",
+    ["compose", "-f", composePath, "down", "--remove-orphans", "--volumes"],
+    workingDirectory,
+    30000,
+    onOutput
+  );
+  steps.push(cleanup);
+
+  if (cleanup.exitCode !== 0) {
+    return {
+      success: false,
+      steps,
+      combinedLogs: formatCombinedLogs(steps),
+    };
+  }
+
+  // Step 2: Build
+  onStepStart?.("build", "Building containers...");
+  const build = await runCommand(
+    "docker",
+    ["compose", "-f", composePath, "build"],
+    workingDirectory,
+    300000, // 5 minutes for build
+    onOutput
+  );
+  steps.push(build);
+
+  if (build.exitCode !== 0) {
+    return {
+      success: false,
+      steps,
+      combinedLogs: formatCombinedLogs(steps),
+    };
+  }
+
+  // Step 3: Run with 2 minute timeout
+  onStepStart?.("run", "Running containers (2 minute timeout)...");
+  const run = await runCommand(
+    "docker",
+    ["compose", "-f", composePath, "up"],
+    workingDirectory,
+    120000, // 2 minutes
+    onOutput
+  );
+  steps.push(run);
+
+  // Stop containers properly after timeout or completion
+  if (run.timedOut) {
+    onStepStart?.("stopping", "Stopping containers...");
+    await stopContainers(workingDirectory, composePath);
+  }
+
+  // Success if it timed out (ran for full 2 minutes) or exited with 0
+  const success = run.timedOut || run.exitCode === 0;
+
+  return {
+    success,
+    steps,
+    combinedLogs: formatCombinedLogs(steps),
+  };
+}
+
+function formatCombinedLogs(steps: SimulationStep[]): string {
+  return steps
+    .map((step) => {
+      const status = step.timedOut
+        ? "(timed out - expected)"
+        : step.exitCode === 0
+          ? "(success)"
+          : `(exit code: ${step.exitCode})`;
+      return `### ${step.name} ${status}\n\n\`\`\`\n${step.output.trim() || "(no output)"}\n\`\`\``;
+    })
+    .join("\n\n");
 }
 
 export type SandboxValidationResult = { valid: true } | { valid: false; error: string };
