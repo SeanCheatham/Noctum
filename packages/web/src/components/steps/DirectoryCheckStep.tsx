@@ -42,25 +42,26 @@ export function DirectoryCheckStep({
 
   return (
     <div className="step-content">
-      <div className="step-icon">N</div>
+      <div className="step-icon">&gt;_</div>
       <h3>Welcome to Noctum</h3>
 
       <div className="noctum-overview">
-        <p>Noctum helps you test your application in a safe, isolated Docker environment.</p>
+        <p>Test your application in a safe, isolated Docker environment.</p>
 
         <ul className="feature-list">
           <li>Sandboxed execution with no network access</li>
           <li>AI-powered docker-compose generation</li>
           <li>Automatic dependency detection</li>
+          <li>Real-time log analysis and reporting</li>
         </ul>
 
         <p>
-          A <code>noctum/</code> directory will be created to store configuration files.
+          A <code>noctum/</code> directory will be created for configuration.
         </p>
       </div>
 
-      <button className="btn btn-primary" onClick={onCreateAndContinue}>
-        Continue
+      <button className="btn btn-primary btn-large" onClick={onCreateAndContinue}>
+        Get Started
       </button>
     </div>
   );

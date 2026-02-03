@@ -15,6 +15,12 @@ interface ApiResponse<T> {
   error?: string;
 }
 
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h`;
+}
+
 export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +71,8 @@ export default function App() {
     <main className="container">
       <div className="top-bar">
         <div className="top-bar-brand">
-          <h1>Noctum</h1>
-          <p className="subtitle">AI-powered sandboxed simulation testing</p>
+          <h1>noctum</h1>
+          <p className="subtitle">sandboxed simulation testing</p>
         </div>
         <div className="top-bar-status">
           {error ? (
@@ -74,19 +80,18 @@ export default function App() {
           ) : health ? (
             <>
               <div className="top-bar-status-item">
-                <span className="label">Status</span>
                 <span className="value status-ok">{health.status}</span>
               </div>
               <div className="top-bar-status-item">
                 <span className="label">v{health.version}</span>
               </div>
               <div className="top-bar-status-item">
-                <span className="label">Uptime</span>
-                <span className="value">{health.uptime}s</span>
+                <span className="label">up</span>
+                <span className="value">{formatUptime(health.uptime)}</span>
               </div>
             </>
           ) : (
-            <span className="top-bar-status-item">Loading...</span>
+            <span className="top-bar-status-item">connecting...</span>
           )}
         </div>
       </div>

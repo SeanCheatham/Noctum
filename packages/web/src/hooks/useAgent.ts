@@ -219,7 +219,11 @@ export function useAgent(): UseAgentReturn {
     };
 
     eventSource.onerror = () => {
-      setStatus("error");
+      // Only set error if we're in an active state - connection drops after
+      // completion are normal and shouldn't override the completed status
+      setStatus((current) =>
+        current === "running" || current === "waiting_for_input" ? "error" : current
+      );
     };
 
     return () => {

@@ -19,15 +19,19 @@ export function ProgressIndicator({ currentStep }: ProgressIndicatorProps) {
 
   return (
     <div className="progress-indicator">
-      {STEPS.map((step, index) => (
-        <div
-          key={step.key}
-          className={`progress-step ${index <= currentIndex ? "active" : ""} ${index < currentIndex ? "completed" : ""}`}
-        >
-          <div className="step-marker">{index + 1}</div>
-          <div className="step-label">{step.label}</div>
-        </div>
-      ))}
+      {STEPS.map((step, index) => {
+        const isCompleted = index < currentIndex;
+        const isActive = index === currentIndex;
+        return (
+          <div
+            key={step.key}
+            className={`progress-step ${isActive ? "active" : ""} ${isCompleted ? "completed" : ""}`}
+          >
+            <div className="step-marker">{isCompleted ? "✓" : index + 1}</div>
+            <div className="step-label">{step.label}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }

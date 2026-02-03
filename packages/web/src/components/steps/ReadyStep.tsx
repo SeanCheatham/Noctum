@@ -23,21 +23,22 @@ export function RunStep({
   if (!hasStarted) {
     return (
       <div className="step-content">
-        <div className="step-icon success">&#10003;</div>
+        <div className="step-icon success">&#x2713;</div>
         <h3>Ready to Run</h3>
-        <p>Your simulation environment is configured and ready.</p>
+        <p>Your simulation environment is configured and ready to go.</p>
 
         <div className="noctum-overview">
           <p>The simulation will:</p>
           <ul className="feature-list">
-            <li>Build Docker containers</li>
-            <li>Run for up to 2 minutes (or until crash)</li>
-            <li>Analyze logs and report results</li>
+            <li>Build and launch Docker containers</li>
+            <li>Run for up to 2 minutes or until exit</li>
+            <li>Capture and analyze all output</li>
+            <li>Generate a detailed report</li>
           </ul>
         </div>
 
         <button className="btn btn-primary btn-large" onClick={onStart}>
-          Run Simulation
+          Start Simulation
         </button>
       </div>
     );
