@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { version } from "../version.js";
-import type { ApiResponse, HealthResponse } from "./types.js";
+import type { ApiResponse, HealthData } from "./types.js";
 
 const startTime = Date.now();
 
@@ -10,7 +10,7 @@ export function sendJson<T>(res: ServerResponse, status: number, data: ApiRespon
 }
 
 export function handleHealth(_req: IncomingMessage, res: ServerResponse): void {
-  const response: ApiResponse<HealthResponse> = {
+  const response: ApiResponse<HealthData> = {
     success: true,
     data: {
       status: "ok",

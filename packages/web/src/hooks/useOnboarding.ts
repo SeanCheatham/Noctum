@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useReducer } from "react";
 import type {
-  OnboardingState,
+  ApiResponse,
+  OnboardingState as BackendOnboardingState,
   OnboardingStep,
   GitStatusData,
   DirectoryCheckData,
   ComposeCheckData,
-} from "../types/onboarding";
-
-interface BackendOnboardingState {
-  step: OnboardingStep;
-  gitStatus: GitStatusData | null;
-  directoryStatus: DirectoryCheckData | null;
-  composeStatus: ComposeCheckData | null;
-}
+} from "@noctum/shared";
+import type { OnboardingState } from "../types/onboarding";
 
 type OnboardingAction =
   | { type: "START_CHECK" }
@@ -76,12 +71,6 @@ function reducer(state: OnboardingState, action: OnboardingAction): OnboardingSt
     default:
       return state;
   }
-}
-
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
 }
 
 export function useOnboarding() {

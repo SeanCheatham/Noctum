@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+export type { ApiResponse, HealthData } from "@noctum/shared";
+
+// Server-specific types
 export interface ServerConfig {
   host?: string;
   port?: number;
@@ -12,15 +15,3 @@ export interface ServerInfo {
 }
 
 export type RouteHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
-
-export interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
-
-export interface HealthResponse {
-  status: "ok";
-  version: string;
-  uptime: number;
-}

@@ -1,19 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import type { ApiResponse, HealthData } from "@noctum/shared";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { useAgent } from "./hooks/useAgent";
 import { useOnboarding } from "./hooks/useOnboarding";
-
-interface HealthData {
-  status: string;
-  version: string;
-  uptime: number;
-}
-
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
 
 function formatUptime(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;

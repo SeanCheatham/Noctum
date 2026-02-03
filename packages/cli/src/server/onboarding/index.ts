@@ -10,9 +10,9 @@ export {
   handleCheckCompose,
 } from "./routes.js";
 export type {
-  GitStatusResult,
-  DirectoryCheckResult,
-  ComposeCheckResult,
+  GitStatusData,
+  DirectoryCheckData,
+  ComposeCheckData,
   OnboardingStep,
   OnboardingState,
 } from "./types.js";

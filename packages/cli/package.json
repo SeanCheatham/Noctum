@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.29",
+    "@noctum/shared": "*",
     "@noctum/web": "*",
     "commander": "^14.0.0"
   }

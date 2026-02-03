@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { startServer } from "../../server/index.js";
-import type { ApiResponse, HealthResponse } from "../../server/types.js";
+import type { ApiResponse, HealthData } from "../../server/types.js";
 
 describe("server", () => {
   let shutdown: (() => Promise<void>) | null = null;
@@ -28,7 +28,7 @@ describe("server", () => {
     const response = await fetch(`${result.info.url}api/health`);
     expect(response.status).toBe(200);
 
-    const data = (await response.json()) as ApiResponse<HealthResponse>;
+    const data = (await response.json()) as ApiResponse<HealthData>;
     expect(data.success).toBe(true);
     expect(data.data?.status).toBe("ok");
     expect(data.data?.version).toBeDefined();

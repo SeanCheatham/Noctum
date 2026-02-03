@@ -1,30 +1,14 @@
-export type OnboardingStep =
-  | "git-status"
-  | "directory-check"
-  | "compose-check"
-  | "compose-generation"
-  | "ready";
+import type { OnboardingState as BaseOnboardingState } from "@noctum/shared";
 
-export interface GitStatusData {
-  isClean: boolean;
-  branch: string;
-  changedFiles: string[];
-}
+export type {
+  OnboardingStep,
+  GitStatusData,
+  DirectoryCheckData,
+  ComposeCheckData,
+} from "@noctum/shared";
 
-export interface DirectoryCheckData {
-  exists: boolean;
-}
-
-export interface ComposeCheckData {
-  exists: boolean;
-  path: string;
-}
-
-export interface OnboardingState {
-  step: OnboardingStep;
-  gitStatus: GitStatusData | null;
-  directoryStatus: DirectoryCheckData | null;
-  composeStatus: ComposeCheckData | null;
+// Frontend-specific extension with loading and error state
+export interface OnboardingState extends BaseOnboardingState {
   isLoading: boolean;
   error: string | null;
 }
