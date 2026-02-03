@@ -34,27 +34,34 @@ npm install
 npm run build
 
 # Start the web dashboard
-npx noctum serve
+npx noctum serve --dir /path/to/your/project
 ```
+
+Options:
+
+- `--port <number>` — Port to listen on (default: random available port)
+- `--host <address>` — Host to bind to (default: 127.0.0.1)
+- `--dir <path>` — Target project directory (default: current directory)
 
 Open the displayed URL in your browser to access the dashboard.
 
 ## Status
 
-🚧 **Early Development** — Core infrastructure is in place, but simulation execution is not yet functional.
+🚧 **Early Development** — Core simulation workflow is functional. Iterative fix-and-retry loop is not yet implemented.
 
 ### What Works
 
 - [x] Web dashboard with server health monitoring
-- [x] Claude Agent SDK integration for AI-powered planning
-- [x] "Run" button to generate Docker Compose simulation plans
+- [x] Multi-step onboarding wizard (git status → directory setup → compose generation)
+- [x] Claude Agent SDK integration for codebase analysis
+- [x] Docker Compose generation — LLM analyzes your code and generates isolated container configuration
+- [x] Docker sandbox execution — builds and runs containers with network isolation
+- [x] Log collection and LLM analysis — collects container logs, determines success/failure
 
 ### Planned Features
 
-- [ ] Docker-based sandbox execution
-- [ ] Test harness scaffolding (LLM helps generate your test harness)
-- [ ] Log collection and analysis
 - [ ] Iterative failure analysis and fix suggestions
+- [ ] Test harness scaffolding (LLM helps generate your test harness)
 - [ ] Configuration via `noctum.toml`
 
 ## Future Ideas

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { resolve } from "node:path";
 import { version } from "./version.js";
 import { startServer } from "./server/index.js";
 
@@ -26,7 +27,8 @@ program
   .action(async (options) => {
     const port = parseInt(options.port, 10);
     const host = options.host;
-    const projectDir = options.dir;
+    // Resolve to absolute path immediately to avoid issues with workspace tools
+    const projectDir = resolve(options.dir);
 
     // Change to the target project directory
     process.chdir(projectDir);

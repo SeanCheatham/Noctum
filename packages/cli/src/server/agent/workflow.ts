@@ -46,6 +46,7 @@ export const RUN_CONTAINERS_PROMPT = `You are analyzing the logs from a Docker s
 The following logs were captured from running the simulation:
 - Cleanup: docker compose down --remove-orphans --volumes
 - Build: docker compose build
+- Pull: docker compose pull (for pre-built images)
 - Run: docker compose up (with 2 minute timeout)
 
 ## Logs
@@ -208,7 +209,26 @@ export async function runDockerSimulation(
     };
   }
 
-  // Step 3: Run with 2 minute timeout
+  // Step 3: Pull pre-built images
+  onStepStart?.("pull", "Pulling images...");
+  const pull = await runCommand(
+    "docker",
+    ["compose", "-f", composePath, "pull", "--ignore-buildable"],
+    workingDirectory,
+    300000, // 5 minutes for pull
+    onOutput
+  );
+  steps.push(pull);
+
+  if (pull.exitCode !== 0) {
+    return {
+      success: false,
+      steps,
+      combinedLogs: formatCombinedLogs(steps),
+    };
+  }
+
+  // Step 4: Run with 2 minute timeout
   onStepStart?.("run", "Running containers (2 minute timeout)...");
   const run = await runCommand(
     "docker",

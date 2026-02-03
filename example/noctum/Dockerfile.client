@@ -1,0 +1,13 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY client/package.json client/package-lock.json* ./
+RUN npm install
+
+COPY client/tsconfig.json ./
+COPY client/src ./src
+
+RUN npm run build
+
+CMD ["npm", "start"]

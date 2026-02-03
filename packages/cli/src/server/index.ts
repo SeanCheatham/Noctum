@@ -148,6 +148,7 @@ export function startServer(config: ServerConfig = {}): Promise<{
 
       const shutdown = (): Promise<void> => {
         return new Promise((res, rej) => {
+          server.closeAllConnections();
           server.close((err) => (err ? rej(err) : res()));
         });
       };

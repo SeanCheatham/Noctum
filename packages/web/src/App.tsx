@@ -45,6 +45,11 @@ export default function App() {
     run({ workflow: "compose-generation" });
   }, [run]);
 
+  const handleComposeComplete = useCallback(() => {
+    clear();
+    onboarding.markComposeComplete();
+  }, [clear, onboarding]);
+
   const handleRun = useCallback(() => {
     run({ workflow: "run-containers" });
   }, [run]);
@@ -104,7 +109,7 @@ export default function App() {
           onCreateDirectory={onboarding.createDirectoryAndProceed}
           onCheckCompose={onboarding.checkCompose}
           onStartComposeGeneration={handleStartComposeGeneration}
-          onComposeComplete={onboarding.markComposeComplete}
+          onComposeComplete={handleComposeComplete}
           onStartRun={handleRun}
           agentOutput={output}
           agentStatus={status}
