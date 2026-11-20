@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Trial - Noctum{% endblock %}
+{% block content %}
+<p><a href="/">Repositories</a></p>
+<h1>{{ test_name }}</h1>
+<div class="card">
+    <p>Symbol {{ symbol }}</p>
+    <p>Status {{ status }}</p>
+    <p>Gate {{ reason }}</p>
+    <p>Baseline {{ baseline }}</p>
+    <p>Candidate {{ candidate }}</p>
+    <p>Ratio {{ ratio }}</p>
+    <p>{{ summary }}</p>
+</div>
+<h2>Diff</h2>
+<pre style="white-space: pre-wrap; background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border);">{{ diff }}</pre>
+<h2>Tool output</h2>
+<pre style="white-space: pre-wrap; background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border);">{{ tool_output }}</pre>
+{% endblock %}

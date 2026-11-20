@@ -1,679 +1,318 @@
-//! HTTP request handlers for the web dashboard and API.
-//!
-//! HTML handlers render Askama templates for the browser UI.
-//! API handlers return JSON for programmatic access and AJAX requests.
+//! Dashboard pages and the small JSON API the pages call.
 
-use crate::analyzer::OllamaClient;
-use crate::config::{Config, OllamaEndpoint};
-use crate::db::{AnalysisResult, DaemonState, Database, Repository};
-use crate::AppState;
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::{Html, IntoResponse, Response},
-    Json,
-};
-use serde::{Deserialize, Serialize};
-use std::path::Path as FilePath;
 use std::sync::Arc;
 
-use super::templates::{
-    render_markdown, AnalysisResultView, MutationResultView, MutationResultsTemplate,
-    RepositoriesTemplate, RepositoryArchitectureTemplate, RepositoryDiagramsTemplate,
-    RepositoryFilesTemplate, SettingsTemplate,
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::Form;
+use axum::Json;
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::config::Config;
+use crate::lockfile::{self, AssetState};
+use crate::web::templates::{
+    BaselineRow, HomeTemplate, RepoRow, RepositoryTemplate, SettingsTemplate, TrialRow,
+    TrialTemplate,
 };
-use askama::Template;
+use crate::AppState;
 
-fn render_template<T: Template>(template: T) -> Response {
-    match template.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Template error: {}", e),
-        )
-            .into_response(),
+pub async fn home(State(state): State<Arc<AppState>>) -> Response {
+    let daemon = state.db.get_daemon().await.ok();
+    let config = state.config.read().await.clone();
+    let repos = state.db.get_repositories().await.unwrap_or_default();
+    let page = HomeTemplate {
+        phase: daemon
+            .as_ref()
+            .map(|d| d.phase.clone())
+            .unwrap_or_else(|| "idle".into()),
+        detail: daemon.and_then(|d| d.detail).unwrap_or_default(),
+        window: format!(
+            "{}:00–{}:00",
+            config.schedule.start_hour, config.schedule.end_hour
+        ),
+        model: format!("{:?}", lockfile::model_stamp(&config.data_dir())),
+        qemu: format!("{:?}", lockfile::qemu_stamp(&config.data_dir())),
+        repositories: repos
+            .into_iter()
+            .map(|repo| RepoRow {
+                id: repo.id,
+                name: repo.name,
+                path: repo.path,
+                enabled: repo.enabled,
+            })
+            .collect(),
+    };
+    render(page)
+}
+
+pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> Response {
+    let Some(repo) = state.db.get_repository(id).await.ok().flatten() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let run = state.db.latest_run(id).await.ok().flatten();
+    let baselines = match &run {
+        Some(run) => state.db.baselines_for_run(run.id).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let trials = match &run {
+        Some(run) => state.db.trials_for_run(run.id).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let delta = match &run {
+        Some(run) => state.db.accepted_delta(run.id).await.unwrap_or(0),
+        None => 0,
+    };
+    let page = RepositoryTemplate {
+        name: repo.name,
+        path: repo.path,
+        git_sha: run
+            .as_ref()
+            .map(|run| run.git_sha.clone())
+            .unwrap_or_default(),
+        perf_sha: run
+            .as_ref()
+            .and_then(|run| run.perf_sha.clone())
+            .unwrap_or_default(),
+        run_status: run
+            .as_ref()
+            .map(|run| run.status.clone())
+            .unwrap_or_else(|| "none".into()),
+        run_error: run.and_then(|run| run.error).unwrap_or_default(),
+        delta: delta.to_string(),
+        baselines: baselines
+            .into_iter()
+            .map(|row| BaselineRow {
+                test_name: row.test_name,
+                status: row.status,
+                insn_count: row.insn_count.map(|n| n.to_string()).unwrap_or_default(),
+                reason: row.reason.unwrap_or_default(),
+            })
+            .collect(),
+        trials: trials
+            .into_iter()
+            .map(|row| TrialRow {
+                id: row.id,
+                test_name: row.test_name,
+                status: row.status,
+                summary: row.model_summary.unwrap_or_default(),
+                ratio: row
+                    .improvement_ratio
+                    .map(|ratio| format!("{ratio:.4}"))
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    };
+    render(page)
+}
+
+pub async fn trial(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> Response {
+    let Some(trial) = state.db.trial(id).await.ok().flatten() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let page = TrialTemplate {
+        test_name: trial.test_name,
+        symbol: trial.symbol,
+        status: trial.status,
+        reason: trial.reason.unwrap_or_default(),
+        summary: trial.model_summary.unwrap_or_default(),
+        baseline: trial
+            .baseline_count
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
+        candidate: trial.insn_count.map(|n| n.to_string()).unwrap_or_default(),
+        ratio: trial
+            .improvement_ratio
+            .map(|ratio| format!("{ratio:.4}"))
+            .unwrap_or_default(),
+        diff: trial.unified_diff.unwrap_or_default(),
+        tool_output: trial.tool_output.unwrap_or_default(),
+    };
+    render(page)
+}
+
+pub async fn settings(State(state): State<Arc<AppState>>) -> Response {
+    let config = state.config.read().await.clone();
+    render(settings_page(&config, false))
+}
+
+pub async fn save_settings(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<SettingsForm>,
+) -> Response {
+    let mut config = state.config.read().await.clone();
+    config.schedule.start_hour = form.start_hour;
+    config.schedule.end_hour = form.end_hour;
+    config.schedule.check_interval_seconds = form.check_interval_seconds;
+    config.gate.min_improvement_ratio = form.min_improvement_ratio;
+    config.gate.min_insn_delta = form.min_insn_delta;
+    config.gate.max_candidates = form.max_candidates;
+    config.gate.max_tests = form.max_tests;
+    config.gate.max_scan = form.max_scan;
+    config.web.host = form.host;
+    config.web.port = form.port;
+    if config.validate().is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if let Err(err) = config.save(state.config_path.as_deref()) {
+        tracing::warn!("could not save config: {err}");
+    }
+    *state.config.write().await = config.clone();
+    render(settings_page(&config, true))
+}
+
+fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
+    let model = lockfile::ModelLock::load().ok();
+    let qemu = lockfile::QemuLock::load().ok();
+    SettingsTemplate {
+        start_hour: config.schedule.start_hour,
+        end_hour: config.schedule.end_hour,
+        check_interval_seconds: config.schedule.check_interval_seconds,
+        min_improvement_ratio: config.gate.min_improvement_ratio,
+        min_insn_delta: config.gate.min_insn_delta,
+        max_candidates: config.gate.max_candidates,
+        max_tests: config.gate.max_tests,
+        max_scan: config.gate.max_scan,
+        host: config.web.host.clone(),
+        port: config.web.port,
+        model_lock: model
+            .map(|lock| format!("{} {}", lock.llama_cpp_tag, lock.gguf_filename))
+            .unwrap_or_default(),
+        qemu_lock: qemu
+            .map(|lock| {
+                if lock.published() {
+                    lock.id
+                } else {
+                    format!("{} (not published; run qemu/build-bundle.sh)", lock.id)
+                }
+            })
+            .unwrap_or_default(),
+        saved,
     }
 }
 
-async fn get_repo_or_error(db: &Database, id: i64) -> Result<Repository, Response> {
-    match db.get_repository(id).await {
-        Ok(Some(repo)) => Ok(repo),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "Repository not found").into_response()),
-        Err(e) => {
-            tracing::error!("Database error fetching repository {}: {}", id, e);
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
-        }
-    }
+#[derive(Deserialize)]
+pub struct SettingsForm {
+    pub start_hour: u8,
+    pub end_hour: u8,
+    pub check_interval_seconds: u64,
+    pub min_improvement_ratio: f64,
+    pub min_insn_delta: u64,
+    pub max_candidates: u32,
+    pub max_tests: u32,
+    pub max_scan: u32,
+    pub host: String,
+    pub port: u16,
 }
 
-pub async fn list_repositories(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let repositories = state.db.get_repositories().await.unwrap_or_default();
-    render_template(RepositoriesTemplate { repositories })
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct AddRepositoryRequest {
-    path: String,
-    name: String,
+#[derive(Deserialize)]
+pub struct AddRepoForm {
+    pub name: String,
+    pub path: String,
 }
 
 pub async fn add_repository(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AddRepositoryRequest>,
+    Form(form): Form<AddRepoForm>,
 ) -> impl IntoResponse {
-    // Validate path exists and is a directory
-    let path = FilePath::new(&req.path);
-    if !path.exists() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Path does not exist" })),
-        )
-            .into_response();
+    if form.name.trim().is_empty() || form.path.trim().is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
     }
-    if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Path must be a directory" })),
-        )
-            .into_response();
+    if state
+        .db
+        .add_repository(form.path.trim(), form.name.trim())
+        .await
+        .is_err()
+    {
+        return StatusCode::BAD_REQUEST.into_response();
     }
+    Redirect::to("/").into_response()
+}
 
-    // Canonicalize the path to get an absolute, normalized path.
-    // This resolves symlinks, removes `.` and `..` components, and ensures
-    // we store a consistent path representation in the database.
-    let canonical_path = match path.canonicalize() {
-        Ok(p) => p.to_string_lossy().to_string(),
-        Err(e) => {
-            tracing::warn!("Failed to canonicalize path {}: {}", req.path, e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "Failed to resolve path" })),
-            )
-                .into_response();
-        }
-    };
+#[derive(Deserialize)]
+pub struct EnabledForm {
+    pub enabled: Option<String>,
+}
 
-    tracing::info!(
-        "Adding repository: name={}, path={} (canonicalized from {})",
-        req.name,
-        canonical_path,
-        req.path
+pub async fn set_enabled(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Form(form): Form<EnabledForm>,
+) -> impl IntoResponse {
+    let enabled = matches!(
+        form.enabled.as_deref(),
+        Some("on") | Some("true") | Some("1")
     );
-
-    match state.db.add_repository(&canonical_path, &req.name).await {
-        Ok(id) => {
-            tracing::info!("Repository added successfully: id={}", id);
-            // If we're in the scheduled window, trigger a scan so the new repo is processed immediately
-            let in_window = state.config.read().await.schedule.is_in_window();
-            if in_window {
-                state.daemon.trigger_scan();
-                tracing::info!("Triggered scan for newly added repository (in scheduled window)");
-            }
-            (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
-        }
-        Err(e) => {
-            tracing::warn!("Failed to add repository: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "Failed to add repository" })),
-            )
-                .into_response()
-        }
-    }
+    let _ = state.db.set_enabled(id, enabled).await;
+    Redirect::to("/")
 }
 
 pub async fn delete_repository(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    match state.db.delete_repository(id).await {
-        Ok(true) => {
-            tracing::info!("Deleted repository {}", id);
-            (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
-        }
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Repository not found" })),
+    let _ = state.db.delete_repository(id).await;
+    Redirect::to("/")
+}
+
+pub async fn run_now(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if state.daemon.trigger(None).is_err() {
+        return StatusCode::CONFLICT.into_response();
+    }
+    Redirect::to("/").into_response()
+}
+
+#[derive(Serialize)]
+pub struct StatusBody {
+    pub phase: String,
+    pub detail: Option<String>,
+    pub model: String,
+    pub qemu: String,
+}
+
+pub async fn api_status(State(state): State<Arc<AppState>>) -> Json<StatusBody> {
+    let daemon = state.db.get_daemon().await.ok();
+    let config = state.config.read().await.clone();
+    Json(StatusBody {
+        phase: daemon
+            .as_ref()
+            .map(|d| d.phase.clone())
+            .unwrap_or_else(|| "idle".into()),
+        detail: daemon.and_then(|d| d.detail),
+        model: stamp_name(lockfile::model_stamp(&config.data_dir())),
+        qemu: stamp_name(lockfile::qemu_stamp(&config.data_dir())),
+    })
+}
+
+pub async fn api_repositories(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.db.get_repositories().await {
+        Ok(repos) => Json(repos).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub async fn api_config(State(state): State<Arc<AppState>>) -> Json<Config> {
+    Json(state.config.read().await.clone())
+}
+
+fn stamp_name(state: AssetState) -> String {
+    match state {
+        AssetState::Missing => "missing",
+        AssetState::Present => "present",
+        AssetState::Mismatch => "mismatch",
+        AssetState::Unverified => "unverified",
+    }
+    .into()
+}
+
+fn render<T: askama::Template>(page: T) -> Response {
+    match page.render() {
+        Ok(html) => (
+            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            html,
         )
             .into_response(),
-        Err(e) => {
-            tracing::error!("Failed to delete repository {}: {}", id, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Failed to delete repository" })),
-            )
-                .into_response()
-        }
-    }
-}
-
-/// Legacy route - redirects to architecture tab
-pub async fn repository_results(Path(id): Path<i64>) -> impl IntoResponse {
-    axum::response::Redirect::permanent(&format!("/repositories/{}/architecture", id))
-}
-
-pub async fn repository_architecture(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let repository = match get_repo_or_error(&state.db, id).await {
-        Ok(repo) => repo,
-        Err(response) => return response,
-    };
-
-    let all_results = state
-        .db
-        .get_all_repository_results(id)
-        .await
-        .unwrap_or_default();
-
-    let architecture_summary = all_results
-        .into_iter()
-        .find(|r| r.analysis_type == "architecture_summary");
-
-    let architecture_summary_html = architecture_summary
-        .as_ref()
-        .map(|s| render_markdown(&s.result))
-        .unwrap_or_default();
-
-    render_template(RepositoryArchitectureTemplate {
-        repository,
-        architecture_summary,
-        architecture_summary_html,
-    })
-}
-
-pub async fn repository_files(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let repository = match get_repo_or_error(&state.db, id).await {
-        Ok(repo) => repo,
-        Err(response) => return response,
-    };
-
-    let all_results = state
-        .db
-        .get_all_repository_results(id)
-        .await
-        .unwrap_or_default();
-
-    let file_results: Vec<AnalysisResultView> = all_results
-        .into_iter()
-        .filter(|r| r.analysis_type == "code_understanding")
-        .map(|r| AnalysisResultView::from_result(r, &repository.path))
-        .collect();
-
-    render_template(RepositoryFilesTemplate {
-        repository,
-        file_results,
-    })
-}
-
-pub async fn mutation_results(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let repository = match get_repo_or_error(&state.db, id).await {
-        Ok(repo) => repo,
-        Err(response) => return response,
-    };
-
-    let raw_results = state.db.get_mutation_results(id).await.unwrap_or_default();
-    let summary = state.db.get_mutation_summary(id).await.unwrap_or_default();
-
-    let results: Vec<MutationResultView> = raw_results
-        .into_iter()
-        .map(|r| MutationResultView::from_result(r, &repository.path))
-        .collect();
-
-    let mutation_score_percent = format!("{:.1}", summary.mutation_score() * 100.0);
-
-    render_template(MutationResultsTemplate {
-        repository,
-        results,
-        summary,
-        mutation_score_percent,
-    })
-}
-
-pub async fn repository_diagrams(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let repository = match get_repo_or_error(&state.db, id).await {
-        Ok(repo) => repo,
-        Err(response) => return response,
-    };
-
-    let diagrams = state.db.get_latest_diagrams(id).await.unwrap_or_default();
-
-    render_template(RepositoryDiagramsTemplate {
-        repository,
-        diagrams,
-    })
-}
-
-pub async fn settings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let config = state.config.read().await;
-    let endpoints = config.endpoints.clone();
-    let start_hour = config.schedule.start_hour;
-    let end_hour = config.schedule.end_hour;
-    let config_path = Config::default_config_path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "(unknown)".to_string());
-
-    render_template(SettingsTemplate {
-        endpoints,
-        start_hour,
-        end_hour,
-        config_path,
-    })
-}
-
-/// Add a new Ollama endpoint
-#[derive(Deserialize)]
-pub struct AddEndpointRequest {
-    name: String,
-    url: String,
-    model: String,
-}
-
-pub async fn add_endpoint(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<AddEndpointRequest>,
-) -> impl IntoResponse {
-    let new_endpoint = OllamaEndpoint {
-        name: req.name,
-        url: req.url,
-        model: req.model,
-        enabled: true,
-    };
-
-    {
-        let mut config = state.config.write().await;
-        config.endpoints.push(new_endpoint);
-    }
-
-    tracing::info!("Added new Ollama endpoint");
-    (
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "success": true })),
-    )
-}
-
-/// Update an Ollama endpoint (by index)
-#[derive(Deserialize)]
-pub struct UpdateEndpointRequest {
-    name: String,
-    url: String,
-    model: String,
-    enabled: bool,
-}
-
-pub async fn update_endpoint(
-    State(state): State<Arc<AppState>>,
-    Path(index): Path<usize>,
-    Json(req): Json<UpdateEndpointRequest>,
-) -> impl IntoResponse {
-    let mut config = state.config.write().await;
-
-    if index >= config.endpoints.len() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Endpoint not found" })),
-        )
-            .into_response();
-    }
-
-    config.endpoints[index] = OllamaEndpoint {
-        name: req.name,
-        url: req.url,
-        model: req.model,
-        enabled: req.enabled,
-    };
-
-    tracing::info!("Updated Ollama endpoint at index {}", index);
-    (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
-}
-
-/// Delete an Ollama endpoint (by index)
-pub async fn delete_endpoint(
-    State(state): State<Arc<AppState>>,
-    Path(index): Path<usize>,
-) -> impl IntoResponse {
-    let mut config = state.config.write().await;
-
-    if index >= config.endpoints.len() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Endpoint not found" })),
-        )
-            .into_response();
-    }
-
-    config.endpoints.remove(index);
-
-    tracing::info!("Deleted Ollama endpoint at index {}", index);
-    (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
-}
-
-/// API: Get all Ollama endpoints
-pub async fn api_endpoints(State(state): State<Arc<AppState>>) -> Json<Vec<OllamaEndpoint>> {
-    let config = state.config.read().await;
-    Json(config.endpoints.clone())
-}
-
-#[derive(Serialize)]
-pub struct StatusResponse {
-    pub daemon_status: Option<DaemonState>,
-    pub version: &'static str,
-}
-
-/// API: Get daemon status
-pub async fn api_status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
-    let daemon_status = state.db.get_daemon_status().await.ok();
-
-    Json(StatusResponse {
-        daemon_status,
-        version: env!("CARGO_PKG_VERSION"),
-    })
-}
-
-/// API: Get repositories
-pub async fn api_repositories(State(state): State<Arc<AppState>>) -> Json<Vec<Repository>> {
-    let repositories = state.db.get_repositories().await.unwrap_or_default();
-    Json(repositories)
-}
-
-/// API: Get analysis results
-pub async fn api_results(State(state): State<Arc<AppState>>) -> Json<Vec<AnalysisResult>> {
-    let results = state.db.get_recent_results(100).await.unwrap_or_default();
-    Json(results)
-}
-
-/// API: Test Ollama connection
-#[derive(Deserialize)]
-pub struct TestOllamaRequest {
-    url: String,
-}
-
-#[derive(Serialize)]
-pub struct TestOllamaResponse {
-    success: bool,
-    model_count: Option<usize>,
-    error: Option<String>,
-}
-
-pub async fn api_test_ollama(Json(req): Json<TestOllamaRequest>) -> Json<TestOllamaResponse> {
-    let client = OllamaClient::new(&req.url, "");
-
-    if !client.is_available().await {
-        return Json(TestOllamaResponse {
-            success: false,
-            model_count: None,
-            error: Some("Cannot connect to Ollama at the specified URL".to_string()),
-        });
-    }
-
-    match client.list_models().await {
-        Ok(models) => Json(TestOllamaResponse {
-            success: true,
-            model_count: Some(models.len()),
-            error: None,
-        }),
-        Err(e) => Json(TestOllamaResponse {
-            success: false,
-            model_count: None,
-            error: Some(e.to_string()),
-        }),
-    }
-}
-
-/// Get current config as JSON
-#[derive(Serialize)]
-pub struct ConfigResponse {
-    pub start_hour: u8,
-    pub end_hour: u8,
-    pub check_interval_seconds: u64,
-}
-
-pub async fn api_get_config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> {
-    let config = state.config.read().await;
-    Json(ConfigResponse {
-        start_hour: config.schedule.start_hour,
-        end_hour: config.schedule.end_hour,
-        check_interval_seconds: config.schedule.check_interval_seconds,
-    })
-}
-
-/// Update config
-#[derive(Deserialize)]
-pub struct UpdateConfigRequest {
-    pub start_hour: u8,
-    pub end_hour: u8,
-}
-
-pub async fn api_update_config(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<UpdateConfigRequest>,
-) -> impl IntoResponse {
-    let start_hour = req.start_hour.min(23);
-    let end_hour = req.end_hour.min(23);
-
-    // Update in-memory config (daemon reads this directly each cycle)
-    {
-        let mut config = state.config.write().await;
-        config.schedule.start_hour = start_hour;
-        config.schedule.end_hour = end_hour;
-    }
-
-    tracing::info!(
-        "Config updated: schedule = {:02}:00 - {:02}:00",
-        start_hour,
-        end_hour
-    );
-
-    (StatusCode::OK, Json(serde_json::json!({ "success": true })))
-}
-
-/// Save config to disk
-pub async fn api_save_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let config = state.config.read().await;
-
-    match config.save(None) {
-        Ok(()) => {
-            tracing::info!("Config saved to disk");
-            (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
-        }
-        Err(e) => {
-            tracing::error!("Failed to save config: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Failed to save configuration" })),
-            )
-                .into_response()
-        }
-    }
-}
-
-/// Reload config from disk
-pub async fn api_reload_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match Config::load(None) {
-        Ok(new_config) => {
-            // Update shared config (daemon reads this directly each cycle)
-            {
-                let mut config = state.config.write().await;
-                *config = new_config;
-            }
-
-            tracing::info!("Config reloaded from disk");
-            (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
-        }
-        Err(e) => {
-            tracing::error!("Failed to reload config: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Failed to reload configuration" })),
-            )
-                .into_response()
-        }
-    }
-}
-
-/// API: Trigger an immediate scan
-pub async fn api_trigger_scan(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    state.daemon.trigger_scan();
-    tracing::info!("Scan triggered via API");
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({ "success": true, "message": "Scan triggered" })),
-    )
-}
-
-/// A minimal mutation result for clipboard export
-#[derive(Serialize, Debug, PartialEq)]
-pub struct SurvivedMutation {
-    pub file_path: String,
-    pub description: String,
-    pub test_outcome: String,
-    pub replacements: serde_json::Value,
-}
-
-/// Filter mutation results to only "survived" ones and convert to API format.
-/// This function is extracted for testability.
-fn filter_survived_mutations(
-    results: Vec<crate::db::MutationResult>,
-    repo_path: &str,
-) -> Vec<SurvivedMutation> {
-    results
-        .into_iter()
-        .filter(|r| r.test_outcome == "survived")
-        .map(|r| {
-            let relative_path = r
-                .file_path
-                .strip_prefix(repo_path)
-                .map(|p| p.trim_start_matches('/'))
-                .unwrap_or(&r.file_path)
-                .to_string();
-
-            let replacements: serde_json::Value =
-                serde_json::from_str(&r.replacements_json).unwrap_or(serde_json::json!([]));
-
-            SurvivedMutation {
-                file_path: relative_path,
-                description: r.description,
-                test_outcome: r.test_outcome,
-                replacements,
-            }
-        })
-        .collect()
-}
-
-/// API: Get survived mutations for a repository (for clipboard export)
-pub async fn api_survived_mutations(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let repository = match get_repo_or_error(&state.db, id).await {
-        Ok(repo) => repo,
-        Err(response) => return response,
-    };
-
-    let raw_results = state.db.get_mutation_results(id).await.unwrap_or_default();
-    let survived = filter_survived_mutations(raw_results, &repository.path);
-
-    Json(survived).into_response()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::MutationResult;
-
-    fn make_mutation_result(
-        file_path: &str,
-        description: &str,
-        test_outcome: &str,
-        replacements_json: &str,
-    ) -> MutationResult {
-        MutationResult {
-            id: 1,
-            repository_id: 1,
-            file_path: file_path.to_string(),
-            description: description.to_string(),
-            reasoning: "test reasoning".to_string(),
-            replacements_json: replacements_json.to_string(),
-            test_outcome: test_outcome.to_string(),
-            killing_test: None,
-            test_output: None,
-            execution_time_ms: None,
-            content_hash: None,
-            created_at: "2024-01-01".to_string(),
-        }
-    }
-
-    #[test]
-    fn test_filter_survived_mutations_filters_correctly() {
-        let results = vec![
-            make_mutation_result("/repo/src/main.rs", "desc1", "survived", "[]"),
-            make_mutation_result("/repo/src/lib.rs", "desc2", "killed", "[]"),
-            make_mutation_result("/repo/src/test.rs", "desc3", "survived", "[]"),
-        ];
-
-        let survived = filter_survived_mutations(results, "/repo");
-
-        assert_eq!(survived.len(), 2);
-        assert!(survived.iter().all(|m| m.test_outcome == "survived"));
-    }
-
-    #[test]
-    fn test_filter_survived_mutations_strips_repo_prefix() {
-        let results = vec![make_mutation_result(
-            "/home/user/project/src/main.rs",
-            "desc",
-            "survived",
-            "[]",
-        )];
-
-        let survived = filter_survived_mutations(results, "/home/user/project");
-
-        assert_eq!(survived.len(), 1);
-        assert_eq!(survived[0].file_path, "src/main.rs");
-    }
-
-    #[test]
-    fn test_filter_survived_mutations_parses_replacements() {
-        let replacements = r#"[{"line": 10, "find": "x > 0", "replace": "x >= 0"}]"#;
-        let results = vec![make_mutation_result(
-            "/repo/file.rs",
-            "Changed > to >=",
-            "survived",
-            replacements,
-        )];
-
-        let survived = filter_survived_mutations(results, "/repo");
-
-        assert_eq!(survived.len(), 1);
-        assert!(survived[0].replacements.is_array());
-        assert_eq!(survived[0].replacements.as_array().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_filter_survived_mutations_empty_input() {
-        let results: Vec<MutationResult> = vec![];
-        let survived = filter_survived_mutations(results, "/repo");
-        assert!(survived.is_empty());
-    }
-
-    #[test]
-    fn test_filter_survived_mutations_no_survived() {
-        let results = vec![
-            make_mutation_result("/repo/a.rs", "desc1", "killed", "[]"),
-            make_mutation_result("/repo/b.rs", "desc2", "timeout", "[]"),
-        ];
-
-        let survived = filter_survived_mutations(results, "/repo");
-        assert!(survived.is_empty());
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
 }

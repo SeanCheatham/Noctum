@@ -1,0 +1,11 @@
+# QEMU measurement bundle produced by qemu/build-bundle.sh.
+#
+# `sha256` is the hash of the tarball (qemu-system-x86_64, noctum_profile.so,
+# vmlinuz, initramfs.cpio.gz, MANIFEST). It stays empty until that tarball
+# exists: this tree does not vendor a built guest, and a host QEMU is never
+# used for a measurement. `noctum qemu fetch` downloads `url` when both fields
+# are set and refuses otherwise.
+
+id = "qemu-9.2.0-linux-6.12.10"
+url = ""
+sha256 = ""

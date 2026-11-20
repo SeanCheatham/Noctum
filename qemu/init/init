@@ -1,0 +1,24 @@
+#!/bin/sh
+# Initramfs init. The ready snapshot is taken at the serial read, before 9p
+# is mounted, so a restored guest cannot reuse a stale page cache.
+export PATH=/bin:/sbin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /tmp
+echo 0 > /proc/sys/kernel/randomize_va_space
+exec </dev/console >/dev/console 2>&1
+echo NOCTUM_READY
+read -r _noctum_go
+mkdir -p /work /scratch
+if ! mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,ro,cache=none work /work; then
+    echo NOCTUM_MOUNT_FAIL
+    poweroff -f
+fi
+if ! mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,cache=none scratch /scratch; then
+    echo NOCTUM_MOUNT_FAIL
+    poweroff -f
+fi
+cd /work || cd /
+/bin/runner /scratch/job /scratch
+echo NOCTUM_DONE
+poweroff -f

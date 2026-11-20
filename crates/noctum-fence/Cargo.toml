@@ -1,0 +1,9 @@
+[package]
+name = "noctum-fence"
+version = "0.2.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Drop guard that emits the Noctum measurement fences"
+
+[dependencies]

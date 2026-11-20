@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} - Noctum{% endblock %}
+{% block content %}
+<p><a href="/">Repositories</a></p>
+<h1>{{ name }}</h1>
+<div class="card">
+    <p>{{ path }}</p>
+    <p>Last run: {{ run_status }}</p>
+    <p>HEAD {{ git_sha }}</p>
+    <p>noctum/perf {{ perf_sha }}</p>
+    <p>Accepted delta this run: {{ delta }}</p>
+    {% if run_error != "" %}<p>{{ run_error }}</p>{% endif %}
+</div>
+<h2>Baselines</h2>
+<div class="table-wrapper">
+<table>
+    <thead><tr><th>Test</th><th>Status</th><th>Instructions</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for row in baselines %}
+        <tr>
+            <td>{{ row.test_name }}</td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.insn_count }}</td>
+            <td>{{ row.reason }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+<h2>Trials</h2>
+<div class="table-wrapper">
+<table>
+    <thead><tr><th>Test</th><th>Status</th><th>Ratio</th><th>Summary</th></tr></thead>
+    <tbody>
+    {% for row in trials %}
+        <tr>
+            <td><a href="/trials/{{ row.id }}">{{ row.test_name }}</a></td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.ratio }}</td>
+            <td>{{ row.summary }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}
