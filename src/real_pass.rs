@@ -2,7 +2,9 @@
 //!
 //! `cargo test` skips it. `qemu/real-pass.sh` runs it. The production lockfile
 //! stays on Qwen2.5-Coder-7B-Instruct Q5_K_M. `NOCTUM_GGUF` is the file this
-//! process actually loads.
+//! process actually loads. The fixture's fenced body recounts its input and
+//! discards that copy, so a real edit can clear the keep gate. A measured
+//! rejection fails the test.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,7 +54,12 @@ async fn real_model_proposes_a_diff_and_the_gate_decides() {
     let mut missed = String::new();
     for attempt in 1..=3 {
         if let Err(reason) = one_night(&stage, &server, &gguf, attempt).await {
-            println!("REAL_PASS attempt {attempt} was not measured again: {reason}");
+            println!("REAL_PASS attempt {attempt} was not kept: {reason}");
+            // A measured trial already had its one repair. Another sample would
+            // be a second night, so a gate rejection stops here.
+            if reason.starts_with("GATE ") {
+                panic!("measured trial was not kept\n{reason}");
+            }
             missed = reason;
             continue;
         }
@@ -148,6 +155,13 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
         crate::hashutil::sha256_file(gguf).unwrap_or_default()
     );
     println!("REAL_PASS diff:\n{diff}");
+    assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
+    assert!(
+        git(repo.path(), &["status", "--porcelain"])
+            .trim()
+            .is_empty(),
+        "the original checkout was modified"
+    );
     match trial.status.as_str() {
         "accepted" => {
             let delta = before.saturating_sub(after);
@@ -160,6 +174,8 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
             assert!(!committed.contains("_noctum_guard"), "{committed}");
             let manifest = git(repo.path(), &["show", "noctum/perf:Cargo.toml"]);
             assert!(!manifest.contains("noctum-fence"), "{manifest}");
+            let show = git(repo.path(), &["show", "--format=full", "noctum/perf"]);
+            println!("REAL_PASS kept commit:\n{show}");
         }
         "rejected" => {
             let perf = Command::new("git")
@@ -168,23 +184,21 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
                 .status()
                 .unwrap();
             assert!(!perf.success(), "a rejected diff was committed");
+            return Err(format!(
+                "GATE before={before} after={after} reason={:?} summary={:?}",
+                trial.reason, trial.model_summary
+            ));
         }
         other => panic!("unexpected trial status {other}: {trial:?}"),
     }
-    assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-    assert!(
-        git(repo.path(), &["status", "--porcelain"])
-            .trim()
-            .is_empty(),
-        "the original checkout was modified"
-    );
     Ok(())
 }
 
 fn write_sources(path: &Path) {
-    // Eight `black_box` calls do not change the sum. They live in `encode`,
-    // which is what the profile ranks, and the batch loop bound is a literal
-    // the diff checker refuses to lower. A raw string keeps the indentation.
+    // The second scan does not change the sum, but `black_box` keeps it in the
+    // release binary. Deleting it is a real instruction win. The `for` bound in
+    // the test is a literal the diff checker refuses to lower. A raw string
+    // keeps the indentation.
     std::fs::write(
         path.join("src/lib.rs"),
         r#"#[inline(never)]
@@ -193,29 +207,36 @@ pub fn encode(input: &[u8]) -> u64 {
     for &byte in input {
         saved = saved.wrapping_add(byte as u64);
     }
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
-    let _ = std::hint::black_box(saved);
+    // Recount the same bytes. The copy is discarded and does not change `saved`.
+    let mut copy = 0u64;
+    for _ in 0..16 {
+        for &byte in input {
+            copy = copy.wrapping_add(std::hint::black_box(byte) as u64);
+        }
+    }
+    let _ = std::hint::black_box(copy);
     saved
 }
 
 #[test]
 fn encode_batch() {
-    let mut total = 0u64;
-    for _ in 0..2_000 {
-        total = total.wrapping_add(encode(b"abcd"));
+    let mut data = [0u8; 32];
+    let mut index = 0usize;
+    while index < data.len() {
+        data[index] = (index as u8).wrapping_mul(5).wrapping_add(3);
+        index += 1;
     }
-    assert_eq!(total, 788_000);
+    let mut total = 0u64;
+    for _ in 0..12 {
+        total = total.wrapping_add(encode(&data));
+    }
+    assert_eq!(total, 30_912);
 }
 
 #[test]
 fn tiny_assert() {
-    assert_eq!(encode(b"a"), 97);
+    assert_eq!(encode(b"hi"), 209);
+    assert_eq!(encode(b"abcdefg"), 700);
 }
 "#,
     )

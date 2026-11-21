@@ -6,6 +6,10 @@
 # machine can load, and NOCTUM_LLAMA_SERVER at the pinned llama-server.
 # The QEMU stage is qemu/out/stage from qemu/build-bundle.sh unless
 # NOCTUM_QEMU_STAGE is set.
+#
+# The fixture recounts each input and discards the copy. The script exits
+# non-zero unless the guest count drops by at least 1% and 10,000 instructions
+# and the commit lands on noctum/perf. A gate rejection is not a pass.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 STAGE="${NOCTUM_QEMU_STAGE:-$ROOT/qemu/out/stage}"
