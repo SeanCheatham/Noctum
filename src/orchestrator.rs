@@ -798,21 +798,12 @@ where
             }
         };
         self.reset(dest, base, repo_config).await?;
-        if self
-            .check_proposal(dest, repo_config, test, &repair)
-            .await
-            .is_err()
-        {
-            self.reject(
-                pick,
-                "diff rejected",
-                Some(&repair),
-                false,
-                false,
-                None,
-                test,
-            )
-            .await?;
+        if let Err(reason) = self.check_proposal(dest, repo_config, test, &repair).await {
+            // A repair that lowers a fixed bound, drops an assertion, or
+            // otherwise fails validation ends the candidate. The trial stores
+            // that reason so a later sample is not drawn for it.
+            self.reject(pick, &reason, Some(&repair), false, false, None, test)
+                .await?;
             return Ok(HostRound::Done);
         }
         worktree::apply(dest, &repair.diff, false).await?;
@@ -1646,6 +1637,8 @@ impl Default for CargoHost {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+
     use super::*;
     use object::{Object, ObjectSymbol};
 
@@ -1965,6 +1958,124 @@ mod tests {{
         assert_eq!(trials[0].reason.as_deref(), Some("host check failed"));
         no_perf(repo.path());
         assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
+    }
+
+    struct Sequenced {
+        diffs: Vec<String>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Inferencer for Sequenced {
+        async fn complete(
+            &self,
+            _messages: &[crate::ports::ChatMessage],
+            _cancel: &AtomicBool,
+        ) -> Result<crate::ports::Completion> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let diff = self
+                .diffs
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| self.diffs.last().cloned().unwrap_or_default());
+            Ok(crate::ports::Completion {
+                summary: format!("sample {}", index + 1),
+                diff,
+            })
+        }
+    }
+
+    /// The first sample fails the host suite, so the one allowed repair is drawn.
+    /// That repair lowers a fixed `for` bound. The rejection ends the candidate:
+    /// the third sample, which would clear the existing gate, is never requested.
+    #[tokio::test]
+    async fn a_lowered_for_bound_is_rejected_without_another_sample() {
+        let host_repo = init_fixture();
+        let host_fail = diff_to(host_repo.path(), &source("let _ = input;\n    Vec::new()"));
+        let bound_repo = init_fixture();
+        let lowered = slow_source().replace("0..10_000", "0..10");
+        let bound = diff_to(bound_repo.path(), &lowered);
+        assert!(
+            bound
+                .lines()
+                .any(|line| line.starts_with('+') && line.contains("0..10 {")),
+            "{bound}"
+        );
+        let keep_repo = init_fixture();
+        let keep = diff_to(keep_repo.path(), &source("input.to_vec()"));
+        assert!(keep.contains("to_vec"), "{keep}");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let repo = init_fixture();
+        let head = git(repo.path(), &["rev-parse", "HEAD"]);
+        let data = tempfile::tempdir().unwrap();
+        let config = crate::config::Config {
+            data_dir: Some(data.path().to_path_buf()),
+            gate: crate::config::GateConfig {
+                max_candidates: 1,
+                max_tests: 1,
+                min_improvement_ratio: 0.01,
+                min_insn_delta: 10_000,
+                ..crate::config::GateConfig::default()
+            },
+            ..crate::config::Config::default()
+        };
+        assert_eq!(config.gate.min_improvement_ratio, 0.01);
+        assert_eq!(config.gate.min_insn_delta, 10_000);
+        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
+        db.run_migrations().await.unwrap();
+        let id = db
+            .add_repository(&repo.path().display().to_string(), "fixture")
+            .await
+            .unwrap();
+        let night = Night::new(
+            db.clone(),
+            config,
+            Scripted,
+            Sequenced {
+                diffs: vec![host_fail, bound, keep],
+                calls: calls.clone(),
+            },
+            crate::builder::CargoHost,
+        );
+        let row = db.get_repository(id).await.unwrap().unwrap();
+        night
+            .run_repository(
+                &row,
+                &RunOptions {
+                    ignore_window: true,
+                    stop: Arc::new(AtomicBool::new(false)),
+                    asset_error: None,
+                    only_repo: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "host failure draws one repair; a lowered for-bound draws no further sample"
+        );
+        let run = db.latest_run(id).await.unwrap().unwrap();
+        assert_eq!(run.status, "ok", "{:?}", run.error);
+        let trials = db.trials_for_run(run.id).await.unwrap();
+        assert_eq!(trials.len(), 1, "{trials:?}");
+        assert_eq!(trials[0].status, "rejected");
+        let reason = trials[0].reason.clone().unwrap_or_default();
+        assert!(reason.contains("lowers a fixed loop bound"), "{reason}");
+        let diff = trials[0].unified_diff.clone().unwrap_or_default();
+        assert!(
+            diff.lines()
+                .any(|line| line.starts_with('+') && line.contains("0..10 {")),
+            "{diff}"
+        );
+        assert!(!diff.contains("to_vec"), "{diff}");
+        assert!(trials[0].insn_count.is_none(), "{trials:?}");
+        no_perf(repo.path());
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
+        assert!(git(repo.path(), &["status", "--porcelain"])
+            .trim()
+            .is_empty());
     }
 
     #[tokio::test]

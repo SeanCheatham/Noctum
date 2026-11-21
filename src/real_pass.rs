@@ -53,25 +53,63 @@ async fn real_model_proposes_a_diff_and_the_gate_decides() {
     // The ranking comes from the guest dump. Print the PCs and the mapped
     // functions. A completion that git cannot apply never reaches QEMU. The
     // model is sampled up to three times; one measured candidate is enough.
+    // A rejected bound-lowering is not one of those misses: it ends the night.
     std::env::set_var("NOCTUM_PROFILE_TRACE", "1");
     let mut missed = String::new();
     for attempt in 1..=3 {
         if let Err(reason) = one_night(&stage, &server, &gguf, attempt).await {
             println!("REAL_PASS attempt {attempt} was not kept: {reason}");
-            // Mapping is a property of the binary, not of the sample. A gate
-            // rejection already had its one repair, so it stops here too.
-            if reason.starts_with("PROFILE_UNMAPPED") {
-                panic!("profile could not be mapped back to source\n{reason}");
+            match another_sample(&reason) {
+                Sample::Again => {
+                    missed = reason;
+                    continue;
+                }
+                Sample::Stop(message) => panic!("{message}\n{reason}"),
             }
-            if reason.starts_with("GATE ") {
-                panic!("measured trial was not kept\n{reason}");
-            }
-            missed = reason;
-            continue;
         }
         return;
     }
     panic!("three completions and the guest never measured a candidate\n{missed}");
+}
+
+enum Sample {
+    Again,
+    Stop(&'static str),
+}
+
+/// Whether the real-pass harness may draw another completion for this candidate.
+///
+/// A diff that will not apply can be sampled again. A host-check failure already
+/// spent the one repair inside the night, and another night is still allowed.
+/// A lowered fixed `for` bound is a rejected cheat: the plan gives it no repair
+/// and this harness does not take another sample after it.
+fn another_sample(reason: &str) -> Sample {
+    if reason.starts_with("PROFILE_UNMAPPED") {
+        return Sample::Stop("profile could not be mapped back to source");
+    }
+    if reason.starts_with("GATE ") {
+        return Sample::Stop("measured trial was not kept");
+    }
+    if reason.contains("lowers a fixed loop bound") {
+        return Sample::Stop("a lowered loop bound ended the night");
+    }
+    Sample::Again
+}
+
+#[test]
+fn a_lowered_for_bound_ends_sampling_and_a_host_failure_does_not() {
+    let host_fail = "attempt 1 status=rejected reason=Some(\"host check failed\") summary=Some(\"The diff was updated to remove the unnecessary black_box call\")";
+    assert!(
+        matches!(another_sample(host_fail), Sample::Again),
+        "a host-check failure still has its one repair"
+    );
+    let lowered = "attempt 2 status=rejected reason=Some(\"diff lowers a fixed loop bound in the measured test\") summary=Some(\"Reduced the number of guest instructions\")\ndiff:\n-        for _ in 0..12 {\n+        for _ in 0..1 {";
+    assert!(
+        matches!(another_sample(lowered), Sample::Stop(_)),
+        "a lowered for-bound must not be sampled again"
+    );
+    let unapplied = "attempt 2 status=rejected reason=Some(\"hunk does not match at line 25\")";
+    assert!(matches!(another_sample(unapplied), Sample::Again));
 }
 
 async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Result<(), String> {
