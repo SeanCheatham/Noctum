@@ -1,6 +1,7 @@
 //! Musl `cargo test` builds. Cargo is the only build. A dynamic harness is
 //! refused; there is no gnu fallback.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -124,6 +125,9 @@ pub async fn resolve_package(worktree: &Path, requested: Option<&str>) -> Result
         );
     };
     let manifest = PathBuf::from(package["manifest_path"].as_str().context("manifest path")?);
+    let manifest_text = std::fs::read_to_string(&manifest)
+        .with_context(|| format!("read {}", manifest.display()))?;
+    let bench_harness = bench_harness_flags(&manifest_text);
     let uses_criterion = package["dependencies"].as_array().is_some_and(|deps| {
         deps.iter()
             .any(|dep| dep["name"].as_str() == Some("criterion"))
@@ -137,11 +141,21 @@ pub async fn resolve_package(worktree: &Path, requested: Option<&str>) -> Result
             .find(|kind| matches!(*kind, "lib" | "bin" | "test" | "bench"))
             .unwrap_or("lib")
             .to_string();
+        let name = target["name"].as_str().unwrap_or("").to_string();
+        // Current cargo metadata omits `harness`. The manifest is what says
+        // `harness = false`, which is the only bench shape that is scored.
+        let harness = target["harness"].as_bool().unwrap_or_else(|| {
+            if kind == "bench" {
+                bench_harness.get(&name).copied().unwrap_or(true)
+            } else {
+                true
+            }
+        });
         targets.push(CargoTarget {
-            name: target["name"].as_str().unwrap_or("").to_string(),
+            name,
             kind,
             src_path: PathBuf::from(target["src_path"].as_str().unwrap_or("")),
-            harness: target["harness"].as_bool().unwrap_or(true),
+            harness,
         });
     }
     Ok(ResolvedPackage {
@@ -180,6 +194,28 @@ fn text_forces_abort(text: &str) -> bool {
             || code.contains("panic=\"abort\"")
             || code.contains("panic=abort")
     })
+}
+
+/// `harness` flags from `[[bench]]` tables. Cargo's default is `true`.
+pub fn bench_harness_flags(manifest: &str) -> HashMap<String, bool> {
+    let mut flags = HashMap::new();
+    let Ok(value) = toml::from_str::<Value>(manifest) else {
+        return flags;
+    };
+    let Some(tables) = value.get("bench").and_then(Value::as_array) else {
+        return flags;
+    };
+    for table in tables {
+        let Some(name) = table.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let harness = table
+            .get("harness")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        flags.insert(name.to_string(), harness);
+    }
+    flags
 }
 
 pub fn feature_args(repo: &RepoConfig) -> Vec<String> {
@@ -246,6 +282,15 @@ pub async fn build_bench(
     ];
     args.extend(feature_args(repo));
     build_harnesses(worktree, &args, repo.timeout_seconds, "bench").await
+}
+
+pub fn pick_bench(harnesses: &[BuiltHarness], name: &str) -> Result<PathBuf> {
+    harnesses
+        .iter()
+        .find(|harness| harness.target_name == name)
+        .or_else(|| harnesses.iter().find(|harness| harness.kind == "bench"))
+        .map(|harness| harness.executable.clone())
+        .context("cargo bench produced no binary")
 }
 
 async fn build_harnesses(
@@ -388,6 +433,25 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].name, "tests::encode_batch");
         assert_eq!(listed[1].kind, "ignore");
+    }
+
+    #[test]
+    fn bench_harness_false_is_read_from_the_manifest() {
+        let manifest = "\
+[package]
+name = \"fixture\"
+version = \"0.1.0\"
+
+[[bench]]
+name = \"fold\"
+harness = false
+
+[[bench]]
+name = \"legacy\"
+";
+        let flags = bench_harness_flags(manifest);
+        assert_eq!(flags.get("fold"), Some(&false));
+        assert_eq!(flags.get("legacy"), Some(&true));
     }
 
     #[test]

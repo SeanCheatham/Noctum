@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A listed bench with `harness = false` and `fn main` is measured and can be kept. Criterion, `#[bench]`, and the default harness stay skipped
 - The repository page lists each candidate's hot function, the fenced counts before and after the change, and whether the night kept it
 - Pinned QEMU guest bundle (`qemu-9.2.0-linux-6.12.10`) with a TCG instruction-count plugin, a musl initramfs, and `qemu/smoke.sh` to boot one fenced harness
 - `noctum qemu install` for a local tarball when the lockfile has a checksum and no download URL

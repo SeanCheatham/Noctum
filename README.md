@@ -88,7 +88,7 @@ clean_paths = ["target"]
 
 `panic = "abort"` is refused, because the fence has to run on unwind. A dynamic binary (`PT_INTERP`) is skipped. Tests that open a socket, read the clock, or otherwise match the denylist are skipped and the reason is stored.
 
-A listed bench that uses Criterion, `#[bench]`, or the default harness is stored as skipped. A bench that is a normal `fn main` binary is not scored in this version.
+A listed bench that uses Criterion, `#[bench]`, or the default harness is stored as skipped. A listed bench with `harness = false` and a `fn main` is measured: the fence wraps `main`, and the guest runs that binary with no libtest filter. The loop inside `main` has to be a fixed count.
 
 ## Dashboard
 
