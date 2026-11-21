@@ -7,9 +7,12 @@
 # The QEMU stage is qemu/out/stage from qemu/build-bundle.sh unless
 # NOCTUM_QEMU_STAGE is set.
 #
-# The fixture recounts each input and discards the copy. The script exits
-# non-zero unless the guest count drops by at least 1% and 10,000 instructions
-# and the commit lands on noctum/perf. A gate rejection is not a pass.
+# The fixture does not name a test or a function. The night measures what it
+# discovers, ranks guest PCs from the plugin dump, and asks the model about
+# whichever in-repo function that ranking puts first. The script exits non-zero
+# unless that edit drops the guest count by at least 1% and 10,000 instructions
+# and the commit lands on noctum/perf. A gate rejection is not a pass. An
+# unmapped profile is not a pass.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 STAGE="${NOCTUM_QEMU_STAGE:-$ROOT/qemu/out/stage}"

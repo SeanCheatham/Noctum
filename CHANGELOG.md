@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Libtest's `finished in` duration is left out of the stdout comparison, so the timer cannot reject a cheaper run
 - `git apply --recount` accepts a model diff whose hunk counts are wrong when the changed lines still match
 - The model prompt requires a `diff --git` header and context lines copied from the source. A hunk whose header line is wrong is still checked where those lines match
+- The night's candidate is the hottest in-repo function in the QEMU guest profile. A measured test whose PCs do not map back to repository source stops the run instead of substituting a named function
 
 ## [0.2.0] - 2026-11-20
 

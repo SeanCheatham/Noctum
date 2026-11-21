@@ -2,9 +2,10 @@
 //!
 //! `cargo test` skips it. `qemu/real-pass.sh` runs it. The production lockfile
 //! stays on Qwen2.5-Coder-7B-Instruct Q5_K_M. `NOCTUM_GGUF` is the file this
-//! process actually loads. The fixture's fenced body recounts its input and
-//! discards that copy, so a real edit can clear the keep gate. A measured
-//! rejection fails the test.
+//! process actually loads. The fixture leaves `tests` empty. The night measures
+//! the discovered test, reads the plugin's guest-PC ranking, and asks the model
+//! about whichever in-repo function that ranking puts first. A profile that
+//! does not map back to source fails the run. A measured rejection fails it too.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -49,14 +50,19 @@ async fn real_model_proposes_a_diff_and_the_gate_decides() {
         );
     }
 
-    // A completion that git cannot apply never reaches QEMU. The model is
-    // sampled up to three times; one measured candidate is enough.
+    // The ranking comes from the guest dump. Print the PCs and the mapped
+    // functions. A completion that git cannot apply never reaches QEMU. The
+    // model is sampled up to three times; one measured candidate is enough.
+    std::env::set_var("NOCTUM_PROFILE_TRACE", "1");
     let mut missed = String::new();
     for attempt in 1..=3 {
         if let Err(reason) = one_night(&stage, &server, &gguf, attempt).await {
             println!("REAL_PASS attempt {attempt} was not kept: {reason}");
-            // A measured trial already had its one repair. Another sample would
-            // be a second night, so a gate rejection stops here.
+            // Mapping is a property of the binary, not of the sample. A gate
+            // rejection already had its one repair, so it stops here too.
+            if reason.starts_with("PROFILE_UNMAPPED") {
+                panic!("profile could not be mapped back to source\n{reason}");
+            }
             if reason.starts_with("GATE ") {
                 panic!("measured trial was not kept\n{reason}");
             }
@@ -120,8 +126,46 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
 
     let run = db.latest_run(id).await.unwrap().unwrap();
     let baselines = db.baselines_for_run(run.id).await.unwrap();
+    let candidates = db.candidates_for_run(run.id).await.unwrap();
     let trials = db.trials_for_run(run.id).await.unwrap();
-    assert_eq!(run.status, "ok", "{:?} baselines={baselines:?}", run.error);
+    if run.status != "ok" {
+        let err = run.error.clone().unwrap_or_default();
+        if err.contains("did not map guest PCs") {
+            return Err(format!("PROFILE_UNMAPPED {err} baselines={baselines:?}"));
+        }
+        panic!("run {}: {err} baselines={baselines:?}", run.status);
+    }
+    if candidates.is_empty() {
+        return Err(format!(
+            "PROFILE_UNMAPPED profile ranked no in-repo function baselines={baselines:?}"
+        ));
+    }
+    let top = &candidates[0];
+    println!(
+        "PROFILE_RANK symbol={} file={}:{}-{} exclusive={} share={:.4} test={}",
+        top.symbol,
+        top.file,
+        top.line_start,
+        top.line_end,
+        top.exclusive_count,
+        top.share,
+        top.test_name
+    );
+    assert_eq!(top.rank, 0, "the stored candidate is not the first rank");
+    assert!(
+        top.exclusive_count > 0,
+        "ranked function has no instructions"
+    );
+    assert!(
+        top.file.starts_with("src/"),
+        "ranked file is outside the repo: {}",
+        top.file
+    );
+    let toml = std::fs::read_to_string(repo.path().join("noctum.toml")).unwrap();
+    assert!(
+        !toml.contains("tests ="),
+        "the fixture named a test: {toml}"
+    );
     let measured = baselines
         .iter()
         .find(|row| row.status == "measured")
@@ -133,6 +177,11 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
     );
     assert_eq!(trials.len(), 1, "model was not asked: {trials:?}");
     let trial = &trials[0];
+    assert_eq!(
+        trial.symbol, top.symbol,
+        "the model was not asked about the function the profile ranked first"
+    );
+    assert_eq!(trial.file, top.file);
     let diff = trial.unified_diff.clone().unwrap_or_default();
     assert!(
         diff.contains("diff --git") || diff.contains("+++"),
@@ -195,14 +244,14 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
 }
 
 fn write_sources(path: &Path) {
-    // The second scan does not change the sum, but `black_box` keeps it in the
-    // release binary. Deleting it is a real instruction win. The `for` bound in
-    // the test is a literal the diff checker refuses to lower. A raw string
-    // keeps the indentation.
+    // The recount does not change the sum. `black_box` keeps it in the release
+    // binary, so deleting it is a real instruction win. The `for` bound in the
+    // test is a literal the diff checker refuses to lower. This file does not
+    // tell the night which function to edit. A raw string keeps the indentation.
     std::fs::write(
         path.join("src/lib.rs"),
         r#"#[inline(never)]
-pub fn encode(input: &[u8]) -> u64 {
+pub fn fold_bytes(input: &[u8]) -> u64 {
     let mut saved = 0u64;
     for &byte in input {
         saved = saved.wrapping_add(byte as u64);
@@ -228,15 +277,15 @@ fn encode_batch() {
     }
     let mut total = 0u64;
     for _ in 0..12 {
-        total = total.wrapping_add(encode(&data));
+        total = total.wrapping_add(fold_bytes(&data));
     }
     assert_eq!(total, 30_912);
 }
 
 #[test]
 fn tiny_assert() {
-    assert_eq!(encode(b"hi"), 209);
-    assert_eq!(encode(b"abcdefg"), 700);
+    assert_eq!(fold_bytes(b"hi"), 209);
+    assert_eq!(fold_bytes(b"abcdefg"), 700);
 }
 "#,
     )
@@ -269,7 +318,7 @@ fn init_fixture() -> tempfile::TempDir {
     .unwrap();
     std::fs::write(
         path.join("noctum.toml"),
-        "package = \"fixture\"\ntests = [\"encode_batch\"]\ntimeout_seconds = 300\n",
+        "package = \"fixture\"\ntimeout_seconds = 300\n",
     )
     .unwrap();
     write_sources(path);

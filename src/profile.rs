@@ -1,7 +1,9 @@
 //! Turn one fenced plugin dump and an ELF into ranked functions in the repo.
 //!
 //! Kernel addresses stay in the total and stay out of the candidate list.
-//! A function under 1% of the fenced total is discarded.
+//! A function under 1% of the fenced total is discarded. A dump that never
+//! lands in a repository function is not filled in with a name the caller
+//! already knew.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -86,6 +88,14 @@ fn parse_pc(text: &str) -> Result<u64> {
     u64::from_str_radix(hex, 16).with_context(|| format!("bad pc {text}"))
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankedProfile {
+    pub functions: Vec<HotFunction>,
+    /// At least one guest PC landed in a function in the worktree, before the
+    /// 1% filter. Protected paths and the injected fence do not count.
+    pub mapped_function: bool,
+}
+
 pub fn rank(
     dump: &ProfileDump,
     map_start: u64,
@@ -96,11 +106,15 @@ pub fn rank(
     worktree: &Path,
     protected: &[String],
     test_name: &str,
-) -> Vec<HotFunction> {
+) -> RankedProfile {
     if dump.error.is_some() || dump.total == 0 {
-        return Vec::new();
+        return RankedProfile {
+            functions: Vec::new(),
+            mapped_function: false,
+        };
     }
     let mut counts: HashMap<(String, String), u64> = HashMap::new();
+    let mut mapped_function = false;
     for &(pc, n) in &dump.blocks {
         if pc < map_start || pc >= map_end || n == 0 {
             continue;
@@ -124,6 +138,7 @@ pub fn rank(
         if span.source.contains("noctum_fence") || span.source.contains("_noctum_guard") {
             continue;
         }
+        mapped_function = true;
         *counts.entry((relative, span.path.clone())).or_default() += n;
     }
     let mut ranked = Vec::new();
@@ -152,7 +167,10 @@ pub fn rank(
         });
     }
     ranked.sort_by(|a, b| b.exclusive.cmp(&a.exclusive).then(a.name.cmp(&b.name)));
-    ranked
+    RankedProfile {
+        functions: ranked,
+        mapped_function,
+    }
 }
 
 fn innermost(spans: &[FnSpan], line: usize) -> Option<&FnSpan> {
@@ -329,11 +347,12 @@ mod tests {
             &[],
             "encode_batch",
         );
-        assert_eq!(ranked.len(), 2);
-        assert_eq!(ranked[0].name, "encode");
-        assert_eq!(ranked[0].exclusive, 700);
-        assert!(!ranked[0].is_test);
-        assert!(ranked[1].is_test);
+        assert!(ranked.mapped_function);
+        assert_eq!(ranked.functions.len(), 2);
+        assert_eq!(ranked.functions[0].name, "encode");
+        assert_eq!(ranked.functions[0].exclusive, 700);
+        assert!(!ranked.functions[0].is_test);
+        assert!(ranked.functions[1].is_test);
     }
 
     #[test]
@@ -379,7 +398,11 @@ mod tests {
             &["fixtures/**".into()],
             "encode_batch",
         );
-        assert!(ranked.is_empty(), "{ranked:?}");
+        assert!(
+            ranked.mapped_function,
+            "a sub-1% in-repo hit is still a mapping"
+        );
+        assert!(ranked.functions.is_empty(), "{ranked:?}");
     }
 
     #[test]
@@ -397,7 +420,8 @@ mod tests {
             &[],
             "t",
         );
-        assert!(ranked.is_empty());
+        assert!(!ranked.mapped_function);
+        assert!(ranked.functions.is_empty());
     }
 
     #[test]
