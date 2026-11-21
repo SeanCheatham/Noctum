@@ -1,0 +1,9 @@
+[package]
+name = "observed"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Deterministic test whose hot function's result is asserted"
+
+[workspace]

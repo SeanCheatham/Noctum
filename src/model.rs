@@ -40,9 +40,10 @@ You reduce the number of guest instructions retired inside one single-threaded R
 Preserve assertions, fixed loop bounds, and libtest success. Do not add dependencies. \
 Do not edit noctum.toml, Cargo.toml, or Cargo.lock. Return a unified diff and a short summary. \
 The fence that measures the body is not in the source. Do not delete the work of a fixed loop. \
+Replace the hot function with a cheaper algorithm that returns the same value for every input. \
+Do not delete a computation the assertions observe, and do not replace it with a constant. \
 Begin the diff with a diff --git line. Copy unchanged and removed lines exactly from the source, \
-including indentation. Put every changed line inside a hunk. \
-Delete only work that does not change the value the hot function returns.";
+including indentation. Put every changed line inside a hunk.";
     let mut user = format!(
         "Test: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
         input.test_name,
@@ -588,6 +589,12 @@ mod tests {
         assert!(system.contains("unified diff"));
         assert!(system.contains("Do not add dependencies"));
         assert!(system.contains("diff --git"));
+        assert!(system.contains("cheaper algorithm"));
+        assert!(system.contains("same value for every input"));
+        assert!(
+            !system.contains("Delete only work"),
+            "the prompt must not ask for a deleted unused computation"
+        );
         assert!(messages[1].content.contains("encode_batch"));
         assert!(messages[1].content.contains("fn encode"));
     }

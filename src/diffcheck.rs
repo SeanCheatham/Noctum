@@ -1,5 +1,5 @@
-//! Reject a model diff that touches the wrong files, deletes an assertion,
-//! or lowers a fixed loop bound in the measured test.
+//! Reject a model diff that touches the wrong files, deletes or rewrites an
+//! assertion, or lowers a fixed loop bound in the measured test.
 
 use std::collections::HashMap;
 use std::path::{Component, Path};
@@ -110,6 +110,9 @@ fn check_test_edits(before: &str, after: &str, test_name: &str) -> Result<(), St
     let after_asserts = count_asserts(&after_fn);
     if after_asserts < before_asserts {
         return Err("diff removes an assertion from the measured test".into());
+    }
+    if !assert_text_holds(&assert_keys(&before_fn), &assert_keys(&after_fn)) {
+        return Err("diff changes an assertion in the measured test".into());
     }
     let before_bounds = loop_bounds(&before_fn);
     let after_bounds = loop_bounds(&after_fn);
@@ -422,6 +425,27 @@ fn count_asserts(func: &ItemFn) -> usize {
     visitor.count
 }
 
+fn assert_keys(func: &ItemFn) -> Vec<String> {
+    let mut visitor = AssertKeyVisitor { keys: Vec::new() };
+    visitor.visit_block(&func.block);
+    visitor.keys
+}
+
+fn assert_text_holds(before: &[String], after: &[String]) -> bool {
+    let mut used = vec![false; after.len()];
+    for key in before {
+        let Some(index) = after
+            .iter()
+            .enumerate()
+            .position(|(index, value)| !used[index] && value == key)
+        else {
+            return false;
+        };
+        used[index] = true;
+    }
+    true
+}
+
 fn loop_bounds(func: &ItemFn) -> Vec<u128> {
     let mut visitor = BoundVisitor { bounds: Vec::new() };
     visitor.visit_block(&func.block);
@@ -430,6 +454,26 @@ fn loop_bounds(func: &ItemFn) -> Vec<u128> {
 
 struct AssertVisitor {
     count: usize,
+}
+
+struct AssertKeyVisitor {
+    keys: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for AssertKeyVisitor {
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        if is_assert(&mac.path) {
+            let path = mac
+                .path
+                .segments
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            self.keys.push(format!("{path}!({})", mac.tokens));
+        }
+        syn::visit::visit_macro(self, mac);
+    }
 }
 
 impl<'ast> Visit<'ast> for AssertVisitor {
@@ -561,6 +605,13 @@ mod tests {
         assert!(check_test_edits(original, &dropped, "tests::encode_batch").is_err());
         assert!(check_test_edits(original, &lowered, "tests::encode_batch").is_err());
         assert!(check_test_edits(original, original, "tests::encode_batch").is_ok());
+    }
+
+    #[test]
+    fn rejects_a_rewritten_expected_value() {
+        let rewritten = SOURCE.replace("26 * 10_000", "26");
+        let err = check_test_edits(SOURCE, &rewritten, "tests::encode_batch").unwrap_err();
+        assert!(err.contains("changes an assertion"), "{err}");
     }
 
     #[test]

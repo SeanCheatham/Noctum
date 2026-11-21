@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A diff that lowers a fixed `for` bound rejects that candidate and is not sampled again. A host-suite failure still gets its one repair.
+- A diff that rewrites an assertion in the measured test is rejected, as is one that drops the assertion. The prompt asks for a cheaper algorithm that returns the same value, and no longer tells the model to delete a computation the return value ignores.
 - After an accept, the next hot function in that file is still tried, and it is scored against a fresh baseline. A rebaseline that does not repeat ends the night's remaining candidates.
 
 ### Added
@@ -19,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned QEMU guest bundle (`qemu-9.2.0-linux-6.12.10`) with a TCG instruction-count plugin, a musl initramfs, and `qemu/smoke.sh` to boot one fenced harness
 - `noctum qemu install` for a local tarball when the lockfile has a checksum and no download URL
 - `qemu/real-pass.sh`, an ignored test that asks llama.cpp for one unified diff, rebuilds the musl harness, and keeps the commit only when the fenced count clears the gate
-- The real-pass fixture recounts its input and discards the copy, so the fenced body is large enough for a real edit to clear 10,000 instructions. The script fails unless that edit is kept
+- The real-pass fixture counts equal byte pairs with a nested scan. The tests assert that count, so deleting the scan fails the host suite. A linear count of the same pairs still passes. The script keeps a commit only when the measured edit clears the gate
 - Libtest's `finished in` duration is left out of the stdout comparison, so the timer cannot reject a cheaper run
 - `git apply --recount` accepts a model diff whose hunk counts are wrong when the changed lines still match
 - The model prompt requires a `diff --git` header and context lines copied from the source. A hunk whose header line is wrong is still checked where those lines match

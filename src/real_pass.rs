@@ -1,6 +1,6 @@
 //! One night with a real llama.cpp completion and the pinned guest.
 //!
-//! `cargo test` skips it. `qemu/real-pass.sh` runs it. The production lockfile
+//! `cargo test` skips the guest run. `qemu/real-pass.sh` runs it. The production lockfile
 //! stays on Qwen2.5-Coder-7B-Instruct Q5_K_M. `NOCTUM_GGUF` is the file this
 //! process actually loads. The fixture leaves `tests` empty. The night measures
 //! the discovered test, reads the plugin's guest-PC ranking, and asks the model
@@ -16,6 +16,7 @@ use crate::builder::CargoHost;
 use crate::lockfile::{ModelLock, QemuLock};
 use crate::model::{self, LlamaEndpoint};
 use crate::orchestrator::{Night, RunOptions};
+use crate::ports::HostCheck;
 use crate::qemu::QemuRunner;
 
 fn required(name: &str) -> PathBuf {
@@ -281,53 +282,163 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
     Ok(())
 }
 
+const OBSERVED: &str = include_str!("../qemu/fixtures/observed/src/lib.rs");
+
 fn write_sources(path: &Path) {
-    // The recount does not change the sum. `black_box` keeps it in the release
-    // binary, so deleting it is a real instruction win. The `for` bound in the
-    // test is a literal the diff checker refuses to lower. This file does not
-    // tell the night which function to edit. A raw string keeps the indentation.
-    std::fs::write(
-        path.join("src/lib.rs"),
-        r#"#[inline(never)]
-pub fn fold_bytes(input: &[u8]) -> u64 {
-    let mut saved = 0u64;
-    for &byte in input {
-        saved = saved.wrapping_add(byte as u64);
-    }
-    // Recount the same bytes. The copy is discarded and does not change `saved`.
-    let mut copy = 0u64;
-    for _ in 0..16 {
-        for &byte in input {
-            copy = copy.wrapping_add(std::hint::black_box(byte) as u64);
-        }
-    }
-    let _ = std::hint::black_box(copy);
-    saved
+    // `equal_pairs` returns the count `encode_batch` asserts. The `for` bound
+    // in that test is a literal the diff checker refuses to lower. This file
+    // does not tell the night which function to edit.
+    std::fs::write(path.join("src/lib.rs"), OBSERVED).unwrap();
 }
 
-#[test]
-fn encode_batch() {
-    let mut data = [0u8; 32];
-    let mut index = 0usize;
-    while index < data.len() {
-        data[index] = (index as u8).wrapping_mul(5).wrapping_add(3);
-        index += 1;
-    }
-    let mut total = 0u64;
-    for _ in 0..12 {
-        total = total.wrapping_add(fold_bytes(&data));
-    }
-    assert_eq!(total, 30_912);
-}
-
-#[test]
-fn tiny_assert() {
-    assert_eq!(fold_bytes(b"hi"), 209);
-    assert_eq!(fold_bytes(b"abcdefg"), 700);
-}
-"#,
+fn replace_equal_pairs(src: &str, replacement: &str) -> String {
+    let start = src
+        .find("#[inline(never)]\npub fn equal_pairs")
+        .expect("equal_pairs");
+    let end = src[start..]
+        .find("\n#[cfg(test)]\nfn pattern")
+        .map(|offset| start + offset)
+        .expect("pattern");
+    format!(
+        "{}{}\n{}",
+        &src[..start],
+        replacement.trim_end(),
+        &src[end..]
     )
-    .unwrap();
+}
+
+const DELETED_SCAN: &str = r#"#[inline(never)]
+pub fn equal_pairs(data: &[u8]) -> u64 {
+    let _ = data;
+    0
+}"#;
+
+const LINEAR_SCAN: &str = r#"#[inline(never)]
+pub fn equal_pairs(data: &[u8]) -> u64 {
+    let mut freq = [0u64; 256];
+    for &byte in data {
+        freq[byte as usize] = freq[byte as usize].wrapping_add(1);
+    }
+    let mut count = 0u64;
+    for times in freq {
+        count = count.wrapping_add(times.wrapping_mul(times));
+    }
+    count
+}"#;
+
+#[test]
+fn the_fixture_rejects_a_bound_shrink_a_dropped_assert_and_a_rewritten_total() {
+    assert!(
+        !OBSERVED.contains("freq"),
+        "the measured source must not already be the linear count"
+    );
+    let ordered = crate::selector::order_for_scan(crate::selector::classify_source(OBSERVED), 20);
+    let kept: Vec<_> = ordered
+        .iter()
+        .filter(|test| test.skip.is_none())
+        .map(|test| test.name.as_str())
+        .collect();
+    assert_eq!(kept, vec!["encode_batch", "tiny_assert"], "{kept:?}");
+
+    let repo = init_fixture();
+    let files = files_of(repo.path());
+    let lowered = OBSERVED.replace("0..32u8", "0..1u8");
+    let bound = diff_to(repo.path(), &lowered);
+    let err = crate::diffcheck::check_diff(&bound, &files, Some("src/lib.rs"), "encode_batch", &[])
+        .unwrap_err();
+    assert!(err.contains("loop bound"), "{err}");
+
+    let dropped = OBSERVED.replace("assert_eq!(total, 6400);", "let _ = total;");
+    let err = crate::diffcheck::check_diff(
+        &diff_to(repo.path(), &dropped),
+        &files,
+        Some("src/lib.rs"),
+        "encode_batch",
+        &[],
+    )
+    .unwrap_err();
+    assert!(err.contains("removes an assertion"), "{err}");
+
+    let rewritten = OBSERVED.replace("assert_eq!(total, 6400);", "assert_eq!(total, 1);");
+    let err = crate::diffcheck::check_diff(
+        &diff_to(repo.path(), &rewritten),
+        &files,
+        Some("src/lib.rs"),
+        "encode_batch",
+        &[],
+    )
+    .unwrap_err();
+    assert!(err.contains("changes an assertion"), "{err}");
+
+    let deleted = replace_equal_pairs(OBSERVED, DELETED_SCAN);
+    crate::diffcheck::check_diff(
+        &diff_to(repo.path(), &deleted),
+        &files,
+        Some("src/lib.rs"),
+        "encode_batch",
+        &[],
+    )
+    .expect("deleting the scan is not an assert or bound edit");
+    let linear = replace_equal_pairs(OBSERVED, LINEAR_SCAN);
+    crate::diffcheck::check_diff(
+        &diff_to(repo.path(), &linear),
+        &files,
+        Some("src/lib.rs"),
+        "encode_batch",
+        &[],
+    )
+    .expect("a linear count keeps the asserted total");
+}
+
+#[tokio::test]
+async fn deleting_the_scan_fails_the_host_check_and_the_linear_count_passes() {
+    let repo = init_fixture();
+    let host = CargoHost;
+    let config = crate::repo_config::RepoConfig {
+        package: Some("fixture".into()),
+        timeout_seconds: 180,
+        ..crate::repo_config::RepoConfig::default()
+    };
+    let ok = host.run(repo.path(), &config, "fixture").await.unwrap();
+    assert!(ok.success, "baseline host check failed:\n{}", ok.output);
+
+    let lib = repo.path().join("src/lib.rs");
+    std::fs::write(&lib, replace_equal_pairs(OBSERVED, DELETED_SCAN)).unwrap();
+    let deleted = host.run(repo.path(), &config, "fixture").await.unwrap();
+    assert!(
+        !deleted.success,
+        "deleting the scan still passed the host check:\n{}",
+        deleted.output
+    );
+    assert!(
+        deleted.output.contains("FAILED") || deleted.output.contains("assertion"),
+        "deleted scan did not fail an assertion:\n{}",
+        deleted.output
+    );
+
+    std::fs::write(&lib, replace_equal_pairs(OBSERVED, LINEAR_SCAN)).unwrap();
+    let linear = host.run(repo.path(), &config, "fixture").await.unwrap();
+    assert!(
+        linear.success,
+        "linear count failed the host check:\n{}",
+        linear.output
+    );
+}
+
+fn files_of(path: &Path) -> std::collections::HashMap<String, String> {
+    let mut files = std::collections::HashMap::new();
+    files.insert(
+        "src/lib.rs".to_string(),
+        std::fs::read_to_string(path.join("src/lib.rs")).unwrap(),
+    );
+    files
+}
+
+fn diff_to(dir: &Path, next: &str) -> String {
+    std::fs::write(dir.join("src/lib.rs"), next).unwrap();
+    let diff = git(dir, &["diff", "--", "src/lib.rs"]);
+    git(dir, &["checkout", "--", "src/lib.rs"]);
+    diff
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
