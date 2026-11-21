@@ -353,6 +353,15 @@ impl Database {
         Ok(row.try_get("id")?)
     }
 
+    pub async fn set_candidate_blob(&self, id: i64, file_blob: &str) -> Result<()> {
+        sqlx::query("UPDATE candidates SET file_blob = ? WHERE id = ?")
+            .bind(file_blob)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn insert_trial(
         &self,
         candidate_id: i64,
