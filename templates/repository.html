@@ -27,15 +27,31 @@
     </tbody>
 </table>
 </div>
-<h2>Trials</h2>
+<h2>Candidates</h2>
+<p>Fenced instructions before and after each change.</p>
 <div class="table-wrapper">
 <table>
-    <thead><tr><th>Test</th><th>Status</th><th>Ratio</th><th>Summary</th></tr></thead>
+    <thead>
+        <tr>
+            <th>Hot function</th>
+            <th>Test</th>
+            <th>Before</th>
+            <th>After</th>
+            <th>Result</th>
+            <th>Why</th>
+            <th>Ratio</th>
+            <th>Summary</th>
+        </tr>
+    </thead>
     <tbody>
     {% for row in trials %}
         <tr>
-            <td><a href="/trials/{{ row.id }}">{{ row.test_name }}</a></td>
-            <td>{{ row.status }}</td>
+            <td><a href="/trials/{{ row.id }}">{{ row.symbol }}</a></td>
+            <td>{{ row.test_name }}</td>
+            <td>{{ row.before }}</td>
+            <td>{{ row.after }}</td>
+            <td>{{ row.result }}</td>
+            <td>{{ row.why }}</td>
             <td>{{ row.ratio }}</td>
             <td>{{ row.summary }}</td>
         </tr>

@@ -93,8 +93,8 @@ A listed bench that uses Criterion, `#[bench]`, or the default harness is stored
 ## Dashboard
 
 - Home: phase (idle, building, measuring, inferring), window, bundle and model status
-- Repository: last run, baselines, trials
-- Trial: diff, instruction counts, gate reason, tool output
+- Repository: last run, baselines, and each candidate's hot function, fenced counts before and after, whether it was kept, and why
+- Trial: diff, those counts, the gate that failed, tool output
 - Settings: schedule, thresholds, web bind, and the lockfile facts (read-only)
 
 ## Licenses
