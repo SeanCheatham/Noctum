@@ -216,7 +216,17 @@ where
         if !self.proceed(opts) {
             return self.close(run_id, dest, "ok", None).await;
         }
-        let mut picks = self.rank(repo.id, dest, repo_config, &measured).await?;
+        let (mut picks, mapped) = self.rank(repo.id, dest, repo_config, &measured).await?;
+        if !mapped {
+            return self
+                .close(
+                    run_id,
+                    dest,
+                    "error",
+                    Some("profile did not map guest PCs back to repository source"),
+                )
+                .await;
+        }
         let limit = self.config.gate.max_candidates as usize;
         picks.truncate(limit);
         self.store_candidates(run_id, &mut picks).await?;
@@ -353,15 +363,36 @@ where
         dest: &Path,
         repo_config: &RepoConfig,
         measured: &[ScoredTest],
-    ) -> Result<Vec<Pick>> {
+    ) -> Result<(Vec<Pick>, bool)> {
         let spans = collect_spans(dest);
         let mut best: HashMap<(String, String), Pick> = HashMap::new();
+        let mut mapped_function = false;
+        let trace = std::env::var_os("NOCTUM_PROFILE_TRACE").is_some();
         for test in measured {
             if !test.eligible {
                 continue;
             }
             let elf = std::fs::read(&test.identity.executable)?;
             let located = locate_dump(&elf, &test.baseline)?;
+            if trace {
+                let mut blocks = test.baseline.dump.blocks.clone();
+                blocks.sort_by_key(|block| std::cmp::Reverse(block.1));
+                eprintln!(
+                    "PROFILE_MAP test={} bias={:#x} start={:#x} end={:#x} blocks={}",
+                    test.identity.discovered.fn_path,
+                    test.baseline.load_bias,
+                    test.baseline.map_start,
+                    test.baseline.map_end,
+                    blocks.len()
+                );
+                for (pc, n) in blocks.into_iter().take(8) {
+                    let addr = pc.wrapping_sub(test.baseline.load_bias);
+                    eprintln!(
+                        "PROFILE_HIT pc={pc:#x} addr={addr:#x} n={n} hit={:?}",
+                        located.get(&addr)
+                    );
+                }
+            }
             let ranked = profile::rank(
                 &test.baseline.dump,
                 test.baseline.map_start,
@@ -373,7 +404,10 @@ where
                 &repo_config.protected_paths,
                 &test.identity.discovered.fn_path,
             );
-            for hot in ranked {
+            // The only candidates are functions this dump mapped. A miss does
+            // not fall back to the test name or any other symbol.
+            mapped_function |= ranked.mapped_function;
+            for hot in ranked.functions {
                 let blob = worktree::file_blob(dest, &hot.file).await?;
                 if self
                     .db
@@ -413,7 +447,24 @@ where
                 .cmp(&a.hot.exclusive)
                 .then(a.hot.name.cmp(&b.hot.name))
         });
-        Ok(picks)
+        if trace {
+            if picks.is_empty() {
+                eprintln!("PROFILE_RANK none mapped_function={mapped_function}");
+            }
+            for (index, pick) in picks.iter().enumerate() {
+                eprintln!(
+                    "PROFILE_RANK {index} symbol={} file={}:{}-{} exclusive={} share={:.4} test={}",
+                    pick.hot.name,
+                    pick.hot.file,
+                    pick.hot.line_start,
+                    pick.hot.line_end,
+                    pick.hot.exclusive,
+                    pick.hot.share,
+                    pick.test_name
+                );
+            }
+        }
+        Ok((picks, mapped_function))
     }
 
     async fn store_candidates(&self, run_id: i64, picks: &mut [Pick]) -> Result<()> {
@@ -1939,5 +1990,83 @@ mod tests {{
         assert!(git(repo.path(), &["status", "--porcelain"])
             .trim()
             .is_empty());
+    }
+
+    struct Unmapped;
+
+    impl Measurer for Unmapped {
+        async fn measure(
+            &self,
+            _req: &crate::ports::MeasureRequest,
+        ) -> Result<crate::ports::Measurement> {
+            Ok(crate::ports::Measurement {
+                total: 50_000,
+                stdout: b"test tests::encode_batch ... ok\n".to_vec(),
+                stderr: Vec::new(),
+                exit_code: 0,
+                wall_ms: 4,
+                dump: crate::profile::ProfileDump {
+                    total: 50_000,
+                    blocks: vec![(0x7fff_ffff_0000, 50_000)],
+                    error: None,
+                },
+                map_start: 0,
+                map_end: u64::MAX,
+                load_bias: 0,
+                serial_log: String::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unmapped_profile_does_not_invent_a_function() {
+        let repo = init_fixture();
+        let data = tempfile::tempdir().unwrap();
+        let config = crate::config::Config {
+            data_dir: Some(data.path().to_path_buf()),
+            gate: crate::config::GateConfig {
+                max_candidates: 1,
+                max_tests: 1,
+                ..crate::config::GateConfig::default()
+            },
+            ..crate::config::Config::default()
+        };
+        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
+        db.run_migrations().await.unwrap();
+        let id = db
+            .add_repository(&repo.path().display().to_string(), "fixture")
+            .await
+            .unwrap();
+        let night = Night::new(
+            db.clone(),
+            config,
+            Unmapped,
+            Fixed {
+                diff: String::new(),
+            },
+            crate::builder::CargoHost,
+        );
+        let row = db.get_repository(id).await.unwrap().unwrap();
+        night
+            .run_repository(
+                &row,
+                &RunOptions {
+                    ignore_window: true,
+                    stop: Arc::new(AtomicBool::new(false)),
+                    asset_error: None,
+                    only_repo: None,
+                },
+            )
+            .await
+            .unwrap();
+        let run = db.latest_run(id).await.unwrap().unwrap();
+        assert_eq!(run.status, "error", "{:?}", run.error);
+        assert_eq!(
+            run.error.as_deref(),
+            Some("profile did not map guest PCs back to repository source")
+        );
+        assert!(db.trials_for_run(run.id).await.unwrap().is_empty());
+        assert!(db.candidates_for_run(run.id).await.unwrap().is_empty());
+        no_perf(repo.path());
     }
 }

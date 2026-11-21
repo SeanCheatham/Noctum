@@ -438,6 +438,19 @@ impl Database {
         .await?)
     }
 
+    pub async fn candidates_for_run(&self, run_id: i64) -> Result<Vec<Candidate>> {
+        Ok(sqlx::query_as(
+            "SELECT id, run_id, test_name, harness, rank, symbol, file, line_start, line_end,
+                    exclusive_count, share, file_blob
+             FROM candidates
+             WHERE run_id = ?
+             ORDER BY rank, id",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn trials_for_run(&self, run_id: i64) -> Result<Vec<Trial>> {
         Ok(sqlx::query_as(
             "SELECT t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
