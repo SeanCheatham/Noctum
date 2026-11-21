@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "diff"],
+  "properties": {
+    "summary": { "type": "string" },
+    "diff": { "type": "string" }
+  }
+}

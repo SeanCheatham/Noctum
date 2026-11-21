@@ -1,2 +1,4 @@
 # Clippy configuration for Noctum
 cognitive-complexity-threshold = 30
+# Row writers and the night-loop steps take one argument per column or collaborator.
+too-many-arguments-threshold = 12

@@ -1,38 +1,32 @@
-# Noctum Configuration Example
-# Copy this to ~/.config/noctum/config.toml or specify with --config
+# Copy to ~/.config/noctum/config.toml, or pass --config.
+# Unknown keys are an error. The model and the QEMU bundle are lockfiles,
+# not fields in this file.
 
 [general]
-# How noisy do you want the logs?
 log_level = "info"
+author_name = "Noctum"
+author_email = "noctum@localhost"
 
 [web]
-# Web dashboard port
 port = 8420
-# Host to bind.
-# WARNING: Using 0.0.0.0 exposes the server without authentication.
-# Only use on trusted networks.
+# The dashboard checks the Host header and only answers on this bind address.
 host = "127.0.0.1"
 
-# Defines the Ollama instances that are used for LLM inference
-[[endpoints]]
-# Name that is displayed in the Web UI
-name = "Laptop"
-# Ollama API URL
-url = "http://localhost:11434"
-# Model to use for analysis (must be available in Ollama)
-model = "qwen2.5-coder"
-# Flag to enable or disable this endpoint
-enabled = true
-
-# You can define more than one Ollama endpoint. Requests will be load-balanced between them.
-# [[endpoints]]
-# name = "Gaming Desktop"
-# url = "http://192.168.1.69:11434"
-# model = "qwen2.5-coder"
-# enabled = true
-
 [schedule]
-# Hour of the day at which background processing begins (24-hours)
 start_hour = 22
-# Hour of the day at which background processing stops (24-hours)
 end_hour = 6
+check_interval_seconds = 60
+
+[gate]
+min_improvement_ratio = 0.01
+min_insn_delta = 10000
+max_candidates = 3
+max_tests = 3
+max_scan = 20
+measure_repeats = 2
+
+[guest]
+memory_mb = 1024
+
+# Optional. Defaults to the platform data directory.
+# data_dir = "/var/lib/noctum"

@@ -1,0 +1,6 @@
+# GBNF for the patch object, used if a pinned llama.cpp build needs a grammar
+# instead of response_format json_schema. The daemon sends json_schema first.
+root   ::= "{" space "\"summary\"" space ":" space string "," space "\"diff\"" space ":" space string "}" space
+space  ::= [ \t\n]*
+string ::= "\"" char* "\""
+char   ::= [^"\\] | "\\" ["\\/bfnrt] | "\\u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]

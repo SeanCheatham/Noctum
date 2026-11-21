@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Noctum{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h1 style="margin: 0">Overnight</h1>
+    <form method="post" action="/run"><button class="btn" type="submit">Run now</button></form>
+</div>
+<div class="grid">
+    <div class="card">
+        <h3>Phase</h3>
+        <p>{{ phase }}{% if detail != "" %} — {{ detail }}{% endif %}</p>
+    </div>
+    <div class="card">
+        <h3>Window</h3>
+        <p>{{ window }}</p>
+    </div>
+    <div class="card">
+        <h3>Model</h3>
+        <p>{{ model }}</p>
+    </div>
+    <div class="card">
+        <h3>QEMU bundle</h3>
+        <p>{{ qemu }}</p>
+    </div>
+</div>
+<div class="card">
+    <h3>Add repository</h3>
+    <form method="post" action="/repositories" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <input name="name" placeholder="Name" required style="flex: 1; padding: 0.5rem; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px;" />
+        <input name="path" placeholder="Path" required style="flex: 2; padding: 0.5rem; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px;" />
+        <button class="btn" type="submit">Add</button>
+    </form>
+</div>
+{% if repositories.is_empty() %}
+<p class="empty-state">No repositories yet.</p>
+{% else %}
+<div class="table-wrapper">
+<table>
+    <thead><tr><th>Name</th><th>Path</th><th>Enabled</th><th></th></tr></thead>
+    <tbody>
+    {% for repo in repositories %}
+        <tr>
+            <td><a href="/repositories/{{ repo.id }}">{{ repo.name }}</a></td>
+            <td>{{ repo.path }}</td>
+            <td>
+                <form method="post" action="/repositories/{{ repo.id }}/enabled">
+                    {% if repo.enabled %}
+                    <input type="hidden" name="enabled" value="0" />
+                    <button class="btn" type="submit">On</button>
+                    {% else %}
+                    <input type="hidden" name="enabled" value="1" />
+                    <button class="btn" type="submit">Off</button>
+                    {% endif %}
+                </form>
+            </td>
+            <td>
+                <form method="post" action="/repositories/{{ repo.id }}/delete">
+                    <button class="btn btn-danger" type="submit">Remove</button>
+                </form>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

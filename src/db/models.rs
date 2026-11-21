@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
+//! Rows in `perf.db`. The old mutation tables are not here.
+
+use serde::Serialize;
 use sqlx::FromRow;
 
-/// A repository configured for analysis
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Repository {
     pub id: i64,
     pub path: String,
@@ -12,170 +13,85 @@ pub struct Repository {
     pub updated_at: String,
 }
 
-/// An analysis result from the daemon
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct AnalysisResult {
-    pub id: i64,
-    pub repository_id: i64,
-    pub file_path: String,
-    pub analysis_type: String,
-    pub result: String,
-    pub severity: Option<String>,
-    pub content_hash: Option<String>,
-    pub created_at: String,
-}
-
-/// Current daemon state
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct DaemonState {
-    pub id: i64,
     pub status: String,
-    pub current_task: Option<String>,
+    pub phase: String,
+    pub detail: Option<String>,
     pub last_active: String,
 }
 
-/// A mutation testing result
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct MutationResult {
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct Run {
     pub id: i64,
     pub repository_id: i64,
-    pub file_path: String,
-    /// Human-readable description of the mutation
-    pub description: String,
-    /// Why this mutation was chosen
-    pub reasoning: String,
-    /// JSON map of line numbers to replacement content
-    pub replacements_json: String,
-    pub test_outcome: String,
-    pub killing_test: Option<String>,
-    pub test_output: Option<String>,
-    pub execution_time_ms: Option<i32>,
-    pub content_hash: Option<String>,
-    pub created_at: String,
+    pub git_sha: String,
+    pub package: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    pub window_key: Option<String>,
+    pub perf_sha: Option<String>,
 }
 
-/// Summary statistics for mutation testing
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct MutationSummary {
-    pub total: usize,
-    pub killed: usize,
-    pub survived: usize,
-    pub timeout: usize,
-    pub compile_error: usize,
-}
-
-/// A generated DOT diagram for a repository
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Diagram {
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct TestBaseline {
     pub id: i64,
-    pub repository_id: i64,
-    /// Type of diagram: 'system_architecture', 'data_flow', 'database_schema'
-    pub diagram_type: String,
-    /// Human-readable title for the diagram
-    pub title: String,
-    /// Description of what the diagram shows
-    pub description: String,
-    /// The GraphViz DOT diagram source code
-    pub dot_content: String,
-    /// Pre-rendered SVG content
-    pub svg_content: String,
-    /// Combined hash of source files used to generate this diagram
-    pub content_hash: Option<String>,
-    pub created_at: String,
+    pub run_id: i64,
+    pub harness: String,
+    pub test_name: String,
+    pub status: String,
+    pub insn_count: Option<i64>,
+    pub stdout_sha256: Option<String>,
+    pub binary_sha256: Option<String>,
+    pub wall_ms: Option<i64>,
+    pub reason: Option<String>,
 }
 
-impl MutationSummary {
-    /// Calculate the mutation score (killed / (killed + survived))
-    pub fn mutation_score(&self) -> f64 {
-        let testable = self.killed + self.survived;
-        if testable == 0 {
-            0.0
-        } else {
-            self.killed as f64 / testable as f64
-        }
-    }
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct Candidate {
+    pub id: i64,
+    pub run_id: i64,
+    pub test_name: String,
+    pub harness: String,
+    pub rank: i64,
+    pub symbol: String,
+    pub file: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub exclusive_count: i64,
+    pub share: f64,
+    pub file_blob: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct Trial {
+    pub id: i64,
+    pub candidate_id: i64,
+    pub status: String,
+    pub reason: Option<String>,
+    pub model_summary: Option<String>,
+    pub unified_diff: Option<String>,
+    pub baseline_count: Option<i64>,
+    pub insn_count: Option<i64>,
+    pub improvement_ratio: Option<f64>,
+    pub host_check_passed: bool,
+    pub stdout_matched: bool,
+    pub tool_output: Option<String>,
+    pub test_name: String,
+    pub harness: String,
+    pub symbol: String,
+    pub file: String,
+}
 
-    #[test]
-    fn test_mutation_score_all_killed() {
-        let summary = MutationSummary {
-            total: 10,
-            killed: 10,
-            survived: 0,
-            timeout: 0,
-            compile_error: 0,
-        };
-        assert!((summary.mutation_score() - 1.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_score_none_killed() {
-        let summary = MutationSummary {
-            total: 10,
-            killed: 0,
-            survived: 10,
-            timeout: 0,
-            compile_error: 0,
-        };
-        assert!((summary.mutation_score() - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_score_half_killed() {
-        let summary = MutationSummary {
-            total: 10,
-            killed: 5,
-            survived: 5,
-            timeout: 0,
-            compile_error: 0,
-        };
-        assert!((summary.mutation_score() - 0.5).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_score_no_testable() {
-        // When there are only timeouts and compile errors, score should be 0
-        let summary = MutationSummary {
-            total: 10,
-            killed: 0,
-            survived: 0,
-            timeout: 5,
-            compile_error: 5,
-        };
-        assert!((summary.mutation_score() - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_score_empty() {
-        let summary = MutationSummary::default();
-        assert!((summary.mutation_score() - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_score_ignores_timeout_and_compile_error() {
-        // Score should only consider killed and survived
-        let summary = MutationSummary {
-            total: 20,
-            killed: 6,
-            survived: 4,
-            timeout: 5,
-            compile_error: 5,
-        };
-        // 6 / (6 + 4) = 0.6
-        assert!((summary.mutation_score() - 0.6).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_summary_default() {
-        let summary = MutationSummary::default();
-        assert_eq!(summary.total, 0);
-        assert_eq!(summary.killed, 0);
-        assert_eq!(summary.survived, 0);
-        assert_eq!(summary.timeout, 0);
-        assert_eq!(summary.compile_error, 0);
-    }
+#[derive(Debug, Clone, FromRow)]
+pub struct PendingCommit {
+    pub trial_id: i64,
+    pub unified_diff: String,
+    pub model_summary: Option<String>,
+    pub test_name: String,
+    pub baseline_count: Option<i64>,
+    pub insn_count: Option<i64>,
+    pub improvement_ratio: Option<f64>,
 }

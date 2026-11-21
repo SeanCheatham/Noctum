@@ -1,0 +1,20 @@
+# Local model Noctum runs itself. There is no endpoint list.
+#
+# Qwen2.5-Coder-7B-Instruct, GGUF quant Q5_K_M, from the official Qwen repo.
+# The overnight daemon was developed against the qwen2.5-coder family. This
+# is still the maintained 7B-class instruct GGUF, so it is pinned directly
+# rather than replaced by a larger model. Q5_K_M is the published quant above
+# Q4 (about 5.1 GiB) that fits a 16 GB machine while the guest is stopped.
+#
+# llama.cpp tag b12528 ships a Linux x86_64 CPU build of llama-server that
+# loads this GGUF. The archive hash was computed from the upstream tarball.
+# The GGUF hash is the Hugging Face LFS oid of
+# qwen2.5-coder-7b-instruct-q5_k_m.gguf.
+
+llama_cpp_tag = "b12528"
+llama_cpp_url = "https://github.com/ggml-org/llama.cpp/releases/download/b12528/llama-b12528-bin-ubuntu-x64.tar.gz"
+llama_cpp_sha256 = "f21dacb5d6ecd20e6809395ea8080e3758d3ae8cde593b0e3195afe10bf058f3"
+gguf_url = "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q5_k_m.gguf"
+gguf_filename = "qwen2.5-coder-7b-instruct-q5_k_m.gguf"
+gguf_sha256 = "586844eac4d6d6321689f0192c8aa8e69cd8625974a5cc2d925b1a03366e4d16"
+gguf_bytes = 5444831232

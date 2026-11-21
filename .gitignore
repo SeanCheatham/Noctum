@@ -20,4 +20,8 @@ Thumbs.db
 # Logs
 *.log
 
+# QEMU bundle sources and the staged tarball. The lockfile records the hash.
+/qemu/src/
+/qemu/out/
+
 CLAUDE.md

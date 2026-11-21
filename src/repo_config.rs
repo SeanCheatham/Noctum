@@ -1,74 +1,68 @@
-//! Repository-level configuration.
+//! `noctum.toml` for one repository.
 //!
-//! Handles loading and parsing `noctum.toml` configuration files from repositories.
-//! This configuration controls which analysis features are enabled and defines
-//! build/test commands for mutation testing.
-//!
-//! # Security
-//!
-//! The `noctum.toml` file can specify arbitrary shell commands that will be executed
-//! during mutation testing. This is a security-sensitive operation. Before loading
-//! a config file, we validate:
-//!
-//! 1. The file is owned by the current user (on Unix systems)
-//! 2. The file is not world-writable
-//!
-//! If these checks fail, the config file is rejected and a warning is logged.
+//! Unknown keys are an error, so a leftover mutation config fails loudly.
+//! The file can name a shell command, so it must be owned by the current user
+//! and must not be world-writable.
 
 use serde::Deserialize;
+use std::fmt;
 use std::path::Path;
 
-/// Result of validating a config file's security properties.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigSecurityCheck {
-    /// Config file passes security checks
     Safe,
-    /// Config file is owned by a different user
-    WrongOwner { expected_uid: u32, actual_uid: u32 },
-    /// Config file is world-writable
+    WrongOwner {
+        expected_uid: u32,
+        actual_uid: u32,
+    },
     WorldWritable,
-    /// Could not read file metadata
     MetadataError(String),
-    /// Security checks not available on this platform
     #[allow(dead_code)]
     NotSupported,
 }
 
 impl ConfigSecurityCheck {
-    /// Returns true if the config file is safe to use
-    #[allow(dead_code)] // Used in tests
     pub fn is_safe(&self) -> bool {
-        matches!(self, ConfigSecurityCheck::Safe)
+        matches!(
+            self,
+            ConfigSecurityCheck::Safe | ConfigSecurityCheck::NotSupported
+        )
     }
 }
 
-/// Check if a config file has safe ownership and permissions.
-///
-/// On Unix systems, this verifies:
-/// - The file is owned by the current user
-/// - The file is not world-writable (mode & 0o002 == 0)
-///
-/// On non-Unix systems, this always returns `Safe` (checks not supported).
+impl fmt::Display for ConfigSecurityCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigSecurityCheck::Safe => write!(f, "ok"),
+            ConfigSecurityCheck::WrongOwner {
+                expected_uid,
+                actual_uid,
+            } => write!(
+                f,
+                "noctum.toml is owned by uid {actual_uid}, current user is uid {expected_uid}"
+            ),
+            ConfigSecurityCheck::WorldWritable => {
+                write!(f, "noctum.toml is world-writable")
+            }
+            ConfigSecurityCheck::MetadataError(err) => {
+                write!(f, "could not read noctum.toml metadata: {err}")
+            }
+            ConfigSecurityCheck::NotSupported => write!(f, "ownership checks are not available"),
+        }
+    }
+}
+
 #[cfg(unix)]
 pub fn check_config_security(config_path: &Path) -> ConfigSecurityCheck {
     use std::os::unix::fs::MetadataExt;
 
     let metadata = match std::fs::metadata(config_path) {
-        Ok(m) => m,
-        Err(e) => return ConfigSecurityCheck::MetadataError(e.to_string()),
+        Ok(metadata) => metadata,
+        Err(err) => return ConfigSecurityCheck::MetadataError(err.to_string()),
     };
-
-    // Get current user's UID by checking the ownership of a temp file we create.
-    // This avoids needing unsafe code or external crates.
-    let current_uid = match get_current_uid() {
-        Some(uid) => uid,
-        None => {
-            return ConfigSecurityCheck::MetadataError(
-                "Could not determine current user ID".to_string(),
-            )
-        }
+    let Some(current_uid) = current_uid() else {
+        return ConfigSecurityCheck::MetadataError("could not determine current user id".into());
     };
-
     let file_uid = metadata.uid();
     if file_uid != current_uid {
         return ConfigSecurityCheck::WrongOwner {
@@ -76,682 +70,193 @@ pub fn check_config_security(config_path: &Path) -> ConfigSecurityCheck {
             actual_uid: file_uid,
         };
     }
-
-    // Check permissions - file should not be world-writable
-    let mode = metadata.mode();
-    if mode & 0o002 != 0 {
+    if metadata.mode() & 0o002 != 0 {
         return ConfigSecurityCheck::WorldWritable;
     }
-
     ConfigSecurityCheck::Safe
 }
 
-/// Get the current user's UID by creating a temp file and checking its ownership.
-/// This is a safe alternative to calling libc::getuid() directly.
 #[cfg(unix)]
-fn get_current_uid() -> Option<u32> {
+fn current_uid() -> Option<u32> {
     use std::os::unix::fs::MetadataExt;
-
-    // Create a temp file - it will be owned by the current user
-    let temp_file = tempfile::NamedTempFile::new().ok()?;
-    let metadata = temp_file.path().metadata().ok()?;
-    Some(metadata.uid())
+    let temp = tempfile::NamedTempFile::new().ok()?;
+    Some(temp.path().metadata().ok()?.uid())
 }
 
 #[cfg(not(unix))]
 pub fn check_config_security(_config_path: &Path) -> ConfigSecurityCheck {
-    // Security checks not available on non-Unix platforms
     ConfigSecurityCheck::NotSupported
 }
 
-/// Repository-level configuration loaded from `noctum.toml`.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct RepoConfig {
-    /// Enable code analysis (File Analysis tab). Default: false.
-    #[serde(default)]
-    pub enable_code_analysis: bool,
-
-    /// Enable architecture analysis (Architecture summary). Default: false.
-    #[serde(default)]
-    pub enable_architecture_analysis: bool,
-
-    /// Enable diagram creation (system architecture, data flow, etc.). Default: false.
-    #[serde(default)]
-    pub enable_diagram_creation: bool,
-
-    /// Enable mutation testing. Default: false.
-    /// Note: Also requires mutation rules to be configured.
-    #[serde(default)]
-    pub enable_mutation_testing: bool,
-
-    /// Glob patterns for files/directories to exclude when copying to temp directory.
-    /// Useful for excluding `node_modules`, build artifacts, or other large directories
-    /// that would be regenerated by the build command anyway.
-    /// Example: `["node_modules", "target", ".git", "dist"]`
-    #[serde(default)]
-    pub copy_ignore: Vec<String>,
-
-    /// Optional command to run setup (e.g., `"npm ci"` to install dependencies).
-    /// Runs once before baseline verification, not for each mutation.
-    #[serde(default)]
-    pub setup_command: Option<String>,
-
-    /// Mutation testing configuration.
-    #[serde(default)]
-    pub mutation: MutationRepoConfig,
-}
-
-/// Mutation testing configuration section.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct MutationRepoConfig {
-    /// Rules for matching files to build/test commands.
-    /// Rules are evaluated in order; the first matching glob wins.
-    #[serde(default)]
-    pub rules: Vec<MutationRule>,
-}
-
-/// A single mutation testing rule that maps a glob pattern to commands.
 #[derive(Debug, Clone, Deserialize)]
-pub struct MutationRule {
-    /// Glob pattern to match file paths (e.g., `"**/*.rs"`, `"src/**/*.ts"`).
-    pub glob: String,
-    /// Optional glob pattern to exclude files that matched `glob`.
-    /// Useful for excluding test files (e.g., `"**/*.test.ts"`).
-    #[serde(default)]
-    pub glob_ignore: Option<String>,
-    /// Command to run for build/compile checking.
-    pub build_command: String,
-    /// Command to run tests.
-    pub test_command: String,
-    /// Timeout in seconds for test execution (defaults to 300).
+#[serde(deny_unknown_fields, default)]
+pub struct RepoConfig {
+    pub package: Option<String>,
+    pub tests: Vec<String>,
+    pub skip_tests: Vec<String>,
+    pub benches: Vec<String>,
+    pub features: Vec<String>,
+    pub all_features: bool,
+    pub protected_paths: Vec<String>,
+    pub check_command: String,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
+    #[serde(default = "default_clean_paths")]
+    pub clean_paths: Vec<String>,
 }
 
 fn default_timeout() -> u64 {
-    300
+    600
 }
 
-impl MutationRule {
-    /// Check if this rule matches the given file path.
-    ///
-    /// Returns `true` if the file matches `glob` and does NOT match `glob_ignore`.
-    pub fn matches(&self, file_path: &str) -> bool {
-        if !glob_match::glob_match(&self.glob, file_path) {
-            return false;
+fn default_clean_paths() -> Vec<String> {
+    vec!["target".to_string()]
+}
+
+impl Default for RepoConfig {
+    fn default() -> Self {
+        Self {
+            package: None,
+            tests: Vec::new(),
+            skip_tests: Vec::new(),
+            benches: Vec::new(),
+            features: Vec::new(),
+            all_features: false,
+            protected_paths: Vec::new(),
+            check_command: String::new(),
+            timeout_seconds: 600,
+            clean_paths: vec!["target".to_string()],
         }
-        // If glob_ignore is set and matches, exclude this file
-        if let Some(ref ignore_pattern) = self.glob_ignore {
-            if glob_match::glob_match(ignore_pattern, file_path) {
-                return false;
-            }
-        }
-        true
     }
 }
 
+#[derive(Debug)]
+pub enum RepoError {
+    Missing,
+    Insecure(String),
+    Parse(String),
+    Io(String),
+}
+
+impl fmt::Display for RepoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RepoError::Missing => write!(f, "repository has no noctum.toml"),
+            RepoError::Insecure(err) => write!(f, "{err}"),
+            RepoError::Parse(err) => write!(f, "failed to parse noctum.toml: {err}"),
+            RepoError::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for RepoError {}
+
 impl RepoConfig {
-    /// Check if `noctum.toml` exists in the repository.
     pub fn exists(repo_path: &Path) -> bool {
         repo_path.join("noctum.toml").exists()
     }
 
-    /// Load configuration from `noctum.toml`.
-    ///
-    /// Returns `Some(config)` if the file exists, passes security checks, and is valid.
-    /// Returns `None` if:
-    /// - The file doesn't exist
-    /// - The file fails security checks (wrong owner, world-writable)
-    /// - The file contains invalid TOML
-    ///
-    /// Returns `Some(default)` if the file is empty or contains only whitespace.
-    ///
-    /// # Security
-    ///
-    /// Before loading, this function checks that the config file:
-    /// - Is owned by the current user (on Unix)
-    /// - Is not world-writable (on Unix)
-    ///
-    /// If these checks fail, a warning is logged and `None` is returned.
-    pub fn load(repo_path: &Path) -> Option<Self> {
-        Self::load_internal(repo_path, true)
+    pub fn load(repo_path: &Path) -> Result<Self, RepoError> {
+        Self::load_at(&repo_path.join("noctum.toml"), true)
     }
 
-    /// Load configuration without security checks.
-    ///
-    /// This should only be used in tests where config files are created in temp directories.
     #[cfg(test)]
-    pub fn load_unchecked(repo_path: &Path) -> Option<Self> {
-        Self::load_internal(repo_path, false)
+    pub fn load_unchecked(repo_path: &Path) -> Result<Self, RepoError> {
+        Self::load_at(&repo_path.join("noctum.toml"), false)
     }
 
-    fn load_internal(repo_path: &Path, check_security: bool) -> Option<Self> {
-        let config_path = repo_path.join("noctum.toml");
+    fn load_at(config_path: &Path, check_security: bool) -> Result<Self, RepoError> {
         if !config_path.exists() {
-            return None;
+            return Err(RepoError::Missing);
         }
-
-        // Perform security checks before loading
         if check_security {
-            let security_check = check_config_security(&config_path);
-            match &security_check {
-                ConfigSecurityCheck::Safe => {}
-                #[cfg(not(unix))]
-                ConfigSecurityCheck::NotSupported => {}
-                ConfigSecurityCheck::WrongOwner {
-                    expected_uid,
-                    actual_uid,
-                } => {
-                    tracing::warn!(
-                        "Rejecting noctum.toml at {:?}: file is owned by uid {} but current user is uid {}. \
-                         Config files with shell commands must be owned by the current user for security.",
-                        config_path,
-                        actual_uid,
-                        expected_uid
-                    );
-                    return None;
-                }
-                ConfigSecurityCheck::WorldWritable => {
-                    tracing::warn!(
-                        "Rejecting noctum.toml at {:?}: file is world-writable. \
-                         Config files with shell commands must not be world-writable for security. \
-                         Fix with: chmod o-w {:?}",
-                        config_path,
-                        config_path
-                    );
-                    return None;
-                }
-                ConfigSecurityCheck::MetadataError(e) => {
-                    tracing::warn!(
-                        "Rejecting noctum.toml at {:?}: could not read file metadata: {}",
-                        config_path,
-                        e
-                    );
-                    return None;
-                }
-                #[cfg(unix)]
-                ConfigSecurityCheck::NotSupported => {}
+            let check = check_config_security(config_path);
+            if !check.is_safe() {
+                return Err(RepoError::Insecure(check.to_string()));
             }
         }
-
-        let content = std::fs::read_to_string(&config_path).ok()?;
-        // Empty file or whitespace-only returns default config
+        let content = std::fs::read_to_string(config_path)
+            .map_err(|err| RepoError::Io(format!("read {}: {err}", config_path.display())))?;
         if content.trim().is_empty() {
-            return Some(Self::default());
+            return Ok(Self::default());
         }
-        toml::from_str(&content).ok()
-    }
-}
-
-impl MutationRepoConfig {
-    /// Find the first rule matching the given file path.
-    ///
-    /// A rule matches if the file matches `glob` and does NOT match `glob_ignore`.
-    /// Returns `None` if no rule matches, indicating the file should be skipped.
-    #[allow(dead_code)]
-    pub fn find_rule(&self, file_path: &str) -> Option<&MutationRule> {
-        self.rules.iter().find(|rule| rule.matches(file_path))
+        toml::from_str(&content).map_err(|err| RepoError::Parse(err.to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     #[test]
-    fn test_exists_returns_false_when_missing() {
-        let temp_dir = TempDir::new().unwrap();
-        assert!(!RepoConfig::exists(temp_dir.path()));
+    fn empty_file_uses_plan_defaults() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("noctum.toml"), "   \n").unwrap();
+        let config = RepoConfig::load_unchecked(dir.path()).unwrap();
+        assert!(config.tests.is_empty());
+        assert!(config.benches.is_empty());
+        assert_eq!(config.timeout_seconds, 600);
+        assert_eq!(config.clean_paths, vec!["target".to_string()]);
+        assert!(!config.all_features);
     }
 
     #[test]
-    fn test_exists_returns_true_when_present() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("noctum.toml"), "").unwrap();
-        assert!(RepoConfig::exists(temp_dir.path()));
+    fn parses_the_documented_shape() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("noctum.toml"),
+            r#"
+package = "demo"
+tests = ["encode_batch"]
+skip_tests = ["*_io_*"]
+protected_paths = ["fixtures/**"]
+timeout_seconds = 120
+"#,
+        )
+        .unwrap();
+        let config = RepoConfig::load_unchecked(dir.path()).unwrap();
+        assert_eq!(config.package.as_deref(), Some("demo"));
+        assert_eq!(config.tests, vec!["encode_batch".to_string()]);
+        assert_eq!(config.skip_tests, vec!["*_io_*".to_string()]);
+        assert_eq!(config.timeout_seconds, 120);
+        assert_eq!(config.clean_paths, vec!["target".to_string()]);
     }
 
     #[test]
-    fn test_load_returns_none_when_missing() {
-        let temp_dir = TempDir::new().unwrap();
-        assert!(RepoConfig::load(temp_dir.path()).is_none());
+    fn mutation_keys_are_named_in_the_error() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("noctum.toml"),
+            "enable_mutation_testing = true\n",
+        )
+        .unwrap();
+        let error = RepoConfig::load_unchecked(dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("enable_mutation_testing"), "{error}");
     }
 
     #[test]
-    fn test_load_empty_file_returns_default() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("noctum.toml"), "").unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert!(config.mutation.rules.is_empty());
-        // All enable flags default to false
-        assert!(!config.enable_code_analysis);
-        assert!(!config.enable_architecture_analysis);
-        assert!(!config.enable_diagram_creation);
-        assert!(!config.enable_mutation_testing);
-    }
-
-    #[test]
-    fn test_load_whitespace_only_returns_default() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("noctum.toml"), "   \n\n  ").unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert!(config.mutation.rules.is_empty());
-    }
-
-    #[test]
-    fn test_load_valid_config() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-[[mutation.rules]]
-glob = "**/*.rs"
-build_command = "cargo check"
-test_command = "cargo test"
-
-[[mutation.rules]]
-glob = "**/*.ts"
-build_command = "npm run build"
-test_command = "npm test"
-timeout_seconds = 600
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert_eq!(config.mutation.rules.len(), 2);
-
-        let rust_rule = &config.mutation.rules[0];
-        assert_eq!(rust_rule.glob, "**/*.rs");
-        assert_eq!(rust_rule.build_command, "cargo check");
-        assert_eq!(rust_rule.test_command, "cargo test");
-        assert_eq!(rust_rule.timeout_seconds, 300); // default
-
-        let ts_rule = &config.mutation.rules[1];
-        assert_eq!(ts_rule.glob, "**/*.ts");
-        assert_eq!(ts_rule.build_command, "npm run build");
-        assert_eq!(ts_rule.test_command, "npm test");
-        assert_eq!(ts_rule.timeout_seconds, 600); // custom
-    }
-
-    #[test]
-    fn test_load_invalid_toml_returns_none() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("noctum.toml"), "invalid {{{{ toml").unwrap();
-
-        assert!(RepoConfig::load_unchecked(temp_dir.path()).is_none());
-    }
-
-    #[test]
-    fn test_find_rule_matches_simple_extension() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "**/*.rs".to_string(),
-                glob_ignore: None,
-                build_command: "cargo check".to_string(),
-                test_command: "cargo test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        assert!(config.find_rule("src/main.rs").is_some());
-        assert!(config.find_rule("src/lib/utils.rs").is_some());
-        assert!(config.find_rule("main.rs").is_some());
-        assert!(config.find_rule("src/main.ts").is_none());
-    }
-
-    #[test]
-    fn test_find_rule_matches_directory_prefix() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "packages/frontend/**/*.tsx".to_string(),
-                glob_ignore: None,
-                build_command: "npm run build".to_string(),
-                test_command: "npm test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        assert!(config.find_rule("packages/frontend/src/App.tsx").is_some());
-        assert!(config
-            .find_rule("packages/frontend/components/Button.tsx")
-            .is_some());
-        assert!(config.find_rule("packages/backend/src/index.ts").is_none());
-        assert!(config.find_rule("src/App.tsx").is_none());
-    }
-
-    #[test]
-    fn test_find_rule_returns_first_match() {
-        let config = MutationRepoConfig {
-            rules: vec![
-                MutationRule {
-                    glob: "src/special/**/*.rs".to_string(),
-                    glob_ignore: None,
-                    build_command: "special check".to_string(),
-                    test_command: "special test".to_string(),
-                    timeout_seconds: 100,
-                },
-                MutationRule {
-                    glob: "**/*.rs".to_string(),
-                    glob_ignore: None,
-                    build_command: "cargo check".to_string(),
-                    test_command: "cargo test".to_string(),
-                    timeout_seconds: 300,
-                },
-            ],
-        };
-
-        // Should match first rule
-        let rule = config.find_rule("src/special/foo.rs").unwrap();
-        assert_eq!(rule.test_command, "special test");
-
-        // Should match second rule
-        let rule = config.find_rule("src/other/bar.rs").unwrap();
-        assert_eq!(rule.test_command, "cargo test");
-    }
-
-    #[test]
-    fn test_find_rule_returns_none_when_no_match() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "**/*.rs".to_string(),
-                glob_ignore: None,
-                build_command: "cargo check".to_string(),
-                test_command: "cargo test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        assert!(config.find_rule("src/main.py").is_none());
-        assert!(config.find_rule("package.json").is_none());
-    }
-
-    #[test]
-    fn test_find_rule_empty_rules() {
-        let config = MutationRepoConfig { rules: vec![] };
-        assert!(config.find_rule("any/file.rs").is_none());
-    }
-
-    #[test]
-    fn test_default_timeout() {
-        assert_eq!(default_timeout(), 300);
-    }
-
-    #[test]
-    fn test_load_with_enable_flags() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-enable_code_analysis = true
-enable_architecture_analysis = true
-enable_diagram_creation = false
-enable_mutation_testing = true
-
-[[mutation.rules]]
-glob = "**/*.rs"
-build_command = "cargo check"
-test_command = "cargo test"
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert!(config.enable_code_analysis);
-        assert!(config.enable_architecture_analysis);
-        assert!(!config.enable_diagram_creation);
-        assert!(config.enable_mutation_testing);
-        assert_eq!(config.mutation.rules.len(), 1);
-    }
-
-    #[test]
-    fn test_load_partial_enable_flags() {
-        let temp_dir = TempDir::new().unwrap();
-        // Only set some flags, others should default to false
-        let config_content = r#"
-enable_code_analysis = true
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert!(config.enable_code_analysis);
-        assert!(!config.enable_architecture_analysis);
-        assert!(!config.enable_diagram_creation);
-        assert!(!config.enable_mutation_testing);
-    }
-
-    #[test]
-    fn test_load_copy_ignore_patterns() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-enable_mutation_testing = true
-copy_ignore = ["node_modules", "target", ".git", "dist"]
-
-[[mutation.rules]]
-glob = "**/*.ts"
-build_command = "npm run build"
-test_command = "npm test"
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert!(config.enable_mutation_testing);
-        assert_eq!(config.copy_ignore.len(), 4);
-        assert!(config.copy_ignore.contains(&"node_modules".to_string()));
-        assert!(config.copy_ignore.contains(&"target".to_string()));
-        assert!(config.copy_ignore.contains(&".git".to_string()));
-        assert!(config.copy_ignore.contains(&"dist".to_string()));
-    }
-
-    #[test]
-    fn test_load_empty_copy_ignore() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-enable_mutation_testing = true
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert!(config.copy_ignore.is_empty());
-    }
-
-    #[test]
-    fn test_load_setup_command() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-enable_mutation_testing = true
-setup_command = "npm ci"
-
-[[mutation.rules]]
-glob = "src/**/*.ts"
-build_command = "npm run build"
-test_command = "npm test"
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert_eq!(config.setup_command, Some("npm ci".to_string()));
-        assert_eq!(config.mutation.rules.len(), 1);
-        assert_eq!(config.mutation.rules[0].build_command, "npm run build");
-    }
-
-    #[test]
-    fn test_load_setup_command_defaults_to_none() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-[[mutation.rules]]
-glob = "**/*.rs"
-build_command = "cargo check"
-test_command = "cargo test"
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert_eq!(config.setup_command, None);
+    fn missing_file_is_an_error() {
+        let dir = TempDir::new().unwrap();
+        assert!(matches!(
+            RepoConfig::load(dir.path()),
+            Err(RepoError::Missing)
+        ));
     }
 
     #[cfg(unix)]
     #[test]
-    fn test_security_check_safe_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("noctum.toml");
-        std::fs::write(&config_path, "enable_code_analysis = true").unwrap();
-
-        // File created by current user should be safe
-        let result = check_config_security(&config_path);
-        assert!(result.is_safe());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_security_check_world_writable() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("noctum.toml");
-        std::fs::write(&config_path, "enable_code_analysis = true").unwrap();
-
-        // Make the file world-writable
-        let mut perms = std::fs::metadata(&config_path).unwrap().permissions();
+    fn world_writable_file_is_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("noctum.toml");
+        std::fs::write(&path, "package = \"demo\"\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o666);
-        std::fs::set_permissions(&config_path, perms).unwrap();
-
-        let result = check_config_security(&config_path);
-        assert_eq!(result, ConfigSecurityCheck::WorldWritable);
-        assert!(!result.is_safe());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_security_check_nonexistent_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("noctum.toml");
-
-        let result = check_config_security(&config_path);
-        assert!(matches!(result, ConfigSecurityCheck::MetadataError(_)));
-        assert!(!result.is_safe());
-    }
-
-    #[test]
-    fn test_glob_ignore_excludes_test_files() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "**/*.ts".to_string(),
-                glob_ignore: Some("**/*.test.ts".to_string()),
-                build_command: "npm run build".to_string(),
-                test_command: "npm test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        // Should match regular .ts files
-        assert!(config.find_rule("src/utils.ts").is_some());
-        assert!(config.find_rule("src/components/Button.ts").is_some());
-
-        // Should NOT match .test.ts files
-        assert!(config.find_rule("src/utils.test.ts").is_none());
-        assert!(config.find_rule("src/components/Button.test.ts").is_none());
-    }
-
-    #[test]
-    fn test_glob_ignore_excludes_spec_files() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "**/*.ts".to_string(),
-                glob_ignore: Some("**/*.spec.ts".to_string()),
-                build_command: "npm run build".to_string(),
-                test_command: "npm test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        assert!(config.find_rule("src/service.ts").is_some());
-        assert!(config.find_rule("src/service.spec.ts").is_none());
-    }
-
-    #[test]
-    fn test_glob_ignore_excludes_directory() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "**/*.ts".to_string(),
-                glob_ignore: Some("**/test/**".to_string()),
-                build_command: "npm run build".to_string(),
-                test_command: "npm test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        assert!(config.find_rule("src/utils.ts").is_some());
-        assert!(config.find_rule("src/test/utils.ts").is_none());
-        assert!(config.find_rule("test/integration.ts").is_none());
-    }
-
-    #[test]
-    fn test_glob_ignore_none_matches_all() {
-        let config = MutationRepoConfig {
-            rules: vec![MutationRule {
-                glob: "**/*.ts".to_string(),
-                glob_ignore: None,
-                build_command: "npm run build".to_string(),
-                test_command: "npm test".to_string(),
-                timeout_seconds: 300,
-            }],
-        };
-
-        // Without glob_ignore, all .ts files should match
-        assert!(config.find_rule("src/utils.ts").is_some());
-        assert!(config.find_rule("src/utils.test.ts").is_some());
-        assert!(config.find_rule("test/integration.ts").is_some());
-    }
-
-    #[test]
-    fn test_mutation_rule_matches_method() {
-        let rule = MutationRule {
-            glob: "**/*.ts".to_string(),
-            glob_ignore: Some("**/*.test.ts".to_string()),
-            build_command: "npm run build".to_string(),
-            test_command: "npm test".to_string(),
-            timeout_seconds: 300,
-        };
-
-        assert!(rule.matches("src/utils.ts"));
-        assert!(!rule.matches("src/utils.test.ts"));
-        assert!(!rule.matches("src/main.rs")); // wrong extension
-    }
-
-    #[test]
-    fn test_load_glob_ignore_from_config() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-[[mutation.rules]]
-glob = "**/*.ts"
-glob_ignore = "**/*.test.ts"
-build_command = "npm run build"
-test_command = "npm test"
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert_eq!(config.mutation.rules.len(), 1);
-        assert_eq!(
-            config.mutation.rules[0].glob_ignore,
-            Some("**/*.test.ts".to_string())
-        );
-
-        // Verify it works correctly
-        assert!(config.mutation.find_rule("src/utils.ts").is_some());
-        assert!(config.mutation.find_rule("src/utils.test.ts").is_none());
-    }
-
-    #[test]
-    fn test_load_glob_ignore_defaults_to_none() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_content = r#"
-[[mutation.rules]]
-glob = "**/*.ts"
-build_command = "npm run build"
-test_command = "npm test"
-"#;
-        std::fs::write(temp_dir.path().join("noctum.toml"), config_content).unwrap();
-
-        let config = RepoConfig::load_unchecked(temp_dir.path()).unwrap();
-        assert_eq!(config.mutation.rules[0].glob_ignore, None);
+        std::fs::set_permissions(&path, perms).unwrap();
+        let error = RepoConfig::load(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("world-writable"), "{error}");
     }
 }
