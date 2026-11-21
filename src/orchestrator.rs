@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use chrono::Local;
 
-use crate::builder::{self, BuiltHarness, CargoHost, ResolvedPackage};
+use crate::builder::{self, BuiltHarness, CargoHost, CargoTarget, ResolvedPackage};
 use crate::config::Config;
 use crate::db::{Database, Repository};
 use crate::diffcheck::{self, parse_diff};
@@ -17,7 +17,8 @@ use crate::gate::{self, GateDecision, GateInput};
 use crate::hashutil::{self, sha256_bytes, sha256_file};
 use crate::model::{self, PromptInput};
 use crate::ports::{
-    comparable_stdout, Completion, HostCheck, Inferencer, MeasureRequest, Measurement, Measurer,
+    comparable_stdout, CheckOutput, Completion, HostCheck, Inferencer, MeasureRequest, Measurement,
+    Measurer,
 };
 use crate::profile::{self, HotFunction, LineHit};
 use crate::repo_config::RepoConfig;
@@ -244,20 +245,41 @@ where
         }
         let found = gather_tests(&package, repo_config);
         let selected = select_tests(&found, repo_config, self.config.gate.max_scan as usize)?;
+        let benches = split_benches(repo_config, &package)?;
         builder::clean_paths(dest, &repo_config.clean_paths)?;
         let fence_dir = fence::install_fence_crate(&self.config.data_dir())?;
-        inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
-        let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
-        let linked =
-            link_harnesses(dest, &selected, &harnesses, repo_config.timeout_seconds).await?;
+        // An empty test list with no bench would still try `cargo test` and
+        // record that failure. A named bench is enough on its own.
+        let build_tests = !selected.is_empty() || benches.score.is_empty();
+        let mut linked = Vec::new();
+        if build_tests {
+            inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
+            let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
+            linked =
+                link_harnesses(dest, &selected, &harnesses, repo_config.timeout_seconds).await?;
+        }
+        if !benches.score.is_empty() {
+            ensure_fence_manifest(&package.manifest, &fence_dir)?;
+            for target in &benches.score {
+                // Capture `main` before the fence is inserted. The fence is
+                // stripped again before the model sees the tree.
+                let mut unit = linked_bench(&package, target, PathBuf::new());
+                inject_main(&target.src_path)?;
+                let built =
+                    builder::build_bench(dest, &package.name, &target.name, repo_config).await?;
+                unit.executable = builder::pick_bench(&built, &target.name)?;
+                linked.push(unit);
+            }
+        }
         for harness in &linked {
             check_elf(dest, &harness.executable)?;
         }
-        restore_fences(dest, &package.manifest, &source_files(&selected)).await?;
-        let bench_skips = bench_skips(repo_config, &package)?;
+        let mut sources = source_files(&selected);
+        sources.extend(benches.score.iter().map(|target| target.src_path.clone()));
+        restore_fences(dest, &package.manifest, &sources).await?;
         Ok(BuildSet {
             tests: linked,
-            bench_skips,
+            bench_skips: benches.skips,
         })
     }
 
@@ -292,7 +314,11 @@ where
                     .await?;
                 continue;
             }
-            if eligible >= self.config.gate.max_tests || !self.proceed(opts) {
+            // A listed bench is requested by name. The scan cap applies to
+            // discovered tests, not to that list.
+            let scan_capped = test.bench.is_none()
+                && (eligible >= self.config.gate.max_tests || !self.proceed(opts));
+            if scan_capped || (test.bench.is_some() && !self.proceed(opts)) {
                 continue;
             }
             let pair = self.measure_pair(dest, repo_config, test).await?;
@@ -431,7 +457,7 @@ where
                         key,
                         Pick {
                             hot,
-                            test_name: test.identity.discovered.fn_path.clone(),
+                            test_name: test.identity.score_name.clone(),
                             harness: test.identity.logical.clone(),
                             blob,
                             candidate_id: 0,
@@ -505,7 +531,7 @@ where
             }
             let still_eligible = measured
                 .iter()
-                .any(|test| test.eligible && test.identity.discovered.fn_path == pick.test_name);
+                .any(|test| test.eligible && test.identity.score_name == pick.test_name);
             if !still_eligible {
                 continue;
             }
@@ -557,7 +583,7 @@ where
         let base = worktree::head_sha(dest).await?;
         let test = measured
             .iter()
-            .find(|test| test.identity.discovered.fn_path == pick.test_name)
+            .find(|test| test.identity.score_name == pick.test_name)
             .context("candidate test is missing")?;
         self.phase("inferring", &pick.hot.name).await;
         let completion = match self.propose(dest, test, pick, None, None, opts).await? {
@@ -720,7 +746,7 @@ where
         let test_source = function_source(dest, &test.identity.discovered);
         let callees = callee_sources(dest, &hot);
         let messages = model::build_messages(&PromptInput {
-            test_name: &test.identity.discovered.fn_path,
+            test_name: &test.identity.score_name,
             test_source: &test_source,
             hot: &hot,
             callee_sources: &callees,
@@ -790,10 +816,7 @@ where
         base: &str,
         opts: &RunOptions,
     ) -> Result<HostRound> {
-        let first = self
-            .host
-            .run(dest, repo_config, &pick_package(dest, repo_config).await?)
-            .await?;
+        let first = self.confirm_host(dest, repo_config, test).await?;
         if first.success {
             return Ok(HostRound::Ready(
                 completion.summary.clone(),
@@ -830,10 +853,7 @@ where
             return Ok(HostRound::Done);
         }
         worktree::apply(dest, &repair.diff, false).await?;
-        let second = self
-            .host
-            .run(dest, repo_config, &pick_package(dest, repo_config).await?)
-            .await?;
+        let second = self.confirm_host(dest, repo_config, test).await?;
         if second.success {
             return Ok(HostRound::Ready(repair.summary, repair.diff));
         }
@@ -853,6 +873,35 @@ where
         Ok(HostRound::Done)
     }
 
+    /// Host `cargo test`, and for a bench also `cargo bench --no-run`.
+    ///
+    /// `cargo test` does not compile a harness=false bench. A bench that fails
+    /// to build is the same repair as a host-suite failure, still only once.
+    async fn confirm_host(
+        &self,
+        dest: &Path,
+        repo_config: &RepoConfig,
+        test: &ScoredTest,
+    ) -> Result<CheckOutput> {
+        let package = pick_package(dest, repo_config).await?;
+        let check = self.host.run(dest, repo_config, &package).await?;
+        if !check.success {
+            return Ok(check);
+        }
+        let Some(name) = &test.identity.bench else {
+            return Ok(check);
+        };
+        builder::clean_paths(dest, &repo_config.clean_paths)?;
+        match builder::build_bench(dest, &package, name, repo_config).await {
+            Ok(_) => Ok(check),
+            Err(err) => Ok(CheckOutput {
+                success: false,
+                timed_out: false,
+                output: err.to_string(),
+            }),
+        }
+    }
+
     async fn rebuild_one(
         &self,
         dest: &Path,
@@ -862,6 +911,22 @@ where
         builder::clean_paths(dest, &repo_config.clean_paths)?;
         let package = builder::resolve_package(dest, repo_config.package.as_deref()).await?;
         let fence_dir = fence::install_fence_crate(&self.config.data_dir())?;
+        if let Some(name) = &test.identity.bench {
+            ensure_fence_manifest(&package.manifest, &fence_dir)?;
+            inject_main(&test.identity.discovered.file)?;
+            let built = builder::build_bench(dest, &package.name, name, repo_config).await?;
+            let executable = builder::pick_bench(&built, name)?;
+            check_elf(dest, &executable)?;
+            restore_fences(
+                dest,
+                &package.manifest,
+                std::slice::from_ref(&test.identity.discovered.file),
+            )
+            .await?;
+            let mut linked = test.identity.clone();
+            linked.executable = executable;
+            return Ok(linked);
+        }
         let selected = vec![test.identity.discovered.clone()];
         inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
         let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
@@ -886,50 +951,73 @@ where
         builder::clean_paths(dest, &repo_config.clean_paths)?;
         let package = builder::resolve_package(dest, repo_config.package.as_deref()).await?;
         let fence_dir = fence::install_fence_crate(&self.config.data_dir())?;
-        let selected: Vec<DiscoveredTest> = measured
+        let tests: Vec<DiscoveredTest> = measured
             .iter()
+            .filter(|test| test.identity.bench.is_none())
             .map(|test| test.identity.discovered.clone())
             .collect();
-        inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
-        let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
-        let linked =
-            link_harnesses(dest, &selected, &harnesses, repo_config.timeout_seconds).await?;
-        restore_fences(dest, &package.manifest, &source_files(&selected)).await?;
-        for test in measured.iter_mut() {
-            let Some(linked_test) = linked
-                .iter()
-                .find(|item| item.discovered.fn_path == test.identity.discovered.fn_path)
-            else {
-                tracing::warn!(
-                    "rebaseline lost {}; stopping further candidates",
-                    test.identity.discovered.fn_path
-                );
-                return Ok(false);
+        let mut sources = source_files(&tests);
+        let linked = if tests.is_empty() {
+            Vec::new()
+        } else {
+            inject_selected(dest, &package.manifest, &fence_dir, &tests)?;
+            let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
+            link_harnesses(dest, &tests, &harnesses, repo_config.timeout_seconds).await?
+        };
+        let mut bench_bins: HashMap<String, PathBuf> = HashMap::new();
+        if measured.iter().any(|test| test.identity.bench.is_some()) {
+            ensure_fence_manifest(&package.manifest, &fence_dir)?;
+        }
+        for test in measured.iter() {
+            let Some(name) = &test.identity.bench else {
+                continue;
             };
-            test.identity.executable = linked_test.executable.clone();
-            match self.measure_pair(dest, repo_config, linked_test).await? {
+            if bench_bins.contains_key(name) {
+                continue;
+            }
+            inject_main(&test.identity.discovered.file)?;
+            sources.push(test.identity.discovered.file.clone());
+            let built = builder::build_bench(dest, &package.name, name, repo_config).await?;
+            bench_bins.insert(name.clone(), builder::pick_bench(&built, name)?);
+        }
+        restore_fences(dest, &package.manifest, &sources).await?;
+        for test in measured.iter_mut() {
+            if let Some(name) = &test.identity.bench {
+                let Some(executable) = bench_bins.get(name) else {
+                    tracing::warn!("rebaseline lost bench {name}; stopping further candidates");
+                    return Ok(false);
+                };
+                test.identity.executable = executable.clone();
+            } else {
+                let Some(linked_test) = linked
+                    .iter()
+                    .find(|item| item.score_name == test.identity.score_name)
+                else {
+                    tracing::warn!(
+                        "rebaseline lost {}; stopping further candidates",
+                        test.identity.score_name
+                    );
+                    return Ok(false);
+                };
+                test.identity.executable = linked_test.executable.clone();
+            }
+            let label = test.identity.score_name.clone();
+            match self.measure_pair(dest, repo_config, &test.identity).await? {
                 Pair::Match(measurement) => {
                     if measurement.dump.error.is_some() || measurement.total == 0 {
-                        tracing::warn!(
-                            "rebaseline of {} had no fenced count",
-                            test.identity.discovered.fn_path
-                        );
+                        tracing::warn!("rebaseline of {label} had no fenced count");
                         return Ok(false);
                     }
                     test.eligible = measurement.total >= self.config.gate.min_insn_delta;
                     test.baseline = measurement;
                 }
                 Pair::Mismatch => {
-                    tracing::warn!(
-                        "rebaseline of {} disagreed; stopping further candidates",
-                        test.identity.discovered.fn_path
-                    );
+                    tracing::warn!("rebaseline of {label} disagreed; stopping further candidates");
                     return Ok(false);
                 }
                 Pair::Fail(reason) => {
                     tracing::warn!(
-                        "rebaseline of {} failed ({reason}); stopping further candidates",
-                        test.identity.discovered.fn_path
+                        "rebaseline of {label} failed ({reason}); stopping further candidates"
                     );
                     return Ok(false);
                 }
@@ -1098,11 +1186,7 @@ where
                 worktree: dest.to_path_buf(),
                 harness: test.executable.clone(),
                 guest_exe: guest_exe(dest, &test.executable),
-                args: vec![
-                    test.discovered.fn_path.clone(),
-                    "--exact".into(),
-                    "--test-threads=1".into(),
-                ],
+                args: test.guest_args.clone(),
                 timeout_secs: repo_config.timeout_seconds,
                 scratch: scratch.clone(),
                 memory_mb: self.config.guest.memory_mb,
@@ -1167,7 +1251,7 @@ where
             .insert_baseline(
                 run_id,
                 &test.logical,
-                &test.discovered.fn_path,
+                &test.score_name,
                 status,
                 insn_count,
                 stdout_sha256,
@@ -1274,11 +1358,14 @@ struct BuildSet {
     bench_skips: Vec<(String, String)>,
 }
 
-fn bench_skips(
-    repo_config: &RepoConfig,
-    package: &ResolvedPackage,
-) -> Result<Vec<(String, String)>> {
+struct BenchSplit {
+    skips: Vec<(String, String)>,
+    score: Vec<CargoTarget>,
+}
+
+fn split_benches(repo_config: &RepoConfig, package: &ResolvedPackage) -> Result<BenchSplit> {
     let mut skips = Vec::new();
+    let mut score = Vec::new();
     for name in &repo_config.benches {
         let target = package
             .targets
@@ -1290,9 +1377,11 @@ fn bench_skips(
         let src = std::fs::read_to_string(&target.src_path).unwrap_or_default();
         if let Some(reason) = bench_reason(target.harness, &src, package.uses_criterion) {
             skips.push((name.clone(), reason.to_string()));
+        } else {
+            score.push(target.clone());
         }
     }
-    Ok(skips)
+    Ok(BenchSplit { skips, score })
 }
 
 #[derive(Clone)]
@@ -1300,6 +1389,11 @@ struct LinkedTest {
     discovered: DiscoveredTest,
     logical: String,
     executable: PathBuf,
+    /// Libtest path, or the cargo target name of a harness=false bench.
+    score_name: String,
+    guest_args: Vec<String>,
+    /// Set for a bench. The guest runs that binary with no libtest filter.
+    bench: Option<String>,
 }
 
 struct ScoredTest {
@@ -1448,27 +1542,90 @@ async fn link_harnesses(
                 .find(|harness| same_file(&harness.src_path, &test.file))
                 .map(|harness| harness.executable.clone())
                 .unwrap_or_else(|| dest.join("target").join("missing"));
-            linked.push(LinkedTest {
-                logical: listed
+            linked.push(linked_test(
+                test.clone(),
+                listed
                     .iter()
                     .find(|(harness, _)| same_file(&harness.src_path, &test.file))
                     .map(|(harness, _)| harness.logical_name.clone())
                     .unwrap_or_else(|| "unknown".into()),
                 executable,
-                discovered: test.clone(),
-            });
+            ));
             continue;
         }
         let Some((harness, _)) = listed.iter().find(|(_, item)| item.name == test.fn_path) else {
             bail!("built harness did not list {}", test.fn_path);
         };
-        linked.push(LinkedTest {
-            logical: harness.logical_name.clone(),
-            executable: harness.executable.clone(),
-            discovered: test.clone(),
-        });
+        linked.push(linked_test(
+            test.clone(),
+            harness.logical_name.clone(),
+            harness.executable.clone(),
+        ));
     }
     Ok(linked)
+}
+
+fn linked_test(discovered: DiscoveredTest, logical: String, executable: PathBuf) -> LinkedTest {
+    let guest_args = vec![
+        discovered.fn_path.clone(),
+        "--exact".into(),
+        "--test-threads=1".into(),
+    ];
+    LinkedTest {
+        score_name: discovered.fn_path.clone(),
+        guest_args,
+        bench: None,
+        discovered,
+        logical,
+        executable,
+    }
+}
+
+fn linked_bench(
+    package: &ResolvedPackage,
+    target: &CargoTarget,
+    executable: PathBuf,
+) -> LinkedTest {
+    let src = std::fs::read_to_string(&target.src_path).unwrap_or_default();
+    let source = selector::function_spans(&src)
+        .into_iter()
+        .find(|span| span.path == "main")
+        .map(|span| span.source)
+        .unwrap_or_else(|| src.clone());
+    let logical = target
+        .src_path
+        .strip_prefix(&package.workspace_root)
+        .unwrap_or(&target.src_path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    LinkedTest {
+        discovered: DiscoveredTest {
+            name: target.name.clone(),
+            file: target.src_path.clone(),
+            fn_path: "main".into(),
+            body: source.clone(),
+            body_bytes: source.len(),
+            source,
+            skip: None,
+        },
+        logical,
+        executable,
+        score_name: target.name.clone(),
+        guest_args: Vec::new(),
+        bench: Some(target.name.clone()),
+    }
+}
+
+fn ensure_fence_manifest(manifest: &Path, fence_dir: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(manifest)?;
+    std::fs::write(manifest, fence::add_fence_dependency(&text, fence_dir)?)?;
+    Ok(())
+}
+
+fn inject_main(src_path: &Path) -> Result<()> {
+    let src = std::fs::read_to_string(src_path)?;
+    std::fs::write(src_path, fence::inject_guards(&src, &["main".into()])?)?;
+    Ok(())
 }
 
 fn same_file(left: &Path, right: &Path) -> bool {
@@ -2638,5 +2795,179 @@ mod tests {{
         assert!(db.trials_for_run(run.id).await.unwrap().is_empty());
         assert!(db.candidates_for_run(run.id).await.unwrap().is_empty());
         no_perf(repo.path());
+    }
+
+    struct BenchScripted;
+
+    impl Measurer for BenchScripted {
+        async fn measure(
+            &self,
+            req: &crate::ports::MeasureRequest,
+        ) -> Result<crate::ports::Measurement> {
+            assert!(
+                req.args.is_empty(),
+                "a fn main bench is not a libtest filter: {:?}",
+                req.args
+            );
+            assert!(
+                req.harness
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("fold")),
+                "measured {} instead of the fold bench",
+                req.harness.display()
+            );
+            let source =
+                std::fs::read_to_string(req.worktree.join("src/lib.rs")).unwrap_or_default();
+            let total = if source.contains("to_vec") {
+                80_000
+            } else {
+                200_000
+            };
+            let bytes = std::fs::read(&req.harness)?;
+            let addr = encode_pc(&bytes);
+            Ok(crate::ports::Measurement {
+                total,
+                stdout: b"fold\n".to_vec(),
+                stderr: Vec::new(),
+                exit_code: 0,
+                wall_ms: 4,
+                dump: crate::profile::ProfileDump {
+                    total,
+                    blocks: vec![(addr, total * 9 / 10)],
+                    error: None,
+                },
+                map_start: 0,
+                map_end: u64::MAX,
+                load_bias: 0,
+                serial_log: String::new(),
+            })
+        }
+    }
+
+    fn init_bench() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        std::fs::create_dir(path.join("src")).unwrap();
+        std::fs::create_dir(path.join("benches")).unwrap();
+        std::fs::write(path.join(".gitignore"), "/target\n").unwrap();
+        std::fs::write(
+            path.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [[bench]]\nname = \"fold\"\nharness = false\n\n\
+             [[bench]]\nname = \"legacy\"\nharness = true\n",
+        )
+        .unwrap();
+        std::fs::write(
+            path.join("noctum.toml"),
+            "package = \"fixture\"\nbenches = [\"fold\", \"legacy\"]\ntimeout_seconds = 180\n",
+        )
+        .unwrap();
+        std::fs::write(
+            path.join("src/lib.rs"),
+            "#[inline(never)]\npub fn encode(input: &[u8]) -> Vec<u8> {\n    \
+             let mut out = Vec::with_capacity(input.len());\n    \
+             for &byte in input { out.push(byte.wrapping_add(1)); }\n    out\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            path.join("benches/fold.rs"),
+            "use fixture::encode;\n\nfn main() {\n    let mut n = 0usize;\n    \
+             for _ in 0..4_000 {\n        n = n.wrapping_add(encode(b\"abcd\").len());\n    }\n    \
+             assert_eq!(n, 16_000);\n}\n",
+        )
+        .unwrap();
+        std::fs::write(path.join("benches/legacy.rs"), "fn main() {}\n").unwrap();
+        git(path, &["init"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test"]);
+        let lock = std::process::Command::new("cargo")
+            .args(["generate-lockfile"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(lock.success(), "cargo generate-lockfile");
+        git(path, &["add", "."]);
+        git(path, &["commit", "-m", "init"]);
+        dir
+    }
+
+    #[tokio::test]
+    async fn a_listed_fn_main_bench_is_measured_and_can_be_kept() {
+        let repo = init_bench();
+        let head = git(repo.path(), &["rev-parse", "HEAD"]);
+        let fast =
+            "#[inline(never)]\npub fn encode(input: &[u8]) -> Vec<u8> {\n    input.to_vec()\n}\n";
+        std::fs::write(repo.path().join("src/lib.rs"), fast).unwrap();
+        let diff = git(repo.path(), &["diff", "--", "src/lib.rs"]);
+        git(repo.path(), &["checkout", "--", "src/lib.rs"]);
+        assert!(diff.contains("to_vec"), "{diff}");
+        let data = tempfile::tempdir().unwrap();
+        let config = crate::config::Config {
+            data_dir: Some(data.path().to_path_buf()),
+            gate: crate::config::GateConfig {
+                max_candidates: 1,
+                max_tests: 1,
+                ..crate::config::GateConfig::default()
+            },
+            ..crate::config::Config::default()
+        };
+        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
+        db.run_migrations().await.unwrap();
+        let id = db
+            .add_repository(&repo.path().display().to_string(), "fixture")
+            .await
+            .unwrap();
+        let night = Night::new(
+            db.clone(),
+            config,
+            BenchScripted,
+            Fixed { diff },
+            crate::builder::CargoHost,
+        );
+        let row = db.get_repository(id).await.unwrap().unwrap();
+        night
+            .run_repository(
+                &row,
+                &RunOptions {
+                    ignore_window: true,
+                    stop: Arc::new(AtomicBool::new(false)),
+                    asset_error: None,
+                    only_repo: None,
+                },
+            )
+            .await
+            .unwrap();
+        let run = db.latest_run(id).await.unwrap().unwrap();
+        assert_eq!(run.status, "ok", "{:?}", run.error);
+        let baselines = db.baselines_for_run(run.id).await.unwrap();
+        assert!(
+            baselines.iter().any(|row| {
+                row.test_name == "legacy"
+                    && row.status == "skipped_env"
+                    && row.reason.as_deref() == Some("adaptive bench")
+            }),
+            "{baselines:?}"
+        );
+        assert!(
+            baselines
+                .iter()
+                .any(|row| row.test_name == "fold" && row.status == "measured"),
+            "{baselines:?}"
+        );
+        let trials = db.trials_for_run(run.id).await.unwrap();
+        assert_eq!(trials.len(), 1, "{trials:?}");
+        assert_eq!(trials[0].test_name, "fold", "{trials:?}");
+        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
+        assert!(trials[0].symbol.contains("encode"), "{trials:?}");
+        let porcelain = git(repo.path(), &["status", "--porcelain"]);
+        assert!(porcelain.trim().is_empty(), "{porcelain}");
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
+        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
+        assert!(committed.contains("to_vec"), "{committed}");
+        let bench = git(repo.path(), &["show", "noctum/perf:benches/fold.rs"]);
+        assert!(!bench.contains("_noctum_guard"), "{bench}");
+        let manifest = git(repo.path(), &["show", "noctum/perf:Cargo.toml"]);
+        assert!(!manifest.contains("noctum-fence"), "{manifest}");
     }
 }
