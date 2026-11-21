@@ -81,9 +81,12 @@ enum Sample {
 /// Whether the real-pass harness may draw another completion for this candidate.
 ///
 /// A diff that will not apply can be sampled again. A host-check failure already
-/// spent the one repair inside the night, and another night is still allowed.
-/// A lowered fixed `for` bound is a rejected cheat: the plan gives it no repair
-/// and this harness does not take another sample after it.
+/// spent the one repair inside the night. Another night is still allowed when
+/// that failure is a compile error or a rewrite that still walks the input.
+/// A lowered fixed `for` bound and a dropped or rewritten assertion are rejected
+/// before that repair. A diff that deletes the nested scan the assertion
+/// observes fails the host check. This harness does not take another sample
+/// after any of those.
 fn another_sample(reason: &str) -> Sample {
     if reason.starts_with("PROFILE_UNMAPPED") {
         return Sample::Stop("profile could not be mapped back to source");
@@ -94,7 +97,57 @@ fn another_sample(reason: &str) -> Sample {
     if reason.contains("lowers a fixed loop bound") {
         return Sample::Stop("a lowered loop bound ended the night");
     }
+    if reason.contains("removes an assertion") || reason.contains("changes an assertion") {
+        return Sample::Stop("an assertion edit ended the night");
+    }
+    if deletes_asserted_work(reason) {
+        return Sample::Stop("a diff that deletes asserted work ended the night");
+    }
     Sample::Again
+}
+
+/// A host-check failure whose diff removes the nested pair scan and does not
+/// replace it with another walk of the input. The count the test asserts is
+/// gone, so another completion would only be a second try at the same cheat.
+fn deletes_asserted_work(reason: &str) -> bool {
+    if !reason.contains("host check failed") {
+        return false;
+    }
+    let Some(diff) = reason.split_once("diff:\n").map(|(_, diff)| diff) else {
+        return false;
+    };
+    let removed_scan = diff.lines().any(|line| {
+        let Some(body) = line.strip_prefix('-') else {
+            return false;
+        };
+        if body.starts_with('-') {
+            return false;
+        }
+        body.contains("while i < data.len()")
+            || body.contains("while j < data.len()")
+            || (body.contains("data[i]") && body.contains("data[j]"))
+    });
+    if !removed_scan {
+        return false;
+    }
+    let replacement_walks_input = diff.lines().any(|line| {
+        let Some(body) = line.strip_prefix('+') else {
+            return false;
+        };
+        if body.starts_with('+') {
+            return false;
+        }
+        let reads = body.contains("data")
+            || body.contains("byte")
+            || body.contains("freq")
+            || body.contains("input");
+        let walks = body.contains("for ")
+            || body.contains("while ")
+            || body.contains(".iter(")
+            || body.contains("fold");
+        reads && walks
+    });
+    !replacement_walks_input
 }
 
 #[test]
@@ -111,6 +164,24 @@ fn a_lowered_for_bound_ends_sampling_and_a_host_failure_does_not() {
     );
     let unapplied = "attempt 2 status=rejected reason=Some(\"hunk does not match at line 25\")";
     assert!(matches!(another_sample(unapplied), Sample::Again));
+    let dropped = "attempt 1 status=rejected reason=Some(\"diff removes an assertion from the measured test\")\ndiff:\n-    assert_eq!(total, 6400);";
+    assert!(
+        matches!(another_sample(dropped), Sample::Stop(_)),
+        "dropping an assertion must not be sampled again"
+    );
+    let rewritten =
+        "attempt 1 status=rejected reason=Some(\"diff changes an assertion in the measured test\")";
+    assert!(matches!(another_sample(rewritten), Sample::Stop(_)));
+    let deleted = "attempt 1 status=rejected reason=Some(\"host check failed\") summary=Some(\"Return zero\")\ndiff:\n-        while i < data.len() {\n-            if data[i] == data[j] {\n+pub fn equal_pairs(data: &[u8]) -> u64 {\n+    let _ = data;\n+    0\n+}";
+    assert!(
+        matches!(another_sample(deleted), Sample::Stop(_)),
+        "deleting the asserted scan must not be sampled again"
+    );
+    let linear_bug = "attempt 1 status=rejected reason=Some(\"host check failed\") summary=Some(\"Count with a frequency table\")\ndiff:\n-        while j < data.len() {\n+    for &byte in data {\n+        freq[byte as usize] = freq[byte as usize].wrapping_add(1);\n+    }";
+    assert!(
+        matches!(another_sample(linear_bug), Sample::Again),
+        "a rewrite that still walks the input may be sampled again"
+    );
 }
 
 async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Result<(), String> {
