@@ -39,7 +39,10 @@ pub fn build_messages(input: &PromptInput<'_>) -> Vec<ChatMessage> {
 You reduce the number of guest instructions retired inside one single-threaded Rust test body. \
 Preserve assertions, fixed loop bounds, and libtest success. Do not add dependencies. \
 Do not edit noctum.toml, Cargo.toml, or Cargo.lock. Return a unified diff and a short summary. \
-The fence that measures the body is not in the source. Do not delete the work of a fixed loop.";
+The fence that measures the body is not in the source. Do not delete the work of a fixed loop. \
+Begin the diff with a diff --git line. Copy unchanged and removed lines exactly from the source, \
+including indentation. Put every changed line inside a hunk. \
+Delete only work that does not change the value the hot function returns.";
     let mut user = format!(
         "Test: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
         input.test_name,
@@ -111,18 +114,61 @@ impl LlamaManager {
 impl Inferencer for LlamaManager {
     async fn complete(&self, messages: &[ChatMessage], cancel: &AtomicBool) -> Result<Completion> {
         ensure_inference_resources(&self.data_dir)?;
-        let mut last_error = None;
-        for _ in 0..2 {
-            if cancel.load(Ordering::SeqCst) {
-                bail!("inference cancelled");
-            }
-            match oneshot(&self.data_dir, messages, cancel).await {
-                Ok(completion) => return Ok(completion),
-                Err(err) => last_error = Some(err),
-            }
-        }
-        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("llama-server failed")))
+        let server = lockfile::server_path(&self.data_dir);
+        let gguf = lockfile::gguf_path(&self.data_dir);
+        complete_with(&server, &gguf, messages, cancel).await
     }
+}
+
+/// A llama-server binary and a GGUF chosen by the caller.
+///
+/// [`LlamaManager`] is the production path and always loads the GGUF named in
+/// `model.lock.toml`. This endpoint is the same server invocation with an
+/// explicit file, so a machine that cannot hold that model can still run one
+/// real completion.
+pub struct LlamaEndpoint {
+    pub server: PathBuf,
+    pub gguf: PathBuf,
+}
+
+impl Inferencer for LlamaEndpoint {
+    async fn complete(&self, messages: &[ChatMessage], cancel: &AtomicBool) -> Result<Completion> {
+        ensure_gguf_fits(&self.gguf)?;
+        complete_with(&self.server, &self.gguf, messages, cancel).await
+    }
+}
+
+async fn complete_with(
+    server: &Path,
+    gguf: &Path,
+    messages: &[ChatMessage],
+    cancel: &AtomicBool,
+) -> Result<Completion> {
+    let mut last_error = None;
+    for _ in 0..2 {
+        if cancel.load(Ordering::SeqCst) {
+            bail!("inference cancelled");
+        }
+        match oneshot(server, gguf, messages, cancel).await {
+            Ok(completion) => return Ok(completion),
+            Err(err) => last_error = Some(err),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("llama-server failed")))
+}
+
+fn ensure_gguf_fits(gguf: &Path) -> Result<()> {
+    let meta = std::fs::metadata(gguf)
+        .with_context(|| format!("model file {} is missing", gguf.display()))?;
+    let available = mem_available()?;
+    let need = meta.len().saturating_add(1024 * 1024 * 1024);
+    if available < need {
+        bail!(
+            "need {need} bytes of available RAM for {}, have {available}",
+            gguf.display()
+        );
+    }
+    Ok(())
 }
 
 fn ensure_inference_resources(data_dir: &Path) -> Result<()> {
@@ -143,37 +189,25 @@ fn ensure_inference_resources(data_dir: &Path) -> Result<()> {
 }
 
 async fn oneshot(
-    data_dir: &Path,
+    server: &Path,
+    gguf: &Path,
     messages: &[ChatMessage],
     cancel: &AtomicBool,
 ) -> Result<Completion> {
     let port = ephemeral_port()?;
-    let lock = ModelLock::load()?;
     let threads = physical_cores().saturating_sub(1).max(1);
-    let server = lockfile::server_path(data_dir);
-    let gguf = lockfile::gguf_path(data_dir);
-    let mut child = tokio::process::Command::new(&server);
+    let log_path = std::env::temp_dir().join(format!("noctum-llama-{port}.log"));
+    let log_file = std::fs::File::create(&log_path)
+        .with_context(|| format!("create {}", log_path.display()))?;
+    let lib_dir = server.parent().unwrap_or(Path::new("."));
+    let mut child = tokio::process::Command::new(server);
     child
-        .args([
-            "-m",
-            &gguf.to_string_lossy(),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "-c",
-            "16384",
-            "-t",
-            &threads.to_string(),
-            "-ngl",
-            "0",
-            "--jinja",
-        ])
-        .env("LD_LIBRARY_PATH", server.parent().unwrap_or(data_dir))
-        .current_dir(server.parent().unwrap_or(data_dir))
+        .args(server_args(gguf, port, threads))
+        .env("LD_LIBRARY_PATH", lib_dir)
+        .current_dir(lib_dir)
         .kill_on_drop(true)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped());
+        .stderr(log_file);
     #[cfg(unix)]
     {
         child.process_group(0);
@@ -182,15 +216,22 @@ async fn oneshot(
     let pid = child.id().unwrap_or(0);
     let base = format!("http://127.0.0.1:{port}");
     let health = wait_health(&base, cancel).await;
-    if health.is_err() {
+    if let Err(err) = health {
         signal_group(pid, "-KILL");
         let _ = child.kill().await;
-        return health.map(|_| unreachable!());
+        let _ = child.wait().await;
+        bail!("{err}\n{}", log_tail(&log_path));
     }
     let result = chat(&base, messages, cancel).await;
     stop_server(pid, &mut child).await;
-    let _ = lock;
+    let result = result.with_context(|| log_tail(&log_path));
+    let _ = std::fs::remove_file(&log_path);
     result
+}
+
+fn log_tail(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    tail_str(&text, 2000)
 }
 
 async fn wait_health(base: &str, cancel: &AtomicBool) -> Result<()> {
@@ -546,6 +587,7 @@ mod tests {
         let system = &messages[0].content;
         assert!(system.contains("unified diff"));
         assert!(system.contains("Do not add dependencies"));
+        assert!(system.contains("diff --git"));
         assert!(messages[1].content.contains("encode_batch"));
         assert!(messages[1].content.contains("fn encode"));
     }

@@ -45,6 +45,8 @@ pub const LOG_LIMIT: usize = 16 * 1024;
 
 #[cfg(test)]
 mod guest_smoke;
+#[cfg(test)]
+mod real_pass;
 
 #[cfg(test)]
 mod source_tests {

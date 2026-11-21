@@ -10,6 +10,10 @@
 # loads this GGUF. The archive hash was computed from the upstream tarball.
 # The GGUF hash is the Hugging Face LFS oid of
 # qwen2.5-coder-7b-instruct-q5_k_m.gguf.
+#
+# This pin stays on the 7B Q5_K_M file. The ignored test behind
+# qemu/real-pass.sh can point NOCTUM_GGUF at a smaller coder GGUF when the
+# machine cannot hold this file. That override is not a second production model.
 
 llama_cpp_tag = "b12528"
 llama_cpp_url = "https://github.com/ggml-org/llama.cpp/releases/download/b12528/llama-b12528-bin-ubuntu-x64.tar.gz"

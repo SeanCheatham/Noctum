@@ -16,7 +16,9 @@ use crate::diffcheck::{self, parse_diff};
 use crate::gate::{self, GateDecision, GateInput};
 use crate::hashutil::{self, sha256_bytes, sha256_file};
 use crate::model::{self, PromptInput};
-use crate::ports::{Completion, HostCheck, Inferencer, MeasureRequest, Measurement, Measurer};
+use crate::ports::{
+    comparable_stdout, Completion, HostCheck, Inferencer, MeasureRequest, Measurement, Measurer,
+};
 use crate::profile::{self, HotFunction, LineHit};
 use crate::repo_config::RepoConfig;
 use crate::selector::{self, DiscoveredTest, FnSpan};
@@ -586,7 +588,8 @@ where
             repeats_match: true,
             guest_ok: measurement.exit_code == 0 && measurement.dump.error.is_none(),
             host_ok: true,
-            stdout_matches: measurement.stdout == test.baseline.stdout,
+            stdout_matches: comparable_stdout(&measurement.stdout)
+                == comparable_stdout(&test.baseline.stdout),
             diff_ok: true,
             min_improvement_ratio: self.config.gate.min_improvement_ratio,
             min_insn_delta: self.config.gate.min_insn_delta,
@@ -616,7 +619,8 @@ where
                     reason,
                     Some(&completion),
                     true,
-                    measurement.stdout == test.baseline.stdout,
+                    comparable_stdout(&measurement.stdout)
+                        == comparable_stdout(&test.baseline.stdout),
                     Some(&measurement),
                     test,
                 )
