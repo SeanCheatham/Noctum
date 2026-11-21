@@ -503,9 +503,30 @@ where
             if !self.proceed(opts) {
                 break;
             }
+            let still_eligible = measured
+                .iter()
+                .any(|test| test.eligible && test.identity.discovered.fn_path == pick.test_name);
+            if !still_eligible {
+                continue;
+            }
+            // An accept changes the file. The next function was ranked on the
+            // previous blob; it is still tried, and the trial is recorded
+            // against the blob the model actually sees.
             let blob_now = worktree::file_blob(dest, &pick.hot.file).await?;
             if blob_now != pick.blob {
-                continue;
+                if !function_remains(dest, &pick.hot.file, &pick.hot.name) {
+                    continue;
+                }
+                if self
+                    .db
+                    .trial_exists(repo.id, &pick.test_name, &pick.hot.name, &blob_now)
+                    .await?
+                {
+                    continue;
+                }
+                self.db
+                    .set_candidate_blob(pick.candidate_id, &blob_now)
+                    .await?;
             }
             let flow = self
                 .one_trial(repo, opts, run_id, dest, repo_config, measured, pick)
@@ -513,7 +534,9 @@ where
             match flow {
                 TrialFlow::Stop => break,
                 TrialFlow::Accepted if index + 1 < picks.len() && self.proceed(opts) => {
-                    self.rebaseline(dest, repo_config, measured).await?;
+                    if !self.rebaseline(dest, repo_config, measured).await? {
+                        break;
+                    }
                 }
                 TrialFlow::Accepted | TrialFlow::Next => {}
             }
@@ -848,14 +871,16 @@ where
         linked.pop().context("rebuild produced no harness")
     }
 
+    /// `Ok(false)` means a measured test has no new count that repeated.
+    /// Later candidates must not be scored against the pre-accept baseline.
     async fn rebaseline(
         &self,
         dest: &Path,
         repo_config: &RepoConfig,
         measured: &mut [ScoredTest],
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if measured.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
         self.phase("measuring", "rebaseline").await;
         builder::clean_paths(dest, &repo_config.clean_paths)?;
@@ -875,16 +900,42 @@ where
                 .iter()
                 .find(|item| item.discovered.fn_path == test.identity.discovered.fn_path)
             else {
-                continue;
+                tracing::warn!(
+                    "rebaseline lost {}; stopping further candidates",
+                    test.identity.discovered.fn_path
+                );
+                return Ok(false);
             };
             test.identity.executable = linked_test.executable.clone();
-            if let Pair::Match(measurement) =
-                self.measure_pair(dest, repo_config, linked_test).await?
-            {
-                test.baseline = measurement;
+            match self.measure_pair(dest, repo_config, linked_test).await? {
+                Pair::Match(measurement) => {
+                    if measurement.dump.error.is_some() || measurement.total == 0 {
+                        tracing::warn!(
+                            "rebaseline of {} had no fenced count",
+                            test.identity.discovered.fn_path
+                        );
+                        return Ok(false);
+                    }
+                    test.eligible = measurement.total >= self.config.gate.min_insn_delta;
+                    test.baseline = measurement;
+                }
+                Pair::Mismatch => {
+                    tracing::warn!(
+                        "rebaseline of {} disagreed; stopping further candidates",
+                        test.identity.discovered.fn_path
+                    );
+                    return Ok(false);
+                }
+                Pair::Fail(reason) => {
+                    tracing::warn!(
+                        "rebaseline of {} failed ({reason}); stopping further candidates",
+                        test.identity.discovered.fn_path
+                    );
+                    return Ok(false);
+                }
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     async fn accept(
@@ -1574,6 +1625,13 @@ fn guest_exe(dest: &Path, executable: &Path) -> String {
     format!("/work/{}", rel.to_string_lossy().replace('\\', "/"))
 }
 
+fn function_remains(dest: &Path, file: &str, name: &str) -> bool {
+    let text = std::fs::read_to_string(dest.join(file)).unwrap_or_default();
+    selector::function_spans(&text)
+        .iter()
+        .any(|span| span.path == name)
+}
+
 fn scored_ok(measurement: &Measurement) -> bool {
     measurement.exit_code == 0 && measurement.dump.error.is_none() && measurement.total > 0
 }
@@ -1720,6 +1778,10 @@ mod tests {{
     }
 
     fn init_fixture() -> tempfile::TempDir {
+        init_with(&slow_source())
+    }
+
+    fn init_with(lib_src: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
         std::fs::create_dir(path.join("src")).unwrap();
@@ -1734,7 +1796,7 @@ mod tests {{
             "package = \"fixture\"\ntimeout_seconds = 180\n",
         )
         .unwrap();
-        std::fs::write(path.join("src/lib.rs"), slow_source()).unwrap();
+        std::fs::write(path.join("src/lib.rs"), lib_src).unwrap();
         git(path, &["init"]);
         git(path, &["config", "user.email", "test@example.com"]);
         git(path, &["config", "user.name", "Test"]);
@@ -2101,6 +2163,403 @@ mod tests {{
         assert!(git(repo.path(), &["status", "--porcelain"])
             .trim()
             .is_empty());
+    }
+
+    fn two_hot(body: &str) -> String {
+        format!(
+            r#"
+#[inline(never)]
+pub fn helper(n: u64) -> u64 {{
+    let mut acc = 0u64;
+    let mut i = 0u64;
+    while i < 4 {{
+        acc = acc.wrapping_add(n);
+        i = i.wrapping_add(1);
+    }}
+    acc
+}}
+
+#[used]
+static KEEP_HELPER: fn(u64) -> u64 = helper;
+
+#[inline(never)]
+pub fn encode(input: &[u8]) -> Vec<u8> {{
+    let _ = std::hint::black_box(KEEP_HELPER(input.len() as u64));
+    {body}
+}}
+
+#[cfg(test)]
+mod tests {{
+    use super::*;
+
+    #[test]
+    fn tiny_assert() {{
+        assert_eq!(encode(b"a").len(), 1);
+    }}
+
+    #[test]
+    fn encode_batch() {{
+        let _ = std::hint::black_box(helper(4));
+        let mut n = 0usize;
+        for _ in 0..10_000 {{
+            n += encode(b"abcd").len();
+        }}
+        assert_eq!(n, 40_000);
+    }}
+
+    #[test]
+    fn opens_socket() {{
+        let _ = std::net::TcpStream::connect("127.0.0.1:9");
+    }}
+}}
+"#
+        )
+    }
+
+    fn slow_two() -> String {
+        two_hot(
+            "let mut out = Vec::with_capacity(input.len());\n    \
+             for &byte in input { out.push(byte.wrapping_add(1)); }\n    \
+             out",
+        )
+    }
+
+    fn marked(marker: &str) -> String {
+        two_hot(&format!("let _marker = \"{marker}\";\n    input.to_vec()"))
+    }
+
+    fn diff_between(from: &str, to: &str) -> String {
+        let dir = init_with(from);
+        std::fs::write(dir.path().join("src/lib.rs"), to).unwrap();
+        git(dir.path(), &["diff", "--", "src/lib.rs"])
+    }
+
+    fn two_total(source: &str) -> u64 {
+        if source.contains("COUNT_60") {
+            60_000
+        } else if source.contains("COUNT_150") {
+            150_000
+        } else if source.contains("COUNT_100") {
+            100_000
+        } else if source.contains("NOCTUM_SLOW") {
+            400_000
+        } else if source.contains("to_vec") {
+            80_000
+        } else {
+            200_000
+        }
+    }
+
+    /// A PC whose line is inside `name` in `src/lib.rs`. The symbol address
+    /// itself can land in an inlined callee's line table.
+    fn pc_in_function(bytes: &[u8], name: &str) -> u64 {
+        let file = object::File::parse(bytes).unwrap();
+        let needle = format!("::{name}");
+        for symbol in file.symbols() {
+            let Ok(raw) = symbol.name() else { continue };
+            if symbol.address() == 0 {
+                continue;
+            }
+            let demangled = rustc_demangle::demangle(raw).to_string();
+            if !(demangled.ends_with(&needle) || demangled == name) {
+                continue;
+            }
+            let start = symbol.address();
+            let size = symbol.size().max(1);
+            let step = (size / 8).max(1);
+            let mut probes = Vec::new();
+            let mut off = 0u64;
+            while off < size && probes.len() < 16 {
+                probes.push(start + off);
+                off += step;
+            }
+            let Ok(hits) = crate::profile::symbolize(bytes, &probes) else {
+                continue;
+            };
+            for (addr, hit) in probes.iter().zip(hits) {
+                let Some(hit) = hit else { continue };
+                if !hit.file.ends_with("src/lib.rs") || hit.line == 0 {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&hit.file).unwrap_or_default();
+                let inside = selector::function_spans(&text).iter().any(|span| {
+                    span.path == name
+                        && hit.line as usize >= span.line_start
+                        && hit.line as usize <= span.line_end
+                });
+                if inside {
+                    return *addr;
+                }
+            }
+        }
+        0
+    }
+
+    fn two_measurement(
+        req: &crate::ports::MeasureRequest,
+        total: u64,
+    ) -> Result<crate::ports::Measurement> {
+        let bytes = std::fs::read(&req.harness)?;
+        let encode = pc_in_function(&bytes, "encode");
+        let helper = pc_in_function(&bytes, "helper");
+        assert!(
+            encode != 0 && helper != 0 && encode != helper,
+            "encode={encode:#x} helper={helper:#x}"
+        );
+        let blocks = vec![(encode, total * 6 / 10), (helper, total * 3 / 10)];
+        Ok(crate::ports::Measurement {
+            total,
+            stdout: b"test tests::encode_batch ... ok\n".to_vec(),
+            stderr: Vec::new(),
+            exit_code: 0,
+            wall_ms: 4,
+            dump: crate::profile::ProfileDump {
+                total,
+                blocks,
+                error: None,
+            },
+            map_start: 0,
+            map_end: u64::MAX,
+            load_bias: 0,
+            serial_log: String::new(),
+        })
+    }
+
+    struct TwoHot {
+        calls: Arc<AtomicUsize>,
+        diverge_at: Option<usize>,
+    }
+
+    impl Measurer for TwoHot {
+        async fn measure(
+            &self,
+            req: &crate::ports::MeasureRequest,
+        ) -> Result<crate::ports::Measurement> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            let source =
+                std::fs::read_to_string(req.worktree.join("src/lib.rs")).unwrap_or_default();
+            let mut total = two_total(&source);
+            if let Some(at) = self.diverge_at {
+                if n >= at {
+                    total = total.saturating_add((n - at + 1) as u64);
+                }
+            }
+            two_measurement(req, total)
+        }
+    }
+
+    async fn run_two<M, I>(
+        measurer: M,
+        inferencer: I,
+    ) -> (tempfile::TempDir, tempfile::TempDir, Database, i64, String)
+    where
+        M: Measurer,
+        I: Inferencer,
+    {
+        let repo = init_with(&slow_two());
+        let head = git(repo.path(), &["rev-parse", "HEAD"]);
+        let data = tempfile::tempdir().unwrap();
+        let config = crate::config::Config {
+            data_dir: Some(data.path().to_path_buf()),
+            gate: crate::config::GateConfig {
+                max_candidates: 2,
+                max_tests: 1,
+                min_improvement_ratio: 0.01,
+                min_insn_delta: 10_000,
+                ..crate::config::GateConfig::default()
+            },
+            ..crate::config::Config::default()
+        };
+        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
+        db.run_migrations().await.unwrap();
+        let id = db
+            .add_repository(&repo.path().display().to_string(), "fixture")
+            .await
+            .unwrap();
+        let night = Night::new(
+            db.clone(),
+            config,
+            measurer,
+            inferencer,
+            crate::builder::CargoHost,
+        );
+        let row = db.get_repository(id).await.unwrap().unwrap();
+        night
+            .run_repository(
+                &row,
+                &RunOptions {
+                    ignore_window: true,
+                    stop: Arc::new(AtomicBool::new(false)),
+                    asset_error: None,
+                    only_repo: None,
+                },
+            )
+            .await
+            .unwrap();
+        (repo, data, db, id, head)
+    }
+
+    fn assert_two_symbols(symbols: &[String]) {
+        assert!(
+            symbols.iter().any(|symbol| symbol.contains("encode"))
+                && symbols.iter().any(|symbol| symbol.contains("helper")),
+            "{symbols:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_accept_stacks_the_next_function_on_the_new_baseline() {
+        let first = diff_between(&slow_two(), &marked("COUNT_100"));
+        let second = diff_between(&marked("COUNT_100"), &marked("COUNT_60"));
+        assert!(first.contains("COUNT_100"), "{first}");
+        assert!(second.contains("COUNT_60"), "{second}");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (repo, _data, db, id, head) = run_two(
+            TwoHot {
+                calls: Arc::new(AtomicUsize::new(0)),
+                diverge_at: None,
+            },
+            Sequenced {
+                diffs: vec![first, second],
+                calls: calls.clone(),
+            },
+        )
+        .await;
+        let run = db.latest_run(id).await.unwrap().unwrap();
+        assert_eq!(run.status, "ok", "{:?}", run.error);
+        let symbols: Vec<_> = db
+            .candidates_for_run(run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.symbol)
+            .collect();
+        let trials = db.trials_for_run(run.id).await.unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "symbols={symbols:?} trials={trials:?}"
+        );
+        assert_two_symbols(&symbols);
+        assert_eq!(trials.len(), 2, "{trials:?}");
+        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
+        assert_eq!(trials[0].baseline_count, Some(200_000));
+        assert_eq!(trials[0].insn_count, Some(100_000));
+        assert!(
+            trials[0].symbol.contains("encode"),
+            "{:?}",
+            trials[0].symbol
+        );
+        assert_eq!(trials[1].status, "accepted", "{:?}", trials[1].reason);
+        assert_eq!(
+            trials[1].baseline_count,
+            Some(100_000),
+            "second candidate was scored against the original baseline"
+        );
+        assert_eq!(trials[1].insn_count, Some(60_000));
+        assert!(
+            trials[1].symbol.contains("helper"),
+            "{:?}",
+            trials[1].symbol
+        );
+        assert_eq!(
+            git(repo.path(), &["rev-list", "--count", "HEAD..noctum/perf"]).trim(),
+            "2"
+        );
+        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
+        assert!(committed.contains("COUNT_60"), "{committed}");
+        assert!(!committed.contains("_noctum_guard"), "{committed}");
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
+        assert!(git(repo.path(), &["status", "--porcelain"])
+            .trim()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_later_candidate_that_only_beats_the_old_baseline_is_rejected() {
+        let first = diff_between(&slow_two(), &marked("COUNT_100"));
+        let second = diff_between(&marked("COUNT_100"), &marked("COUNT_150"));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (repo, _data, db, id, head) = run_two(
+            TwoHot {
+                calls: Arc::new(AtomicUsize::new(0)),
+                diverge_at: None,
+            },
+            Sequenced {
+                diffs: vec![first, second],
+                calls: calls.clone(),
+            },
+        )
+        .await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let run = db.latest_run(id).await.unwrap().unwrap();
+        assert_eq!(run.status, "ok", "{:?}", run.error);
+        let trials = db.trials_for_run(run.id).await.unwrap();
+        assert_eq!(trials.len(), 2, "{trials:?}");
+        assert_eq!(trials[0].status, "accepted");
+        assert_eq!(trials[1].status, "rejected", "{:?}", trials[1].reason);
+        assert_eq!(trials[1].reason.as_deref(), Some("slower"));
+        assert_eq!(
+            trials[1].baseline_count,
+            Some(100_000),
+            "150_000 would clear the original 200_000 baseline"
+        );
+        assert_eq!(trials[1].insn_count, Some(150_000));
+        assert_eq!(
+            git(repo.path(), &["rev-list", "--count", "HEAD..noctum/perf"]).trim(),
+            "1"
+        );
+        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
+        assert!(committed.contains("COUNT_100"), "{committed}");
+        assert!(!committed.contains("COUNT_150"), "{committed}");
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
+        assert!(git(repo.path(), &["status", "--porcelain"])
+            .trim()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_disagreed_rebaseline_does_not_score_the_next_candidate() {
+        let first = diff_between(&slow_two(), &marked("COUNT_100"));
+        let second = diff_between(&marked("COUNT_100"), &marked("COUNT_60"));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (repo, _data, db, id, head) = run_two(
+            TwoHot {
+                calls: Arc::new(AtomicUsize::new(0)),
+                diverge_at: Some(4),
+            },
+            Sequenced {
+                diffs: vec![first, second],
+                calls: calls.clone(),
+            },
+        )
+        .await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a rebaseline that did not repeat still asked for the next diff"
+        );
+        let run = db.latest_run(id).await.unwrap().unwrap();
+        assert_eq!(run.status, "ok", "{:?}", run.error);
+        let symbols: Vec<_> = db
+            .candidates_for_run(run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.symbol)
+            .collect();
+        assert_two_symbols(&symbols);
+        let trials = db.trials_for_run(run.id).await.unwrap();
+        assert_eq!(trials.len(), 1, "{trials:?}");
+        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
+        assert_eq!(
+            git(repo.path(), &["rev-list", "--count", "HEAD..noctum/perf"]).trim(),
+            "1"
+        );
+        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
+        assert!(committed.contains("COUNT_100"), "{committed}");
+        assert!(!committed.contains("COUNT_60"), "{committed}");
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
     }
 
     struct Unmapped;
