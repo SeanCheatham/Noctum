@@ -1,0 +1,12 @@
+[package]
+name = "noctum-smoke-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Static musl harness measured by qemu/smoke.sh"
+
+[workspace]
+
+[dev-dependencies]
+noctum-fence = { path = "../../../crates/noctum-fence" }

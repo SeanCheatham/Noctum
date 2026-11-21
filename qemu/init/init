@@ -4,11 +4,15 @@
 export PATH=/bin:/sbin
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
 mount -t tmpfs tmpfs /tmp
 echo 0 > /proc/sys/kernel/randomize_va_space
 exec </dev/console >/dev/console 2>&1
 echo NOCTUM_READY
-read -r _noctum_go
+read -r _noctum_go || {
+    echo NOCTUM_READ_FAIL
+    poweroff -f
+}
 mkdir -p /work /scratch
 if ! mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,ro,cache=none work /work; then
     echo NOCTUM_MOUNT_FAIL
@@ -19,6 +23,7 @@ if ! mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600,cache=none scr
     poweroff -f
 fi
 cd /work || cd /
+echo NOCTUM_RUN
 /bin/runner /scratch/job /scratch
 echo NOCTUM_DONE
 poweroff -f

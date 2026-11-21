@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Pinned QEMU guest bundle (`qemu-9.2.0-linux-6.12.10`) with a TCG instruction-count plugin, a musl initramfs, and `qemu/smoke.sh` to boot one fenced harness
+- `noctum qemu install` for a local tarball when the lockfile has a checksum and no download URL
+
 ## [0.2.0] - 2026-11-20
 
 The mutation-testing product ended. Noctum is an overnight daemon that keeps a Rust change when a measured test gets cheaper.

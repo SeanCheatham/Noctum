@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -53,34 +53,49 @@ impl Measurer for QemuRunner {
             scratch: req.scratch.clone(),
             dump: dump_path.clone(),
             serial: serial_sock.clone(),
-            qmp: qmp_sock,
+            qmp: qmp_sock.clone(),
         });
         let started = Instant::now();
-        let mut child = spawn_qemu(&bundle, &args)?;
+        let mut child = spawn_qemu(&bundle, &args, &req.scratch)?;
         let pid = child.id().unwrap_or(0);
-        let go = async {
+        let launch = async {
+            wait_until_running(&qmp_sock).await?;
             let mut serial = connect_unix(&serial_sock).await?;
             serial.write_all(b"go\n").await?;
             serial.flush().await?;
             Ok::<(), anyhow::Error>(())
         };
-        let _ = go.await;
+        let launched = match tokio::time::timeout(Duration::from_secs(90), launch).await {
+            Ok(result) => result,
+            Err(_) => Err(anyhow!("timed out waiting for the guest to accept work")),
+        };
+        if let Err(err) = launched {
+            signal_group(pid, "-KILL");
+            let _ = child.kill().await;
+            bail!("{err}\n{}", qemu_logs(&req.scratch));
+        }
         let timeout = Duration::from_secs(req.timeout_secs);
         let status = tokio::time::timeout(timeout, child.wait()).await;
-        let serial_log =
-            std::fs::read_to_string(req.scratch.join("serial.log")).unwrap_or_default();
+        let serial_log = serial_text(&req.scratch);
         match status {
-            Ok(Ok(status)) if status.success() || status.code().is_some() => {
+            Ok(Ok(status)) if status.code().is_some() => {
                 read_measurement(&req.scratch, &dump_path, started.elapsed(), &serial_log)
             }
             Ok(Ok(_)) | Ok(Err(_)) => {
                 signal_group(pid, "-KILL");
-                bail!("QEMU exited before the guest finished");
+                bail!(
+                    "QEMU exited before the guest finished\n{}",
+                    qemu_logs(&req.scratch)
+                );
             }
             Err(_) => {
                 signal_group(pid, "-KILL");
                 let _ = child.kill().await;
-                bail!("guest timed out after {} seconds", req.timeout_secs);
+                bail!(
+                    "guest timed out after {} seconds\n{}",
+                    req.timeout_secs,
+                    qemu_logs(&req.scratch)
+                );
             }
         }
     }
@@ -112,6 +127,8 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
         launch.memory_mb.to_string(),
         "-display".into(),
         "none".into(),
+        "-L".into(),
+        launch.bundle.join("pc-bios").display().to_string(),
         "-nic".into(),
         "none".into(),
         "-icount".into(),
@@ -126,7 +143,7 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
             .display()
             .to_string(),
         "-append".into(),
-        "console=ttyS0 nokaslr panic=1 loglevel=3".into(),
+        "console=ttyS0,115200 nokaslr panic=1 loglevel=3 earlyprintk=serial".into(),
         "-drive".into(),
         format!(
             "if=none,id=disk,file={},format=qcow2",
@@ -150,8 +167,9 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
         "virtio-9p-pci,fsdev=scratch,mount_tag=scratch".into(),
         "-chardev".into(),
         format!(
-            "socket,id=ser,path={},server=on,wait=off",
-            launch.serial.display()
+            "socket,id=ser,path={},server=on,wait=off,logfile={}",
+            launch.serial.display(),
+            launch.scratch.join("serial.log").display()
         ),
         "-serial".into(),
         "chardev:ser".into(),
@@ -183,13 +201,19 @@ fn ensure_tools(bundle: &Path) -> Result<()> {
             bail!("QEMU bundle is missing {name} in {}", bundle.display());
         }
     }
+    if !bundle.join("pc-bios").join("bios-256k.bin").is_file() {
+        bail!(
+            "QEMU bundle is missing pc-bios/bios-256k.bin in {}",
+            bundle.display()
+        );
+    }
     Ok(())
 }
 
 async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
     let ready = bundle.join("ready.qcow2");
     let stamp = bundle.join("ready.stamp");
-    let current = snapshot_stamp(bundle)?;
+    let current = snapshot_stamp(bundle, memory_mb)?;
     if ready.is_file() && std::fs::read_to_string(&stamp).ok().as_deref() == Some(current.as_str())
     {
         return Ok(());
@@ -198,7 +222,7 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
     let created = process::run(
         bundle,
         &img,
-        &["create", "-f", "qcow2", "ready.qcow2", "64M"],
+        &["create", "-f", "qcow2", "ready.qcow2", "2G"],
         &[],
         Duration::from_secs(30),
     )
@@ -223,22 +247,41 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
         serial: serial.clone(),
         qmp: qmp.clone(),
     });
-    let mut child = spawn_qemu(bundle, &args)?;
+    let mut child = spawn_qemu(bundle, &args, &scratch)?;
     let pid = child.id().unwrap_or(0);
-    let held = hold_until(&serial, "NOCTUM_READY", Duration::from_secs(120)).await;
+    let held = hold_until(&serial, "NOCTUM_READY", Duration::from_secs(180)).await;
     let held = match held {
         Ok(stream) => stream,
         Err(err) => {
             signal_group(pid, "-KILL");
             let _ = child.kill().await;
-            return Err(err);
+            bail!("{err}\n{}", qemu_logs(&scratch));
         }
     };
-    let mut qmp = Qmp::connect(&qmp).await?;
-    qmp.execute(
-        &json!({"execute":"human-monitor-command","arguments":{"command-line":"savevm ready"}}),
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut qmp = match Qmp::connect(&qmp).await {
+        Ok(qmp) => qmp,
+        Err(err) => {
+            signal_group(pid, "-KILL");
+            let _ = child.kill().await;
+            bail!("{err}\n{}", qemu_logs(&scratch));
+        }
+    };
+    let saved = tokio::time::timeout(
+        Duration::from_secs(180),
+        qmp.execute(
+            &json!({"execute":"human-monitor-command","arguments":{"command-line":"savevm ready"}}),
+        ),
     )
-    .await?;
+    .await;
+    if let Err(err) = match saved {
+        Ok(result) => result,
+        Err(_) => Err(anyhow!("savevm timed out")),
+    } {
+        signal_group(pid, "-KILL");
+        let _ = child.kill().await;
+        bail!("savevm failed: {err}\n{}", qemu_logs(&scratch));
+    }
     let _ = qmp.execute(&json!({"execute":"quit"})).await;
     let _ = tokio::time::timeout(Duration::from_secs(30), child.wait()).await;
     drop(held);
@@ -249,8 +292,14 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
 pub async fn fetch(data_dir: &Path) -> Result<()> {
     let lock = crate::lockfile::QemuLock::load()?;
     if !lock.published() {
+        if lock.sha256.is_empty() {
+            bail!(
+                "QEMU bundle {} has no published url and sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
+                lock.id
+            );
+        }
         bail!(
-            "QEMU bundle {} has no published url and sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
+            "QEMU bundle {} is pinned but has no download URL. Build it with qemu/build-bundle.sh and run `noctum qemu install` on the tarball.",
             lock.id
         );
     }
@@ -288,20 +337,22 @@ fn extract_bundle(archive: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn snapshot_stamp(bundle: &Path) -> Result<String> {
+fn snapshot_stamp(bundle: &Path, memory_mb: u32) -> Result<String> {
     let kernel = crate::hashutil::sha256_file(&bundle.join("vmlinuz"))?;
     let initrd = crate::hashutil::sha256_file(&bundle.join("initramfs.cpio.gz"))?;
-    Ok(format!("{kernel} {initrd}\n"))
+    Ok(format!("{kernel} {initrd} {memory_mb}\n"))
 }
 
-fn spawn_qemu(bundle: &Path, args: &[String]) -> Result<tokio::process::Child> {
+fn spawn_qemu(bundle: &Path, args: &[String], log_dir: &Path) -> Result<tokio::process::Child> {
+    let stdout = std::fs::File::create(log_dir.join("qemu.stdout"))?;
+    let stderr = std::fs::File::create(log_dir.join("qemu.stderr"))?;
     let mut command = tokio::process::Command::new(bundle.join("qemu-system-x86_64"));
     command
         .args(args)
         .current_dir(bundle)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
         .kill_on_drop(true);
     #[cfg(unix)]
     {
@@ -377,6 +428,44 @@ fn parse_map(text: &str) -> (u64, u64, u64) {
 fn parse_hex(text: &str) -> u64 {
     let text = text.strip_prefix("0x").unwrap_or(text);
     u64::from_str_radix(text, 16).unwrap_or(0)
+}
+
+fn serial_text(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("serial.log")).unwrap_or_default()
+}
+
+fn qemu_logs(dir: &Path) -> String {
+    let mut out = String::new();
+    for name in ["serial.log", "qemu.stderr", "qemu.stdout"] {
+        let text = std::fs::read_to_string(dir.join(name)).unwrap_or_default();
+        if text.is_empty() {
+            continue;
+        }
+        out.push_str(name);
+        out.push('\n');
+        out.push_str(&crate::hashutil::tail_str(&text, 4096));
+        out.push('\n');
+    }
+    out
+}
+
+async fn wait_until_running(path: &Path) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let mut qmp = Qmp::connect(path).await?;
+    loop {
+        if tokio::time::Instant::now() > deadline {
+            bail!("timed out waiting for the guest to run");
+        }
+        let value = qmp.execute(&json!({"execute":"query-status"})).await?;
+        let running = value
+            .pointer("/return/running")
+            .and_then(|item| item.as_bool())
+            .unwrap_or(false);
+        if running {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 async fn connect_unix(path: &Path) -> Result<UnixStream> {
@@ -462,6 +551,33 @@ impl Qmp {
     }
 }
 
+pub fn install(data_dir: &Path, archive: &Path) -> Result<()> {
+    let lock = crate::lockfile::QemuLock::load()?;
+    if lock.sha256.is_empty() {
+        bail!(
+            "QEMU bundle {} has no sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
+            lock.id
+        );
+    }
+    if !archive.is_file() {
+        bail!("bundle archive {} is missing", archive.display());
+    }
+    let got = crate::hashutil::sha256_file(archive)?;
+    if got != lock.sha256 {
+        bail!("tarball sha256 is {got}, lockfile says {}", lock.sha256);
+    }
+    let dest = crate::lockfile::bundle_archive(data_dir);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if archive.canonicalize().ok() != dest.canonicalize().ok() {
+        std::fs::copy(archive, &dest)?;
+    }
+    extract_bundle(&dest, &crate::lockfile::qemu_dir(data_dir))?;
+    crate::lockfile::verify_qemu(data_dir)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +607,8 @@ mod tests {
         assert!(!text.contains("kvm"));
         assert!(!text.contains("-cpu host"));
         assert!(!text.contains("virtio-rng"));
+        assert!(text.contains("pc-bios"));
+        assert!(text.contains("logfile="));
     }
 
     #[test]
