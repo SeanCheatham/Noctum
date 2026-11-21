@@ -183,6 +183,8 @@ fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
             .map(|lock| {
                 if lock.published() {
                     lock.id
+                } else if !lock.sha256.is_empty() {
+                    format!("{} (pinned, no download URL)", lock.id)
                 } else {
                     format!("{} (not published; run qemu/build-bundle.sh)", lock.id)
                 }

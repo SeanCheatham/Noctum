@@ -44,6 +44,9 @@ pub const PERF_BRANCH: &str = "noctum/perf";
 pub const LOG_LIMIT: usize = 16 * 1024;
 
 #[cfg(test)]
+mod guest_smoke;
+
+#[cfg(test)]
 mod source_tests {
     use std::fs;
     use std::path::Path;

@@ -23,5 +23,7 @@ Thumbs.db
 # QEMU bundle sources and the staged tarball. The lockfile records the hash.
 /qemu/src/
 /qemu/out/
+/qemu/fixtures/harness/target/
+/qemu/fixtures/harness/guest-harness
 
 CLAUDE.md

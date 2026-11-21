@@ -143,14 +143,14 @@ int main(int argc, char **argv)
         _exit(127);
     }
 
-    if (waitpid(pid, &status, 0) < 0) {
+    if (waitpid(pid, &status, WUNTRACED) < 0) {
         perror("waitpid");
         return 6;
     }
     if (WIFSTOPPED(status)) {
         write_maps(pid, args[0], map_path);
         ptrace(PTRACE_DETACH, pid, NULL, NULL);
-        if (waitpid(pid, &status, 0) < 0) {
+        if (waitpid(pid, &status, WUNTRACED) < 0) {
             perror("waitpid");
             return 6;
         }

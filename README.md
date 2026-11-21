@@ -33,7 +33,7 @@ Linux x86_64.
 
 The model is Qwen2.5-Coder-7B-Instruct Q5_K_M, run by the llama.cpp build pinned in `model.lock.toml`. Noctum starts that server for one completion and stops it before QEMU. CPU only.
 
-The guest is the tarball named by `qemu.lock.toml`: a pinned QEMU, the TCG plugin, a pinned kernel, and an initramfs. A distro QEMU is never used. The lockfile ships without a URL or hash until `qemu/build-bundle.sh` has produced a tarball and those fields are filled in. `noctum qemu fetch` refuses until then.
+The guest is the tarball named by `qemu.lock.toml`: a pinned QEMU, the TCG plugin, a pinned kernel, and an initramfs. A distro QEMU is never used. `qemu/build-bundle.sh` prints the tarball sha256. Record that hash in the lockfile. `noctum qemu fetch` downloads `url` when a release hosts the tarball. Until then, `noctum qemu install` checks a local tarball against the hash and unpacks it.
 
 ## Install
 
@@ -103,4 +103,6 @@ The Rust crates are MIT OR Apache-2.0. `qemu/plugin/noctum_profile.c` is GPL-2.0
 
 ## Building the guest
 
-`qemu/build-bundle.sh` downloads QEMU 9.2.0, Linux 6.12.10, and BusyBox 1.36.1, checks their hashes, and stages one tarball. It prints the tarball hash. Put that hash and the release URL into `qemu.lock.toml`. The release workflow builds this bundle on a tag or a manual run and uploads it as an artifact; it does not rewrite the lockfile.
+`qemu/build-bundle.sh` downloads QEMU 9.2.0, Linux 6.12.10, and BusyBox 1.36.1, checks their hashes, and stages one tarball. It prints the tarball hash. Put that hash in `qemu.lock.toml`. Put a release URL there when one hosts the tarball. The release workflow builds this bundle on a tag or a manual run and uploads it as an artifact; it does not rewrite the lockfile.
+
+`qemu/smoke.sh` builds `qemu/fixtures/harness` as a static musl test and boots it twice in the guest. The harness calls `noctum_fence::guard()`. The command prints the instruction counts between the fences. `small_loop` and `encode_batch` must each repeat exactly, and the longer loop must count more. This is not part of `cargo test`.

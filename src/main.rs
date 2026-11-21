@@ -59,7 +59,13 @@ enum ModelCommand {
 
 #[derive(Subcommand)]
 enum QemuCommand {
+    /// Download the bundle named by qemu.lock.toml
     Fetch,
+    /// Install a tarball built by qemu/build-bundle.sh after checking its sha256
+    Install {
+        /// Path to noctum-qemu-*.tar.gz
+        archive: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -81,6 +87,10 @@ async fn main() -> Result<()> {
         },
         Command::Qemu { command } => match command {
             QemuCommand::Fetch => qemu::fetch(&config.data_dir()).await,
+            QemuCommand::Install { archive } => {
+                qemu::install(&config.data_dir(), &archive)?;
+                Ok(())
+            }
         },
         Command::Status => status(&config).await,
     }

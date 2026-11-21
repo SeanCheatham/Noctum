@@ -78,6 +78,8 @@ static void flush_dump(void)
         fprintf(f, "error second_fence\n");
     } else if (state == ST_ARMED) {
         fprintf(f, "error unclosed\n");
+    } else if (state == ST_IDLE) {
+        fprintf(f, "error no_fence\n");
     }
     fclose(f);
     flushed = 1;
@@ -183,6 +185,9 @@ static void vcpu_init(qemu_plugin_id_t id, unsigned int vcpu_index)
         }
     }
     g_array_free(regs, TRUE);
+    if (!rax_handle) {
+        qemu_plugin_outs("noctum_profile: rax register not found\n");
+    }
 }
 
 static void tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
@@ -223,7 +228,7 @@ static void tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
     }
 }
 
-static void on_exit(qemu_plugin_id_t id, void *userdata)
+static void on_plugin_exit(qemu_plugin_id_t id, void *userdata)
 {
     (void)id;
     (void)userdata;
@@ -248,6 +253,6 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
     }
     qemu_plugin_register_vcpu_init_cb(id, vcpu_init);
     qemu_plugin_register_vcpu_tb_trans_cb(id, tb_trans);
-    qemu_plugin_register_atexit_cb(id, on_exit, NULL);
+    qemu_plugin_register_atexit_cb(id, on_plugin_exit, NULL);
     return 0;
 }

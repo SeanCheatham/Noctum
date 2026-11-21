@@ -103,7 +103,7 @@ pub fn verify_model(data_dir: &Path) -> Result<()> {
 
 pub fn verify_qemu(data_dir: &Path) -> Result<()> {
     let lock = QemuLock::load()?;
-    if !lock.published() {
+    if lock.sha256.is_empty() {
         bail!(
             "QEMU bundle {} has no published url and sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
             lock.id
@@ -156,7 +156,7 @@ pub fn qemu_stamp(data_dir: &Path) -> AssetState {
     let Ok(lock) = QemuLock::load() else {
         return AssetState::Mismatch;
     };
-    if !lock.published() {
+    if lock.sha256.is_empty() {
         return AssetState::Missing;
     }
     stamp_state(&bundle_archive(data_dir), &lock.sha256, None)
@@ -213,12 +213,15 @@ mod tests {
     }
 
     #[test]
-    fn qemu_bundle_is_not_published_yet() {
+    fn qemu_bundle_is_pinned_without_a_download_url() {
         let lock = QemuLock::load().unwrap();
         assert_eq!(lock.id, "qemu-9.2.0-linux-6.12.10");
+        assert!(lock.url.is_empty());
+        assert_eq!(lock.sha256.len(), 64);
+        assert!(lock.sha256.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(!lock.published());
         let dir = tempfile::tempdir().unwrap();
         let error = verify_qemu(dir.path()).unwrap_err().to_string();
-        assert!(error.contains("qemu/build-bundle.sh"), "{error}");
+        assert!(error.contains("is missing"), "{error}");
     }
 }

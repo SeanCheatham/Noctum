@@ -52,7 +52,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config python3 ninja-build meson \
-            flex bison libglib2.0-dev libpixman-1-dev
+            flex bison bc cpio libelf-dev libssl-dev \
+            libglib2.0-dev libpixman-1-dev libattr1-dev
 
       - name: Build the measurement bundle
         run: sh qemu/build-bundle.sh

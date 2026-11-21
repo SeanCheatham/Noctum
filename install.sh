@@ -119,7 +119,7 @@ install_noctum() {
     echo "  4. noctum"
     echo "  5. Open http://127.0.0.1:8420"
     echo ""
-    echo "qemu fetch refuses until qemu.lock.toml records a published bundle."
+    echo "qemu fetch needs a published bundle URL. Until then, build qemu/build-bundle.sh and run noctum qemu install on the tarball."
     echo "Configuration: https://github.com/${REPO}/blob/main/config.example.toml"
 }
 
