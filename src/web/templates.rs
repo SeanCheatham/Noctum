@@ -32,7 +32,8 @@ pub struct RepositoryTemplate {
 pub struct TrialTemplate {
     pub test_name: String,
     pub symbol: String,
-    pub status: String,
+    pub outcome: String,
+    pub why: String,
     pub reason: String,
     pub summary: String,
     pub baseline: String,
@@ -76,8 +77,12 @@ pub struct BaselineRow {
 
 pub struct TrialRow {
     pub id: i64,
+    pub symbol: String,
     pub test_name: String,
-    pub status: String,
+    pub before: String,
+    pub after: String,
+    pub result: String,
+    pub why: String,
     pub summary: String,
     pub ratio: String,
 }

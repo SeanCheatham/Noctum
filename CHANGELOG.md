@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The repository page lists each candidate's hot function, the fenced counts before and after the change, and whether the night kept it
 - Pinned QEMU guest bundle (`qemu-9.2.0-linux-6.12.10`) with a TCG instruction-count plugin, a musl initramfs, and `qemu/smoke.sh` to boot one fenced harness
 - `noctum qemu install` for a local tarball when the lockfile has a checksum and no download URL
 - `qemu/real-pass.sh`, an ignored test that asks llama.cpp for one unified diff, rebuilds the musl harness, and keeps the commit only when the fenced count clears the gate

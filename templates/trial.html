@@ -4,11 +4,14 @@
 <p><a href="/">Repositories</a></p>
 <h1>{{ test_name }}</h1>
 <div class="card">
-    <p>Symbol {{ symbol }}</p>
-    <p>Status {{ status }}</p>
+    <p>Hot function {{ symbol }}</p>
+    <p>{{ outcome }}</p>
+    <p>Why {{ why }}</p>
+    {% if reason != "" && reason != why %}
     <p>Gate {{ reason }}</p>
-    <p>Baseline {{ baseline }}</p>
-    <p>Candidate {{ candidate }}</p>
+    {% endif %}
+    {% if baseline != "" %}<p>Before {{ baseline }} instructions</p>{% endif %}
+    {% if candidate != "" %}<p>After {{ candidate }} instructions</p>{% endif %}
     <p>Ratio {{ ratio }}</p>
     <p>{{ summary }}</p>
 </div>
