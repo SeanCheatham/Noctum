@@ -21,7 +21,7 @@ From 22:00 to 06:00, one pass per repository:
 
 `noctum run` and the dashboard "run now" button ignore the window and the one-pass rule.
 
-A test is eligible when two runs agree and the count is at least `min_insn_delta` (default 10,000). A candidate is kept when it is also at least `min_improvement_ratio` (default 1%) cheaper. A diff that drops an assertion, lowers a fixed loop bound, or fails the suite is rejected. The model gets one repair if the build or the host suite fails, and no repair if the diff itself is invalid.
+A test is eligible when two runs agree and the count is at least `min_insn_delta` (default 10,000). A candidate is kept when it is also at least `min_improvement_ratio` (default 1%) cheaper. A diff that drops or rewrites an assertion, lowers a fixed loop bound, or fails the suite is rejected. The model gets one repair if the build or the host suite fails, and no repair if the diff itself is invalid.
 
 ## Prerequisites
 
