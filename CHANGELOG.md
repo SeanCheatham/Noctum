@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A diff that lowers a fixed `for` bound rejects that candidate and is not sampled again. A host-suite failure still gets its one repair.
+- The real-pass harness does not draw another sample after a diff that drops or rewrites an assertion, or after a host failure whose diff deletes the nested scan the assertion observes. A rewrite that still walks the input can be sampled again.
 - A diff that rewrites an assertion in the measured test is rejected, as is one that drops the assertion. The prompt asks for a cheaper algorithm that returns the same value, and no longer tells the model to delete a computation the return value ignores.
 - After an accept, the next hot function in that file is still tried, and it is scored against a fresh baseline. A rebaseline that does not repeat ends the night's remaining candidates.
 
