@@ -270,13 +270,11 @@ pub fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, String> {
         }
         split
     };
-    let mut offset: isize = 0;
+    // Models mis-number hunks. The changed lines are the proposal, so a hunk
+    // that does not sit on its header line is applied where its old lines match.
+    let mut floor = 0usize;
     for hunk in hunks {
-        let mut cursor = if hunk.old_start == 0 {
-            0
-        } else {
-            (hunk.old_start as isize - 1 + offset).max(0) as usize
-        };
+        let mut cursor = locate_hunk(&lines, floor, hunk)?;
         for line in &hunk.lines {
             match line {
                 DiffLine::Context(text) | DiffLine::Del(text) => {
@@ -288,7 +286,6 @@ pub fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, String> {
                     }
                     if matches!(line, DiffLine::Del(_)) {
                         lines.remove(cursor);
-                        offset -= 1;
                     } else {
                         cursor += 1;
                     }
@@ -296,10 +293,10 @@ pub fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, String> {
                 DiffLine::Add(text) => {
                     lines.insert(cursor, text.clone());
                     cursor += 1;
-                    offset += 1;
                 }
             }
         }
+        floor = cursor;
     }
     let mut out = lines.join("\n");
     if keep_newline || original.is_empty() && out.is_empty() {
@@ -313,6 +310,49 @@ pub fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+fn old_lines(hunk: &Hunk) -> Vec<&str> {
+    hunk.lines
+        .iter()
+        .filter_map(|line| match line {
+            DiffLine::Context(text) | DiffLine::Del(text) => Some(text.as_str()),
+            DiffLine::Add(_) => None,
+        })
+        .collect()
+}
+
+fn locate_hunk(lines: &[String], floor: usize, hunk: &Hunk) -> Result<usize, String> {
+    let old = old_lines(hunk);
+    let hint = if hunk.old_start == 0 {
+        0
+    } else {
+        hunk.old_start.saturating_sub(1)
+    };
+    if old.is_empty() {
+        let end = lines.len();
+        return Ok(hint.clamp(floor.min(end), end));
+    }
+    let fits = |start: usize| {
+        start >= floor
+            && start + old.len() <= lines.len()
+            && old
+                .iter()
+                .enumerate()
+                .all(|(index, text)| lines[start + index] == *text)
+    };
+    if fits(hint) {
+        return Ok(hint);
+    }
+    (floor..=lines.len().saturating_sub(old.len()))
+        .find(|start| fits(*start))
+        .ok_or_else(|| {
+            format!(
+                "hunk does not match at line {}: expected {:?}",
+                hint + 1,
+                old.first().copied().unwrap_or("")
+            )
+        })
 }
 
 fn find_fn(src: &str, test_name: &str) -> Result<ItemFn, String> {
@@ -527,5 +567,69 @@ mod tests {
     fn empty_diff_is_rejected() {
         let error = check_diff("", &files(), None, "encode_batch", &[]).unwrap_err();
         assert!(error.contains("empty"), "{error}");
+    }
+
+    #[test]
+    fn a_misnumbered_hunk_is_applied_where_the_old_lines_match() {
+        let original = "alpha\nbeta\ngamma\n";
+        let hunks = vec![Hunk {
+            old_start: 40,
+            lines: vec![
+                DiffLine::Context("alpha".into()),
+                DiffLine::Del("beta".into()),
+                DiffLine::Add("BETA".into()),
+                DiffLine::Context("gamma".into()),
+            ],
+        }];
+        let patched = apply_hunks(original, &hunks).unwrap();
+        assert_eq!(patched, "alpha\nBETA\ngamma\n");
+    }
+
+    #[test]
+    fn an_off_by_one_second_hunk_still_applies() {
+        let original = "alpha\nbeta\n\nfn test() {\n    let n = 1;\n}\n";
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,2 +1,2 @@
+ alpha
+-beta
++BETA
+
+@@ -90,3 +90,3 @@
+ fn test() {
+-    let n = 1;
++    let n = 2;
+ }
+"#;
+        let parsed = parse_diff(diff).unwrap();
+        let patched = apply_hunks(original, &parsed[0].hunks).unwrap();
+        assert_eq!(patched, "alpha\nBETA\n\nfn test() {\n    let n = 2;\n}\n");
+    }
+
+    #[test]
+    fn a_misnumbered_hunk_still_rejects_a_lowered_bound() {
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -80,6 +80,6 @@
+     fn encode_batch() {
+         let mut n = 0u64;
+-        for _ in 0..10_000 {
++        for _ in 0..10 {
+             n = n.wrapping_add(encode(b"abcdefghijklmnopqrstuvwxyz").len() as u64);
+         }
+         assert_eq!(n, 26 * 10_000);
+     }
+"#;
+        let err = check_diff(
+            diff,
+            &files(),
+            Some("src/lib.rs"),
+            "tests::encode_batch",
+            &[],
+        )
+        .unwrap_err();
+        assert!(err.contains("loop bound"), "{err}");
     }
 }

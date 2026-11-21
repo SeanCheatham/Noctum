@@ -112,10 +112,12 @@ pub async fn apply(worktree: &Path, diff: &str, check_only: bool) -> Result<()> 
     let mut file = NamedTempFile::new().context("diff tempfile")?;
     std::io::Write::write_all(&mut file, diff.as_bytes())?;
     let path = file.path().to_string_lossy().to_string();
+    // Models often miscount hunk headers. The changed lines are still the
+    // proposal; `--recount` infers the counts from those lines.
     let args: Vec<&str> = if check_only {
-        vec!["apply", "--check", &path]
+        vec!["apply", "--check", "--recount", &path]
     } else {
-        vec!["apply", &path]
+        vec!["apply", "--recount", &path]
     };
     let output = git(worktree, &args).await?;
     if !output.success {
@@ -304,5 +306,15 @@ mod tests {
         assert!(status_porcelain(repo.path()).await.unwrap().is_empty());
         let shown = show_file(&wt, &sha, "src.txt").await.unwrap();
         assert_eq!(shown, "two\n");
+    }
+
+    #[tokio::test]
+    async fn a_miscounted_hunk_still_applies() {
+        let repo = init_repo().await;
+        let diff = "diff --git a/src.txt b/src.txt\n--- a/src.txt\n+++ b/src.txt\n@@ -1,9 +1,9 @@\n-one\n+two\n";
+        apply(repo.path(), diff, true).await.unwrap();
+        apply(repo.path(), diff, false).await.unwrap();
+        let text = std::fs::read_to_string(repo.path().join("src.txt")).unwrap();
+        assert_eq!(text, "two\n");
     }
 }

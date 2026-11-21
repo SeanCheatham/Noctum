@@ -31,7 +31,7 @@ Linux x86_64.
 - `git` and `cargo`.
 - About 8 GB free for the model download, and enough RAM for the GGUF plus 1 GB before inference starts. The guest is not running while the model is.
 
-The model is Qwen2.5-Coder-7B-Instruct Q5_K_M, run by the llama.cpp build pinned in `model.lock.toml`. Noctum starts that server for one completion and stops it before QEMU. CPU only.
+The model is Qwen2.5-Coder-7B-Instruct Q5_K_M, run by the llama.cpp build pinned in `model.lock.toml`. Noctum starts that server for one completion and stops it before QEMU. CPU only. `qemu/real-pass.sh` is an ignored test of that same loop against a GGUF you already have; it does not change the pin.
 
 The guest is the tarball named by `qemu.lock.toml`: a pinned QEMU, the TCG plugin, a pinned kernel, and an initramfs. A distro QEMU is never used. `qemu/build-bundle.sh` prints the tarball sha256. Record that hash in the lockfile. `noctum qemu fetch` downloads `url` when a release hosts the tarball. Until then, `noctum qemu install` checks a local tarball against the hash and unpacks it.
 
