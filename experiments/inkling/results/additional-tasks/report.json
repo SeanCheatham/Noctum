@@ -1,0 +1,34 @@
+[
+  {
+    "task": "hex",
+    "command": [
+      "/Users/sean/git/Noctum/target/release/examples/model_probe",
+      "complete",
+      "/Users/sean/Library/Caches/noctum-inkling/production-check",
+      "/Users/sean/git/Noctum/experiments/inkling/fixtures/hex.rs",
+      "hex_encode",
+      "encode_batch"
+    ],
+    "seconds": 82.29676924999512,
+    "diffcheck": true,
+    "applies": true,
+    "host_tests": true,
+    "reference_tests": true
+  },
+  {
+    "task": "rotation",
+    "command": [
+      "/Users/sean/git/Noctum/target/release/examples/model_probe",
+      "complete",
+      "/Users/sean/Library/Caches/noctum-inkling/production-check",
+      "/Users/sean/git/Noctum/experiments/inkling/fixtures/rotation.rs",
+      "is_rotation",
+      "encode_batch"
+    ],
+    "seconds": 77.23777599999448,
+    "diffcheck": true,
+    "applies": true,
+    "host_tests": true,
+    "reference_tests": true
+  }
+]

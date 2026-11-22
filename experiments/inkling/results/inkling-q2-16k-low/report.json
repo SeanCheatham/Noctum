@@ -1,0 +1,121 @@
+{
+  "date_utc": "2026-11-22T12:49:45.312025+00:00",
+  "commit": "df2b333f7e35135a4713435c2d0a053318eeae51",
+  "model_sha256": "20292e8142b69535ca88a5d04439d0fdeb4dc698d44c002dca706dcf92901441",
+  "command": [
+    "/Users/sean/Library/Caches/noctum-inkling/runtime/llama-server",
+    "-m",
+    "/Users/sean/Library/Caches/noctum-inkling/Inkling-2-Mini-UD-Q2_K_XL.gguf",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "51325",
+    "-c",
+    "16384",
+    "-ngl",
+    "99",
+    "-np",
+    "1",
+    "-b",
+    "256",
+    "-ub",
+    "128",
+    "--jinja",
+    "--reasoning-effort",
+    "low"
+  ],
+  "server_version": "version: 1.0.0-dev (build 12588, commit 883286076)\nbuilt with AppleClang 21.0.0.21000101 for Darwin arm64 (Compiled by the Unsloth team)",
+  "model_bytes": 9138715328,
+  "samples_requested": 1,
+  "hardware": "Apple M4\n17179869184\n",
+  "scope": "Host inference and patch checks. No guest instruction measurement.",
+  "profile_counts": "Zero values. No guest profile was collected.",
+  "before": {
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 1180598272,
+      "Tiler Utilization %": 4,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 4,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 4,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 42729472,
+      "In use system memory": 540803072
+    },
+    "swap": "vm.swapusage: total = 2048.00M  used = 1595.12M  free = 452.88M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 77%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                    32536.\nPages active:                                 110362.\nPages inactive:                               617893.\nPages speculative:                             24462.\nPages throttled:                                   0.\nPages wired down:                             137492.\nPages purgeable:                                 126.\n\"Translation faults\":                      654500946.\nPages copy-on-write:                         6072065.\nPages zero filled:                         183993223.\nPages reactivated:                           4990355.\nPages purged:                                1687378.\nFile-backed pages:                            692903.\nAnonymous pages:                               59814.\nPages stored in compressor:                   184809.\nPages occupied by compressor:                  85359.\nDecompressions:                              2409424.\nCompressions:                                3878030.\nPageins:                                    20723973.\nPageouts:                                      24598.\nSwapins:                                       11381.\nSwapouts:                                     112844.\n"
+  },
+  "samples": [
+    {
+      "seed": 42,
+      "seconds": 75.48309679199883,
+      "usage": {
+        "completion_tokens": 1261,
+        "prompt_tokens": 494,
+        "total_tokens": 1755,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 494,
+        "prompt_ms": 4607.418,
+        "prompt_per_token_ms": 9.326757085020242,
+        "prompt_per_second": 107.21840301878406,
+        "predicted_n": 1261,
+        "predicted_ms": 70859.045,
+        "predicted_per_token_ms": 56.2373373015873,
+        "predicted_per_second": 17.781780716914827
+      },
+      "finish_reason": "stop",
+      "schema": true,
+      "diffcheck": true,
+      "applies": true,
+      "host_tests": true,
+      "reference_tests": true
+    }
+  ],
+  "load_seconds": 2.0338906250108266,
+  "loaded": {
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 11365580800,
+      "Tiler Utilization %": 32,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 32,
+      "TiledSceneBytes": 851968,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10687021056
+    },
+    "swap": "vm.swapusage: total = 2048.00M  used = 1555.12M  free = 492.88M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 14%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     5238.\nPages active:                                  74399.\nPages inactive:                                72859.\nPages speculative:                               831.\nPages throttled:                                   0.\nPages wired down:                             754321.\nPages purgeable:                                2409.\n\"Translation faults\":                      655512994.\nPages copy-on-write:                         6101343.\nPages zero filled:                         184452201.\nPages reactivated:                           5083276.\nPages purged:                                1702610.\nFile-backed pages:                             72703.\nAnonymous pages:                               75386.\nPages stored in compressor:                   202613.\nPages occupied by compressor:                 100455.\nDecompressions:                              2490232.\nCompressions:                                3972342.\nPageins:                                    20763802.\nPageouts:                                      24690.\nSwapins:                                       13744.\nSwapouts:                                     112844.\n"
+  },
+  "peak_sampled_rss_bytes": 10153132032,
+  "peak_system_gpu_bytes": 10744741888,
+  "after": {
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 1175666688,
+      "Tiler Utilization %": 0,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 0,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 0,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 540704768
+    },
+    "swap": "vm.swapusage: total = 2048.00M  used = 1555.12M  free = 492.88M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 72%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                    48420.\nPages active:                                 111208.\nPages inactive:                               584183.\nPages speculative:                               882.\nPages throttled:                                   0.\nPages wired down:                             177867.\nPages purgeable:                                  34.\n\"Translation faults\":                      655521438.\nPages copy-on-write:                         6102002.\nPages zero filled:                         184452609.\nPages reactivated:                           5083465.\nPages purged:                                1702612.\nFile-backed pages:                            614713.\nAnonymous pages:                               81555.\nPages stored in compressor:                   185998.\nPages occupied by compressor:                  85489.\nDecompressions:                              2493236.\nCompressions:                                3972529.\nPageins:                                    20763949.\nPageouts:                                      24690.\nSwapins:                                       13760.\nSwapouts:                                     112844.\n"
+  }
+}

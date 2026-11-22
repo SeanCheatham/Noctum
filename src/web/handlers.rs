@@ -32,7 +32,10 @@ pub async fn home(State(state): State<Arc<AppState>>) -> Response {
             "{}:00–{}:00",
             config.schedule.start_hour, config.schedule.end_hour
         ),
-        model: format!("{:?}", lockfile::model_stamp(&config.data_dir())),
+        model: format!(
+            "{:?}",
+            lockfile::model_stamp(&config.data_dir(), config.model.quant)
+        ),
         qemu: format!("{:?}", lockfile::qemu_stamp(&config.data_dir())),
         repositories: repos
             .into_iter()
@@ -172,7 +175,7 @@ pub async fn save_settings(
 }
 
 fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
-    let model = lockfile::ModelLock::load().ok();
+    let model = lockfile::ModelLock::load_quant(config.model.quant).ok();
     let qemu = lockfile::QemuLock::load().ok();
     SettingsTemplate {
         start_hour: config.schedule.start_hour,
@@ -291,7 +294,10 @@ pub async fn api_status(State(state): State<Arc<AppState>>) -> Json<StatusBody> 
             .map(|d| d.phase.clone())
             .unwrap_or_else(|| "idle".into()),
         detail: daemon.and_then(|d| d.detail),
-        model: stamp_name(lockfile::model_stamp(&config.data_dir())),
+        model: stamp_name(lockfile::model_stamp(
+            &config.data_dir(),
+            config.model.quant,
+        )),
         qemu: stamp_name(lockfile::qemu_stamp(&config.data_dir())),
     })
 }

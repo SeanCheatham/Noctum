@@ -89,15 +89,15 @@ impl Daemon {
     async fn pass(&self, ignore_window: bool, only_repo: Option<PathBuf>) {
         let config = self.config.read().await.clone();
         let data = config.data_dir();
-        let asset_error = orchestrator::prepare_assets(&data)
+        let asset_error = orchestrator::prepare_assets(&data, config.model.quant)
             .await
             .err()
             .map(|err| err.to_string());
         let night = Night::new(
             self.db.clone(),
-            config,
+            config.clone(),
             QemuRunner::new(data.clone(), self.config.read().await.guest.memory_mb),
-            LlamaManager::new(data),
+            LlamaManager::new(data, config.model.quant),
             CargoHost,
         );
         let opts = RunOptions {

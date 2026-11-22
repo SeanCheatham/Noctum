@@ -1,24 +1,33 @@
-# Local model Noctum runs itself. There is no endpoint list.
-#
-# Qwen2.5-Coder-7B-Instruct, GGUF quant Q5_K_M, from the official Qwen repo.
-# The overnight daemon was developed against the qwen2.5-coder family. This
-# is still the maintained 7B-class instruct GGUF, so it is pinned directly
-# rather than replaced by a larger model. Q5_K_M is the published quant above
-# Q4 (about 5.1 GiB) that fits a 16 GB machine while the guest is stopped.
-#
-# llama.cpp tag b12528 ships a Linux x86_64 CPU build of llama-server that
-# loads this GGUF. The archive hash was computed from the upstream tarball.
-# The GGUF hash is the Hugging Face LFS oid of
-# qwen2.5-coder-7b-instruct-q5_k_m.gguf.
-#
-# This pin stays on the 7B Q5_K_M file. The ignored test behind
-# qemu/real-pass.sh can point NOCTUM_GGUF at a smaller coder GGUF when the
-# machine cannot hold this file. That override is not a second production model.
+# Inkling weights and the matching Unsloth server are checked by SHA-256.
+# Q2 is the default for 16 GB machines. Select Q4 in the model configuration.
 
-llama_cpp_tag = "b12528"
-llama_cpp_url = "https://github.com/ggml-org/llama.cpp/releases/download/b12528/llama-b12528-bin-ubuntu-x64.tar.gz"
-llama_cpp_sha256 = "f21dacb5d6ecd20e6809395ea8080e3758d3ae8cde593b0e3195afe10bf058f3"
-gguf_url = "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q5_k_m.gguf"
-gguf_filename = "qwen2.5-coder-7b-instruct-q5_k_m.gguf"
-gguf_sha256 = "586844eac4d6d6321689f0192c8aa8e69cd8625974a5cc2d925b1a03366e4d16"
-gguf_bytes = 5444831232
+[runtime]
+tag = "b12588-mix-c0c3de8"
+
+[runtime.linux_x86_64]
+url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/app-b12588-mix-c0c3de8-linux-x64-cpu.tar.gz"
+sha256 = "511b22366fa879213eb7f91016d629cdfe0054537f1c3cf46346017d968e7947"
+
+[runtime.linux_aarch64]
+url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/app-b12588-mix-c0c3de8-linux-arm64-cpu.tar.gz"
+sha256 = "c391aab748c9969ad1638bbaf5106325b07e8fd1fb3d0d75d5ec0e43d1386ac4"
+
+[runtime.macos_aarch64]
+url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/llama-b12588-mix-c0c3de8-bin-macos-arm64.tar.gz"
+sha256 = "229def18e27ed740ec4f3a6508f084b25630e08d8a87ada40b00622fc496ceb8"
+
+[runtime.macos_x86_64]
+url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/llama-b12588-mix-c0c3de8-bin-macos-x64.tar.gz"
+sha256 = "142c45991da6361f49855e31fc379a71a04f2d6426ad55753914a0defa6f94ec"
+
+[models.q2]
+url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/Inkling-2-Mini-UD-Q2_K_XL.gguf"
+filename = "Inkling-2-Mini-UD-Q2_K_XL.gguf"
+sha256 = "20292e8142b69535ca88a5d04439d0fdeb4dc698d44c002dca706dcf92901441"
+bytes = 9138715328
+
+[models.q4]
+url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/Inkling-2-Mini-UD-Q4_K_M.gguf"
+filename = "Inkling-2-Mini-UD-Q4_K_M.gguf"
+sha256 = "f90c5a4df44d335ac9f9eea2a15c31d6c5a377b1b3cd9ff7fc2cf123f3cdf7e1"
+bytes = 16610543328

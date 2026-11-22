@@ -177,6 +177,16 @@ pub fn signal_group(pid: u32, signal: &str) {
         .status();
 }
 
+#[cfg(target_os = "macos")]
+fn process_group_id(pid: u32) -> Option<u32> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+#[cfg(not(target_os = "macos"))]
 fn process_group_id(pid: u32) -> Option<u32> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after = stat.rsplit_once(')')?.1;

@@ -1,7 +1,7 @@
 //! llama.cpp owned by Noctum. No other local model server is installed or spoken to.
 //!
 //! The server is started for one completion and stopped before QEMU runs.
-//! `-ngl 0` keeps the GPU out of it.
+//! Apple silicon uses Metal. Linux uses the CPU.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 
+use crate::config::ModelQuant;
 use crate::hashutil::{sha256_file, tail_str};
 use crate::lockfile::{self, ModelLock};
 use crate::ports::{ChatMessage, Completion, Inferencer};
@@ -102,21 +103,23 @@ including indentation. Put every changed line inside a hunk.";
 
 pub struct LlamaManager {
     pub data_dir: PathBuf,
+    pub quant: ModelQuant,
 }
 
 impl LlamaManager {
-    pub fn new(data_dir: impl Into<PathBuf>) -> Self {
+    pub fn new(data_dir: impl Into<PathBuf>, quant: ModelQuant) -> Self {
         Self {
             data_dir: data_dir.into(),
+            quant,
         }
     }
 }
 
 impl Inferencer for LlamaManager {
     async fn complete(&self, messages: &[ChatMessage], cancel: &AtomicBool) -> Result<Completion> {
-        ensure_inference_resources(&self.data_dir)?;
+        ensure_inference_resources(&self.data_dir, self.quant)?;
         let server = lockfile::server_path(&self.data_dir);
-        let gguf = lockfile::gguf_path(&self.data_dir);
+        let gguf = lockfile::gguf_path(&self.data_dir, self.quant);
         complete_with(&server, &gguf, messages, cancel).await
     }
 }
@@ -172,21 +175,8 @@ fn ensure_gguf_fits(gguf: &Path) -> Result<()> {
     Ok(())
 }
 
-fn ensure_inference_resources(data_dir: &Path) -> Result<()> {
-    let lock = ModelLock::load()?;
-    let gguf = lockfile::gguf_path(data_dir);
-    if !gguf.is_file() {
-        bail!("model file is missing");
-    }
-    let available = mem_available()?;
-    let need = lock.gguf_bytes + 1024 * 1024 * 1024;
-    if available < need {
-        bail!(
-            "need {} bytes of available RAM for the model, have {available}",
-            need
-        );
-    }
-    Ok(())
+fn ensure_inference_resources(data_dir: &Path, quant: ModelQuant) -> Result<()> {
+    ensure_gguf_fits(&lockfile::gguf_path(data_dir, quant))
 }
 
 async fn oneshot(
@@ -263,6 +253,8 @@ pub async fn chat(base: &str, messages: &[ChatMessage], cancel: &AtomicBool) -> 
             "content": message.content,
         })).collect::<Vec<_>>(),
         "temperature": 0.2,
+        "reasoning_effort": "low",
+        "max_tokens": 3072,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -302,10 +294,13 @@ pub fn parse_completion(content: &str) -> Result<Completion> {
         summary: String,
         diff: String,
     }
-    let patch: Patch =
+    let mut patch: Patch =
         serde_json::from_str(content.trim()).context("model output was not the patch schema")?;
     if patch.summary.trim().is_empty() || patch.diff.trim().is_empty() {
         bail!("model output was empty");
+    }
+    if !patch.diff.ends_with('\n') {
+        patch.diff.push('\n');
     }
     Ok(Completion {
         summary: patch.summary,
@@ -341,16 +336,36 @@ pub fn server_args(gguf: &Path, port: u16, threads: usize) -> Vec<String> {
         "-t".into(),
         threads.to_string(),
         "-ngl".into(),
-        "0".into(),
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "99"
+        } else {
+            "0"
+        }
+        .into(),
+        "-np".into(),
+        "1".into(),
+        "-b".into(),
+        "256".into(),
+        "-ub".into(),
+        "128".into(),
+        "--reasoning-effort".into(),
+        "low".into(),
         "--jinja".into(),
     ]
 }
 
-pub async fn pull(data_dir: &Path) -> Result<()> {
-    let lock = ModelLock::load()?;
+pub async fn pull(data_dir: &Path, quant: ModelQuant) -> Result<()> {
+    let lock = ModelLock::load_quant(quant)?;
+    std::fs::create_dir_all(data_dir)?;
     let free = free_bytes(data_dir)?;
-    if free < 8 * 1024 * 1024 * 1024 {
-        bail!("need at least 8 GB free under {}", data_dir.display());
+    let gguf = lockfile::gguf_path(data_dir, quant);
+    let model_present = gguf.is_file() && sha256_file(&gguf)? == lock.gguf_sha256;
+    let need = if model_present { 0 } else { lock.gguf_bytes }.saturating_add(512 * 1024 * 1024);
+    if free < need {
+        bail!(
+            "need {need} free bytes under {}, have {free}",
+            data_dir.display()
+        );
     }
     std::fs::create_dir_all(lockfile::model_dir(data_dir))?;
     std::fs::create_dir_all(data_dir.join("models"))?;
@@ -364,13 +379,8 @@ pub async fn pull(data_dir: &Path) -> Result<()> {
         &lockfile::archive_path(data_dir),
         &lockfile::model_dir(data_dir),
     )?;
-    download_verified(
-        &lock.gguf_url,
-        &lockfile::gguf_path(data_dir),
-        &lock.gguf_sha256,
-    )
-    .await?;
-    lockfile::verify_model(data_dir)?;
+    download_verified(&lock.gguf_url, &gguf, &lock.gguf_sha256).await?;
+    lockfile::verify_model(data_dir, quant)?;
     Ok(())
 }
 
@@ -457,14 +467,23 @@ fn extract_llama(archive: &Path, dest: &Path) -> Result<()> {
     for entry in tar.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.to_path_buf();
-        let mut components = path.components();
-        components.next();
-        let relative: PathBuf = components.collect();
-        if relative.as_os_str().is_empty()
-            || relative
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
+        let mut parts = Vec::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::Normal(part) => parts.push(part),
+                _ => bail!("archive path is not relative: {}", path.display()),
+            }
+        }
+        if parts.first().is_some_and(|part| {
+            part.to_str()
+                .and_then(|value| value.strip_prefix("llama-b"))
+                .is_some_and(|value| value.as_bytes().first().is_some_and(u8::is_ascii_digit))
+        }) {
+            parts.remove(0);
+        }
+        let relative: PathBuf = parts.into_iter().collect();
+        if relative.as_os_str().is_empty() {
             continue;
         }
         let out = dest.join(relative);
@@ -484,6 +503,42 @@ fn extract_llama(archive: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+pub fn mem_available() -> Result<u64> {
+    let total = sysctl_number("hw.memsize")?;
+    let output = std::process::Command::new("memory_pressure")
+        .arg("-Q")
+        .output()
+        .context("read memory pressure")?;
+    if !output.status.success() {
+        bail!("memory_pressure failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let percent = text
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("System-wide memory free percentage:")
+                .and_then(|value| value.trim().strip_suffix('%'))
+                .and_then(|value| value.parse::<u64>().ok())
+        })
+        .filter(|value| *value <= 100)
+        .context("memory free percentage is missing")?;
+    Ok(total / 100 * percent)
+}
+
+#[cfg(target_os = "macos")]
+fn sysctl_number(name: &str) -> Result<u64> {
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", name])
+        .output()
+        .context("sysctl")?;
+    if !output.status.success() {
+        bail!("sysctl {name} failed");
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().parse()?)
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn mem_available() -> Result<u64> {
     let text = std::fs::read_to_string("/proc/meminfo").context("read meminfo")?;
     for line in text.lines() {
@@ -506,19 +561,26 @@ pub fn free_bytes(path: &Path) -> Result<u64> {
         }
     }
     let output = std::process::Command::new("df")
-        .args(["-B1", "-P", &path.display().to_string()])
+        .args(["-Pk", &path.display().to_string()])
         .output()
         .context("df")?;
+    if !output.status.success() {
+        bail!("df failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
     let text = String::from_utf8_lossy(&output.stdout);
     let line = text.lines().nth(1).context("df produced no data")?;
     let avail = line
         .split_whitespace()
         .nth(3)
         .context("df available column")?;
-    Ok(avail.parse()?)
+    Ok(avail.parse::<u64>()?.saturating_mul(1024))
 }
 
 pub fn physical_cores() -> usize {
+    #[cfg(target_os = "macos")]
+    if let Ok(cores) = sysctl_number("hw.physicalcpu") {
+        return (cores as usize).max(1);
+    }
     let Ok(text) = std::fs::read_to_string("/proc/cpuinfo") else {
         return fallback_cores();
     };
@@ -600,10 +662,17 @@ mod tests {
     }
 
     #[test]
-    fn server_args_keep_the_gpu_out() {
+    fn server_uses_one_slot_and_low_reasoning() {
         let args = server_args(Path::new("model.gguf"), 9, 3);
         let joined = args.join(" ");
-        assert!(joined.contains("-ngl 0"));
+        let layers = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            99
+        } else {
+            0
+        };
+        assert!(joined.contains(&format!("-ngl {layers}")));
+        assert!(joined.contains("-np 1"));
+        assert!(joined.contains("--reasoning-effort low"));
         assert!(joined.contains("-c 16384"));
         assert!(joined.contains("--host 127.0.0.1"));
     }
@@ -618,6 +687,70 @@ mod tests {
     #[test]
     fn extra_text_is_rejected() {
         assert!(parse_completion("sure, here is a diff").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_completion_without_a_final_newline_can_be_applied() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("a.rs"), "old\n").unwrap();
+        let raw = json!({
+            "summary": "replace the line",
+            "diff": "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new",
+        });
+        let completion = parse_completion(&raw.to_string()).unwrap();
+        crate::worktree::apply(directory.path(), &completion.diff, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("a.rs")).unwrap(),
+            "new\n"
+        );
+    }
+
+    #[test]
+    fn extracts_flat_and_wrapped_server_packages() {
+        for prefix in ["", "llama-b12588-mix-c0c3de8/"] {
+            let temp = tempfile::tempdir().unwrap();
+            let archive = temp.path().join("archive.tar.gz");
+            let encoder = flate2::write::GzEncoder::new(
+                std::fs::File::create(&archive).unwrap(),
+                flate2::Compression::fast(),
+            );
+            let mut tar = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(6);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(&mut header, format!("{prefix}llama-server"), &b"server"[..])
+                .unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+            let dest = temp.path().join("runtime");
+            extract_llama(&archive, &dest).unwrap();
+            assert_eq!(std::fs::read(dest.join("llama-server")).unwrap(), b"server");
+        }
+    }
+
+    #[test]
+    fn host_resource_checks_return_bytes() {
+        assert!(mem_available().unwrap() > 0);
+        let temp = tempfile::tempdir().unwrap();
+        assert!(free_bytes(temp.path()).unwrap() > 1024 * 1024);
+        assert!(physical_cores() > 0);
+    }
+
+    #[tokio::test]
+    async fn sends_low_reasoning_and_the_output_limit() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/chat/completions"))
+            .and(wiremock::matchers::body_partial_json(json!({"reasoning_effort": "low", "max_tokens": 3072})))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"content": "{\"summary\":\"shorter\",\"diff\":\"diff --git a/a b/a\\n\"}"}}],
+            })))
+            .expect(1).mount(&server).await;
+        chat(&server.uri(), &[], &AtomicBool::new(false))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

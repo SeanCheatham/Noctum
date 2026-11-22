@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
         Command::Start => start(config, config_path).await,
         Command::Run { repo } => run_once(config, repo).await,
         Command::Model { command } => match command {
-            ModelCommand::Pull => model::pull(&config.data_dir()).await,
+            ModelCommand::Pull => model::pull(&config.data_dir(), config.model.quant).await,
             ModelCommand::Status => model_status(&config).await,
         },
         Command::Qemu { command } => match command {
@@ -128,7 +128,7 @@ async fn start(config: Config, config_path: Option<PathBuf>) -> Result<()> {
 async fn run_once(config: Config, repo: Option<PathBuf>) -> Result<()> {
     let db = open_db(&config).await?;
     let data = config.data_dir();
-    let asset_error = orchestrator::prepare_assets(&data)
+    let asset_error = orchestrator::prepare_assets(&data, config.model.quant)
         .await
         .err()
         .map(|err| err.to_string());
@@ -136,7 +136,7 @@ async fn run_once(config: Config, repo: Option<PathBuf>) -> Result<()> {
         db,
         config.clone(),
         QemuRunner::new(data.clone(), config.guest.memory_mb),
-        LlamaManager::new(data),
+        LlamaManager::new(data, config.model.quant),
         CargoHost,
     );
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -151,7 +151,7 @@ async fn run_once(config: Config, repo: Option<PathBuf>) -> Result<()> {
 }
 
 async fn model_status(config: &Config) -> Result<()> {
-    match lockfile::verify_model(&config.data_dir()) {
+    match lockfile::verify_model(&config.data_dir(), config.model.quant) {
         Ok(()) => println!("model ok"),
         Err(err) => {
             println!("model: {err}");
@@ -163,7 +163,10 @@ async fn model_status(config: &Config) -> Result<()> {
 
 async fn status(config: &Config) -> Result<()> {
     let data = config.data_dir();
-    println!("model {}", stamp(lockfile::model_stamp(&data)));
+    println!(
+        "model {}",
+        stamp(lockfile::model_stamp(&data, config.model.quant))
+    );
     println!("llama {}", stamp(lockfile::llama_stamp(&data)));
     println!("qemu {}", stamp(lockfile::qemu_stamp(&data)));
     if !config.database_path().is_file() {

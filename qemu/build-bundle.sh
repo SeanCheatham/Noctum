@@ -11,6 +11,7 @@
 # Host packages (Debian/Ubuntu):
 #   build-essential pkg-config python3 ninja-build flex bison bc cpio
 #   libglib2.0-dev libpixman-1-dev libattr1-dev
+# Set GUEST_CROSS_COMPILE=x86_64-linux-gnu- on a Linux ARM host.
 #
 # Pinned sources (sha256 of the upstream archives):
 #   qemu 9.2.0          f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894
@@ -24,6 +25,7 @@ SRC="$ROOT/qemu/src"
 OUT="$ROOT/qemu/out"
 STAGE="$OUT/stage"
 BUNDLE_ID="qemu-9.2.0-linux-6.12.10"
+GUEST_CROSS_COMPILE="${GUEST_CROSS_COMPILE:-}"
 
 QEMU_TAR="qemu-9.2.0.tar.xz"
 QEMU_URL="https://download.qemu.org/qemu-9.2.0.tar.xz"
@@ -158,9 +160,9 @@ if [ ! -f "$SRC/linux-6.12.10/arch/x86/boot/bzImage" ]; then
     echo "configuring and building the kernel"
     (
         cd "$SRC/linux-6.12.10"
-        make tinyconfig
+        make ARCH=x86 CROSS_COMPILE="$GUEST_CROSS_COMPILE" tinyconfig
         ./scripts/kconfig/merge_config.sh -m .config "$ROOT/qemu/kernel.fragment"
-        make olddefconfig
+        make ARCH=x86 CROSS_COMPILE="$GUEST_CROSS_COMPILE" olddefconfig
         for opt in \
             CONFIG_64BIT \
             CONFIG_BLK_DEV_INITRD \
@@ -189,12 +191,12 @@ if [ ! -f "$SRC/linux-6.12.10/arch/x86/boot/bzImage" ]; then
                 exit 1
             fi
         done
-        make -j"$jobs" bzImage
+        make ARCH=x86 CROSS_COMPILE="$GUEST_CROSS_COMPILE" -j"$jobs" bzImage
     )
 fi
 cp "$SRC/linux-6.12.10/arch/x86/boot/bzImage" "$STAGE/vmlinuz"
 
-gcc -std=c11 -static -O2 -Wall -Wextra -o "$OUT/runner" "$ROOT/qemu/runner/runner.c"
+"${GUEST_CROSS_COMPILE}gcc" -std=c11 -static -O2 -Wall -Wextra -o "$OUT/runner" "$ROOT/qemu/runner/runner.c"
 
 BB="$SRC/busybox-1.36.1"
 if [ ! -x "$BB/busybox" ]; then
@@ -203,7 +205,7 @@ if [ ! -x "$BB/busybox" ]; then
         cd "$BB"
         # allnoconfig's second pass forces every bool back to n, so a seeded
         # KCONFIG_ALLCONFIG does not survive. Merge the fragment afterwards.
-        make allnoconfig
+        make ARCH=x86_64 CROSS_COMPILE="$GUEST_CROSS_COMPILE" allnoconfig
         awk '
             NR == FNR {
                 if ($0 ~ /^CONFIG_[A-Za-z0-9_]+=/ || $0 ~ /^# CONFIG_[A-Za-z0-9_]+ is not set$/) {
@@ -226,7 +228,7 @@ if [ ! -x "$BB/busybox" ]; then
             }
         ' "$ROOT/qemu/busybox.fragment" .config > .config.merged
         mv .config.merged .config
-        yes '' | make oldconfig >/dev/null
+        yes '' | make ARCH=x86_64 CROSS_COMPILE="$GUEST_CROSS_COMPILE" oldconfig >/dev/null
         for opt in CONFIG_STATIC CONFIG_BUSYBOX CONFIG_SH_IS_ASH CONFIG_ASH CONFIG_MOUNT CONFIG_POWEROFF; do
             if ! grep -q "^${opt}=y$" .config; then
                 echo "busybox config missing $opt" >&2
@@ -234,7 +236,7 @@ if [ ! -x "$BB/busybox" ]; then
                 exit 1
             fi
         done
-        make -j"$jobs"
+        make ARCH=x86_64 CROSS_COMPILE="$GUEST_CROSS_COMPILE" -j"$jobs"
     )
 fi
 applets="$("$BB/busybox" --list)"

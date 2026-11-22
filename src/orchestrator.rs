@@ -52,10 +52,13 @@ pub struct Night<M, I, H> {
     pub host: H,
 }
 
-pub async fn prepare_assets(data_dir: &Path) -> Result<()> {
-    if lockfile::verify_model(data_dir).is_err() {
-        model::pull(data_dir).await?;
-        lockfile::verify_model(data_dir)?;
+pub async fn prepare_assets(data_dir: &Path, quant: crate::config::ModelQuant) -> Result<()> {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        bail!("overnight measurement requires Linux x86_64; model commands can run on this host");
+    }
+    if lockfile::verify_model(data_dir, quant).is_err() {
+        model::pull(data_dir, quant).await?;
+        lockfile::verify_model(data_dir, quant)?;
     }
     if lockfile::verify_qemu(data_dir).is_err() {
         qemu::fetch(data_dir).await?;
@@ -1850,7 +1853,7 @@ impl Default for CargoHost {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use std::sync::atomic::AtomicUsize;
 

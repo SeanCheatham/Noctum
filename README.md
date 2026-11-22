@@ -25,13 +25,17 @@ A test is eligible when two runs agree and the count is at least `min_insn_delta
 
 ## Prerequisites
 
-Linux x86_64.
+Full overnight runs require Linux x86_64. Model commands also run on macOS. Build from source to use those commands on a Mac. Apple silicon uses Metal. Other supported hosts use the CPU.
 
 - Rustup, with the `x86_64-unknown-linux-musl` target already installed. Noctum does not run `rustup target add`.
 - `git` and `cargo`.
-- About 8 GB free for the model download, and enough RAM for the GGUF plus 1 GB before inference starts. The guest is not running while the model is.
+- At least 10 GB free for the default model and server, plus build space. The memory check requires space for the GGUF plus 1 GiB before inference starts. The guest is not running while the model is.
 
-The model is Qwen2.5-Coder-7B-Instruct Q5_K_M, run by the llama.cpp build pinned in `model.lock.toml`. Noctum starts that server for one completion and stops it before QEMU. CPU only. `qemu/real-pass.sh` is an ignored test of that same loop against a GGUF you already have; it does not change the pin.
+The default model is Inkling 2 Mini UD-Q2_K_XL. Its GGUF file is 9.14 GB. Noctum uses the matching Unsloth llama.cpp build pinned in `model.lock.toml`. Each supported host has a pinned server package. Noctum starts one server slot for one completion and stops it before QEMU runs. The context is 16,384 tokens. Reasoning effort is `low`, and the output limit is 3,072 tokens.
+
+The test on a 16 GiB M4 Mac used about 1.6 GiB of system swap. Four patches passed the host and reference checks on one fixture. See `experiments/inkling/results/summary.json` for the initial results. Those results do not establish general reliability. The later full guest test reduced the count from 665,420 to 49,693 instructions. The hexadecimal and rotation patches also passed their reference tests. See `experiments/inkling/results/integration/report.json` for the acceptance results and test limits.
+
+Set `quant = "q4"` in the `[model]` section of the application configuration to use UD-Q4_K_M on a host with more memory. Its GGUF file is 16.61 GB. Run `noctum model pull` after changing the quant. Q2 and Q4 use separate model files. Both use the pinned server. The resource checks apply to the selected quant.
 
 The guest is the tarball named by `qemu.lock.toml`: a pinned QEMU, the TCG plugin, a pinned kernel, and an initramfs. A distro QEMU is never used. `qemu/build-bundle.sh` prints the tarball sha256. Record that hash in the lockfile. `noctum qemu fetch` downloads `url` when a release hosts the tarball. Until then, `noctum qemu install` checks a local tarball against the hash and unpacks it.
 
@@ -70,7 +74,7 @@ noctum status
 
 ## Configuration
 
-Copy `config.example.toml` to `~/.config/noctum/config.toml`. The schedule, the keep floor, the web bind, and the guest memory live there. The model and the QEMU bundle live in the lockfiles.
+Copy `config.example.toml` to `~/.config/noctum/config.toml`. The schedule, the keep floor, the web bind, and the guest memory live there. The model quant is selected in `[model]`. Model files, server packages, and the QEMU bundle are pinned in the lockfiles.
 
 `perf.db` is created in the data directory. An older `noctum.db` is not opened and is not deleted.
 
@@ -106,3 +110,10 @@ The Rust crates are MIT OR Apache-2.0. `qemu/plugin/noctum_profile.c` is GPL-2.0
 `qemu/build-bundle.sh` downloads QEMU 9.2.0, Linux 6.12.10, and BusyBox 1.36.1, checks their hashes, and stages one tarball. It prints the tarball hash. Put that hash in `qemu.lock.toml`. Put a release URL there when one hosts the tarball. The release workflow builds this bundle on a tag or a manual run and uploads it as an artifact; it does not rewrite the lockfile.
 
 `qemu/smoke.sh` builds `qemu/fixtures/harness` as a static musl test and boots it twice in the guest. The harness calls `noctum_fence::guard()`. The command prints the instruction counts between the fences. `small_loop` and `encode_batch` must each repeat exactly, and the longer loop must count more. This is not part of `cargo test`.
+
+
+## Model acceptance checks
+
+On a Mac with Docker, run `sh experiments/inkling/acceptance.sh DATA_DIRECTORY NEW_OUTPUT_DIRECTORY`. The script builds the pinned guest sources in Linux. It runs the unit tests, the guest smoke test, and the full acceptance test. The Mac runs the production model code. Local files transfer each prompt and completion between the two hosts. Guest measurements and inference run in sequence. The test keeps the exact count checks and the normal acceptance thresholds. One smoke run returned unequal counts; a later run passed. This result is recorded in the acceptance report.
+
+Run `python3 experiments/inkling/check_tasks.py --data DATA_DIRECTORY --output NEW_OUTPUT_DIRECTORY` to check the hexadecimal and rotation fixtures with the production model code. Each patch must pass the patch checks, the fixture tests, and independent reference tests.
