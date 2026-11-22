@@ -1,0 +1,38 @@
+{
+  "max_tokens": 3072,
+  "messages": [
+    {
+      "content": "You reduce the number of guest instructions retired inside one single-threaded Rust test body. Preserve assertions, fixed loop bounds, and libtest success. Do not add dependencies. Do not edit noctum.toml, Cargo.toml, or Cargo.lock. Return a unified diff and a short summary. The fence that measures the body is not in the source. Do not delete the work of a fixed loop. Replace the hot function with a cheaper algorithm that returns the same value for every input. Do not delete a computation the assertions observe, and do not replace it with a constant. Begin the diff with a diff --git line. Copy unchanged and removed lines exactly from the source, including indentation. Put every changed line inside a hunk.",
+      "role": "system"
+    },
+    {
+      "content": "Test: encode_batch\nHot function: equal_pairs\nFile: src/lib.rs\nLines: 3-20\nExclusive instructions: 0\nShare of fenced total: 0.0000\n\nHot function source:\n```rust\n/// Number of ordered pairs `(i, j)` with `data[i] == data[j]`, including `i == j`.\n#[inline(never)]\npub fn equal_pairs(data: &[u8]) -> u64 {\n    let mut count = 0u64;\n    let mut i = 0;\n    while i < data.len() {\n        let mut j = 0;\n        while j < data.len() {\n            if data[i] == data[j] {\n                count = count.wrapping_add(1);\n            }\n            j += 1;\n        }\n        i += 1;\n    }\n    count\n}\n\n```\n\nTest source:\n```rust\nfn encode_batch() {\n    let mut total = 0u64;\n    for seed in 0..32u8 {\n        let data = pattern(seed);\n        total = total.wrapping_add(equal_pairs(&data));\n    }\n    assert_eq!(total, 6400);\n}\n\n\n```\n",
+      "role": "user"
+    }
+  ],
+  "response_format": {
+    "json_schema": {
+      "name": "patch",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "diff": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "diff"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    "type": "json_schema"
+  },
+  "temperature": 0.2,
+  "cache_prompt": false
+}

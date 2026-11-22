@@ -1,0 +1,130 @@
+{
+  "date_utc": "2026-11-22T12:39:19.404655+00:00",
+  "commit": "df2b333f7e35135a4713435c2d0a053318eeae51",
+  "model_sha256": "586844eac4d6d6321689f0192c8aa8e69cd8625974a5cc2d925b1a03366e4d16",
+  "command": [
+    "/Users/sean/Library/Caches/noctum-inkling/runtime/llama-server",
+    "-m",
+    "/Users/sean/Library/Caches/noctum-inkling/qwen2.5-coder-7b-instruct-q5_k_m.gguf",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "51206",
+    "-c",
+    "4096",
+    "-ngl",
+    "99",
+    "-np",
+    "1",
+    "-b",
+    "256",
+    "-ub",
+    "128",
+    "--jinja"
+  ],
+  "server_version": "version: 1.0.0-dev (build 12588, commit 883286076)\nbuilt with AppleClang 21.0.0.21000101 for Darwin arm64 (Compiled by the Unsloth team)",
+  "model_bytes": 5444831232,
+  "hardware": "Apple M4\n17179869184\n",
+  "scope": "Host inference and patch checks. No guest instruction measurement.",
+  "profile_counts": "Zero values. No guest profile was collected.",
+  "before": {
+    "swap": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 70%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     5443.\nPages active:                                 326673.\nPages inactive:                               377765.\nPages speculative:                               263.\nPages throttled:                                   0.\nPages wired down:                             138860.\nPages purgeable:                                  98.\n\"Translation faults\":                      647368442.\nPages copy-on-write:                         5808326.\nPages zero filled:                         182529359.\nPages reactivated:                           4107645.\nPages purged:                                1535084.\nFile-backed pages:                            549793.\nAnonymous pages:                              154908.\nPages stored in compressor:                   374441.\nPages occupied by compressor:                 159100.\nDecompressions:                              1499061.\nCompressions:                                2647478.\nPageins:                                    16829554.\nPageouts:                                      23040.\nSwapins:                                           0.\nSwapouts:                                          0.\n"
+  },
+  "samples": [
+    {
+      "seed": 42,
+      "seconds": 25.91226350000943,
+      "usage": {
+        "completion_tokens": 432,
+        "prompt_tokens": 415,
+        "total_tokens": 847,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 415,
+        "prompt_ms": 2183.391,
+        "prompt_per_token_ms": 5.261183132530121,
+        "prompt_per_second": 190.0713156736471,
+        "predicted_n": 432,
+        "predicted_ms": 23719.058,
+        "predicted_per_token_ms": 55.03261716937355,
+        "predicted_per_second": 18.171042037166906
+      },
+      "finish_reason": "stop",
+      "schema": true,
+      "diffcheck": false,
+      "host_tests": null
+    },
+    {
+      "seed": 43,
+      "seconds": 24.797838750004303,
+      "usage": {
+        "completion_tokens": 420,
+        "prompt_tokens": 415,
+        "total_tokens": 835,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 415,
+        "prompt_ms": 1910.823,
+        "prompt_per_token_ms": 4.6043927710843375,
+        "prompt_per_second": 217.18390452700223,
+        "predicted_n": 420,
+        "predicted_ms": 22880.506,
+        "predicted_per_token_ms": 54.60741288782817,
+        "predicted_per_second": 18.312532074246956
+      },
+      "finish_reason": "stop",
+      "schema": true,
+      "diffcheck": false,
+      "host_tests": null
+    },
+    {
+      "seed": 44,
+      "seconds": 26.129133666996495,
+      "usage": {
+        "completion_tokens": 442,
+        "prompt_tokens": 415,
+        "total_tokens": 857,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 415,
+        "prompt_ms": 1930.697,
+        "prompt_per_token_ms": 4.652281927710843,
+        "prompt_per_second": 214.94828033606518,
+        "predicted_n": 442,
+        "predicted_ms": 24192.639,
+        "predicted_per_token_ms": 54.85859183673469,
+        "predicted_per_second": 18.22868517981854
+      },
+      "finish_reason": "stop",
+      "schema": true,
+      "diffcheck": false,
+      "host_tests": null
+    }
+  ],
+  "load_seconds": 8.163142958001117,
+  "loaded": {
+    "swap": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 32%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     5139.\nPages active:                                 163950.\nPages inactive:                               161618.\nPages speculative:                              1975.\nPages throttled:                                   0.\nPages wired down:                             468577.\nPages purgeable:                                2388.\n\"Translation faults\":                      648201109.\nPages copy-on-write:                         5843817.\nPages zero filled:                         182739262.\nPages reactivated:                           4222234.\nPages purged:                                1541601.\nFile-backed pages:                            240480.\nAnonymous pages:                               87063.\nPages stored in compressor:                   457225.\nPages occupied by compressor:                 206845.\nDecompressions:                              1553144.\nCompressions:                                2793510.\nPageins:                                    17546471.\nPageouts:                                      23290.\nSwapins:                                           0.\nSwapouts:                                          0.\n"
+  },
+  "peak_sampled_rss_bytes": 5819727872,
+  "after": {
+    "swap": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 65%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                    36105.\nPages active:                                 231381.\nPages inactive:                               400414.\nPages speculative:                              1765.\nPages throttled:                                   0.\nPages wired down:                             139194.\nPages purgeable:                                2388.\n\"Translation faults\":                      648203460.\nPages copy-on-write:                         5844317.\nPages zero filled:                         182739508.\nPages reactivated:                           4222234.\nPages purged:                                1541603.\nFile-backed pages:                            551249.\nAnonymous pages:                               82311.\nPages stored in compressor:                   449248.\nPages occupied by compressor:                 199117.\nDecompressions:                              1553569.\nCompressions:                                2793510.\nPageins:                                    17549180.\nPageouts:                                      23290.\nSwapins:                                           0.\nSwapouts:                                          0.\n"
+  }
+}

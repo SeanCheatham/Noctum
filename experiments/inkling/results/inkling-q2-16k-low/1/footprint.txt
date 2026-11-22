@@ -1,0 +1,43 @@
+======================================================================
+llama-server [62771]: 64-bit    Footprint: 1208049776 B (16384 bytes per page)
+======================================================================
+
+      Dirty         Clean   Reclaimable    Regions    Category
+        ---           ---           ---        ---    ---
+756006912 B           0 B           0 B         34    Untagged
+277200896 B           0 B           0 B         38    Malloc Large
+ 82427904 B           0 B           0 B         28    Malloc Small
+ 46137344 B           0 B           0 B         22    Owned physical footprint (unmapped) (graphics)
+ 36241408 B           0 B           0 B       1159    IOAccelerator (graphics)
+  5693552 B           0 B           0 B          1    page table
+  1310720 B           0 B           0 B         10    Malloc Metadata
+   976185 B     6569984 B           0 B        382    __DATA
+   518410 B           0 B           0 B        403    __DATA_DIRTY
+   491520 B           0 B           0 B         42    Stack
+   294912 B           0 B           0 B          1    Malloc Tiny
+   262144 B           0 B           0 B          6    IOAccelerator
+   120661 B           0 B           0 B       1272    unused dyld shared cache area
+    81920 B           0 B           0 B          3    Malloc Nano
+    65536 B           0 B           0 B          4    IOKit
+    65464 B           0 B           0 B          4    __TPRO_CONST
+    36424 B           0 B           0 B          1    __OBJC_RW
+    32768 B           0 B           0 B          1    Deferred Reclaim
+    32768 B           0 B           0 B          1    Activity Tracing
+    27576 B      327680 B           0 B        411    __DATA_CONST
+    16384 B           0 B           0 B          1    OS Alloc Once
+     8368 B           0 B           0 B        179    __AUTH
+        0 B  8916647936 B           0 B          9    mapped file
+        0 B     6340608 B           0 B        485    __TEXT
+        0 B      540672 B           0 B         12    __LINKEDIT
+        0 B           0 B           0 B          1    __CTF
+        0 B           0 B           0 B        403    __AUTH_CONST
+        0 B           0 B           0 B          1    __FONT_DATA
+        0 B           0 B           0 B          1    IOSurface
+        0 B           0 B           0 B          1    __OBJC_RO
+        ---           ---           ---        ---    ---
+1208049776 B  8930426880 B           0 B       4918    TOTAL
+
+Auxiliary data:
+    phys_footprint: 1208049776 B
+    phys_footprint_peak: 1208049776 B
+

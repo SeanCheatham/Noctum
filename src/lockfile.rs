@@ -5,13 +5,13 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::path::Path;
 
+use crate::config::ModelQuant;
 use crate::hashutil::sha256_file;
 
 const MODEL_TOML: &str = include_str!("../model.lock.toml");
 const QEMU_TOML: &str = include_str!("../qemu.lock.toml");
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone)]
 pub struct ModelLock {
     pub llama_cpp_tag: String,
     pub llama_cpp_url: String,
@@ -20,6 +20,46 @@ pub struct ModelLock {
     pub gguf_filename: String,
     pub gguf_sha256: String,
     pub gguf_bytes: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelFile {
+    runtime: RuntimeFile,
+    models: ModelsFile,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeFile {
+    tag: String,
+    linux_x86_64: Archive,
+    linux_aarch64: Archive,
+    macos_aarch64: Archive,
+    macos_x86_64: Archive,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Archive {
+    url: String,
+    sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelsFile {
+    q2: Weights,
+    q4: Weights,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Weights {
+    url: String,
+    filename: String,
+    sha256: String,
+    bytes: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -32,7 +72,35 @@ pub struct QemuLock {
 
 impl ModelLock {
     pub fn load() -> Result<Self> {
-        toml::from_str(MODEL_TOML).context("parse model.lock.toml")
+        Self::load_quant(ModelQuant::default())
+    }
+
+    pub fn load_quant(quant: ModelQuant) -> Result<Self> {
+        Self::for_platform(quant, std::env::consts::OS, std::env::consts::ARCH)
+    }
+
+    fn for_platform(quant: ModelQuant, os: &str, arch: &str) -> Result<Self> {
+        let file: ModelFile = toml::from_str(MODEL_TOML).context("parse model.lock.toml")?;
+        let archive = match (os, arch) {
+            ("linux", "x86_64") => file.runtime.linux_x86_64,
+            ("linux", "aarch64") => file.runtime.linux_aarch64,
+            ("macos", "aarch64") => file.runtime.macos_aarch64,
+            ("macos", "x86_64") => file.runtime.macos_x86_64,
+            _ => bail!("model inference is not supported on {os} {arch}"),
+        };
+        let weights = match quant {
+            ModelQuant::Q2 => file.models.q2,
+            ModelQuant::Q4 => file.models.q4,
+        };
+        Ok(Self {
+            llama_cpp_tag: file.runtime.tag,
+            llama_cpp_url: archive.url,
+            llama_cpp_sha256: archive.sha256,
+            gguf_url: weights.url,
+            gguf_filename: weights.filename,
+            gguf_sha256: weights.sha256,
+            gguf_bytes: weights.bytes,
+        })
     }
 }
 
@@ -56,7 +124,14 @@ pub enum AssetState {
 
 pub fn model_dir(data_dir: &Path) -> std::path::PathBuf {
     let lock = ModelLock::load().expect("model lockfile");
-    data_dir.join("llama.cpp").join(lock.llama_cpp_tag)
+    data_dir
+        .join("llama.cpp")
+        .join(lock.llama_cpp_tag)
+        .join(format!(
+            "{}-{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ))
 }
 
 pub fn archive_path(data_dir: &Path) -> std::path::PathBuf {
@@ -67,8 +142,8 @@ pub fn server_path(data_dir: &Path) -> std::path::PathBuf {
     model_dir(data_dir).join("llama-server")
 }
 
-pub fn gguf_path(data_dir: &Path) -> std::path::PathBuf {
-    let lock = ModelLock::load().expect("model lockfile");
+pub fn gguf_path(data_dir: &Path, quant: ModelQuant) -> std::path::PathBuf {
+    let lock = ModelLock::load_quant(quant).expect("model lockfile");
     data_dir.join("models").join(lock.gguf_filename)
 }
 
@@ -82,8 +157,8 @@ pub fn bundle_archive(data_dir: &Path) -> std::path::PathBuf {
 }
 
 /// Full hash check used before a night and by `noctum model status`.
-pub fn verify_model(data_dir: &Path) -> Result<()> {
-    let lock = ModelLock::load()?;
+pub fn verify_model(data_dir: &Path, quant: ModelQuant) -> Result<()> {
+    let lock = ModelLock::load_quant(quant)?;
     expect_hash(
         &archive_path(data_dir),
         &lock.llama_cpp_sha256,
@@ -92,7 +167,7 @@ pub fn verify_model(data_dir: &Path) -> Result<()> {
     if !server_path(data_dir).is_file() {
         bail!("llama-server is not extracted");
     }
-    let gguf = gguf_path(data_dir);
+    let gguf = gguf_path(data_dir, quant);
     expect_hash(&gguf, &lock.gguf_sha256, "model")?;
     let len = std::fs::metadata(&gguf)?.len();
     if len != lock.gguf_bytes {
@@ -126,12 +201,12 @@ pub fn verify_qemu(data_dir: &Path) -> Result<()> {
 
 /// Dashboard check. It compares the stamp written after a verified download
 /// and the file length. The night hashes the bytes again.
-pub fn model_stamp(data_dir: &Path) -> AssetState {
-    let Ok(lock) = ModelLock::load() else {
+pub fn model_stamp(data_dir: &Path, quant: ModelQuant) -> AssetState {
+    let Ok(lock) = ModelLock::load_quant(quant) else {
         return AssetState::Mismatch;
     };
     stamp_state(
-        &gguf_path(data_dir),
+        &gguf_path(data_dir, quant),
         &lock.gguf_sha256,
         Some(lock.gguf_bytes),
     )
@@ -203,13 +278,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_lock_pins_the_coder_quant() {
+    fn model_lock_selects_matching_packages_and_quant_files() {
         let lock = ModelLock::load().unwrap();
-        assert_eq!(lock.llama_cpp_tag, "b12528");
-        assert!(lock.gguf_filename.contains("q5_k_m"));
+        assert_eq!(lock.llama_cpp_tag, "b12588-mix-c0c3de8");
+        assert!(lock.gguf_filename.contains("UD-Q2_K_XL"));
         assert_eq!(lock.gguf_sha256.len(), 64);
         assert_eq!(lock.llama_cpp_sha256.len(), 64);
-        assert!(lock.gguf_bytes > 5_000_000_000);
+        assert_eq!(lock.gguf_bytes, 9_138_715_328);
+        for (os, arch, package) in [
+            ("linux", "x86_64", "linux-x64-cpu"),
+            ("linux", "aarch64", "linux-arm64-cpu"),
+            ("macos", "aarch64", "macos-arm64"),
+            ("macos", "x86_64", "macos-x64"),
+        ] {
+            let small = ModelLock::for_platform(ModelQuant::Q2, os, arch).unwrap();
+            let large = ModelLock::for_platform(ModelQuant::Q4, os, arch).unwrap();
+            assert!(small.llama_cpp_url.contains(package));
+            assert_eq!(small.llama_cpp_sha256, large.llama_cpp_sha256);
+            assert_ne!(small.gguf_sha256, large.gguf_sha256);
+            assert!(large.gguf_filename.contains("UD-Q4_K_M"));
+            assert!(large.gguf_bytes > small.gguf_bytes);
+            assert_ne!(
+                gguf_path(Path::new("data"), ModelQuant::Q2),
+                gguf_path(Path::new("data"), ModelQuant::Q4)
+            );
+        }
+        assert!(ModelLock::for_platform(ModelQuant::Q2, "windows", "x86_64").is_err());
     }
 
     #[test]

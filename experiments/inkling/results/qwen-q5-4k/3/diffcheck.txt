@@ -1,0 +1,1 @@
+Error: hunk does not match at line 3: expected "/// Number of ordered pairs `(i, j)` with `data[i] == data[j]`, including `i == j`."

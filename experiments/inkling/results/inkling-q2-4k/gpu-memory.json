@@ -1,0 +1,2594 @@
+[
+  {
+    "seconds": 5.916008376516402e-06,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651762688,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 56,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004840448
+    }
+  },
+  {
+    "seconds": 1.019712541004992,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 49,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 49,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004627456
+    }
+  },
+  {
+    "seconds": 2.044291083002463,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 61,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 61,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004627456
+    }
+  },
+  {
+    "seconds": 3.0613582500081975,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 58,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 58,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9965649920
+    }
+  },
+  {
+    "seconds": 4.086662790999981,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 55,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 55,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004824064
+    }
+  },
+  {
+    "seconds": 5.112766040998395,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 42,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 42,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10008985600
+    }
+  },
+  {
+    "seconds": 6.1394070829992415,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 59,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 58,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 7.164013291010633,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650746880,
+      "Tiler Utilization %": 60,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 60,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10003759104
+    }
+  },
+  {
+    "seconds": 8.1897461660119,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 9.207960583007662,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 47,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 47,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 10.233112916001119,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 62,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 62,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 11.259191290999297,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 64,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 64,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004889600
+    }
+  },
+  {
+    "seconds": 12.285560290998546,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 34,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 34,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 93,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004627456
+    }
+  },
+  {
+    "seconds": 13.30331220800872,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650746880,
+      "Tiler Utilization %": 30,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 30,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9778069504
+    }
+  },
+  {
+    "seconds": 14.325309708001441,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10643161088,
+      "Tiler Utilization %": 21,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 21,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 15.341400208009873,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10633969664,
+      "Tiler Utilization %": 23,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 23,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9777774592
+    }
+  },
+  {
+    "seconds": 16.36743962499895,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10628481024,
+      "Tiler Utilization %": 23,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 23,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 17.392649333007284,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10620420096,
+      "Tiler Utilization %": 26,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 26,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 18.417844208001043,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10616225792,
+      "Tiler Utilization %": 27,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 27,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 19.44300287500664,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10614128640,
+      "Tiler Utilization %": 26,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 26,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 20.46828812500462,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10613800960,
+      "Tiler Utilization %": 35,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 35,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9830203392
+    }
+  },
+  {
+    "seconds": 21.484905041012098,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10611703808,
+      "Tiler Utilization %": 25,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 25,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9856073728
+    }
+  },
+  {
+    "seconds": 22.51053466599842,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10531782656,
+      "Tiler Utilization %": 26,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 26,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9856073728
+    }
+  },
+  {
+    "seconds": 23.537050915998407,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10519592960,
+      "Tiler Utilization %": 28,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 28,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 35520512,
+      "In use system memory": 9859973120
+    }
+  },
+  {
+    "seconds": 24.562012041002163,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10518790144,
+      "Tiler Utilization %": 28,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 28,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 35520512,
+      "In use system memory": 9855270912
+    }
+  },
+  {
+    "seconds": 25.58748229101184,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10519592960,
+      "Tiler Utilization %": 19,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 19,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 35520512,
+      "In use system memory": 9778839552
+    }
+  },
+  {
+    "seconds": 26.61314170800324,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10519592960,
+      "Tiler Utilization %": 25,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 25,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 35520512,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 27.638299166006618,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10519592960,
+      "Tiler Utilization %": 24,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 24,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 35520512,
+      "In use system memory": 9778577408
+    }
+  },
+  {
+    "seconds": 28.663339999999152,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 39,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 39,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10009051136
+    }
+  },
+  {
+    "seconds": 29.686602540998138,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 66,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 66,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10009247744
+    }
+  },
+  {
+    "seconds": 30.712007666006684,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 44,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 44,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 31.732920958005707,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 59,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 59,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10008985600
+    }
+  },
+  {
+    "seconds": 32.75943062501028,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 50,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 50,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 33.77745716601203,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 73,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 73,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 34.79434649999894,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 40,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 40,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 93,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004660224
+    }
+  },
+  {
+    "seconds": 35.8240595410025,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 73,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 73,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9965912064
+    }
+  },
+  {
+    "seconds": 36.84404804100632,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 37.86986816600256,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650746880,
+      "Tiler Utilization %": 65,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 65,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10003759104
+    }
+  },
+  {
+    "seconds": 38.89536712500558,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650746880,
+      "Tiler Utilization %": 37,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 37,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10003496960
+    }
+  },
+  {
+    "seconds": 39.91393104101007,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650746880,
+      "Tiler Utilization %": 73,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 73,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004021248
+    }
+  },
+  {
+    "seconds": 40.939497541010496,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 25,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 25,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004299776
+    }
+  },
+  {
+    "seconds": 41.965712750010425,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 60,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 60,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004561920
+    }
+  },
+  {
+    "seconds": 42.98851337500673,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 46,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 46,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10008985600
+    }
+  },
+  {
+    "seconds": 44.010795166002936,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 54,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 54,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 45.037206749999314,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 29,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 29,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005348352
+    }
+  },
+  {
+    "seconds": 46.06200275001174,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 56,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 56,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 92,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10010034176
+    }
+  },
+  {
+    "seconds": 47.08109345800767,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 36,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 36,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 48.10522195800149,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 51,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 51,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9966698496
+    }
+  },
+  {
+    "seconds": 49.13042908300122,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 33,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 33,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005676032
+    }
+  },
+  {
+    "seconds": 50.15659700000833,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 48,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 48,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005676032
+    }
+  },
+  {
+    "seconds": 51.172459958004765,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651549696,
+      "Tiler Utilization %": 48,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 48,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 52.198247666005045,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651287552,
+      "Tiler Utilization %": 61,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 61,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005872640
+    }
+  },
+  {
+    "seconds": 53.21807570800593,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651254784,
+      "Tiler Utilization %": 51,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 51,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 54.245135916004074,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651271168,
+      "Tiler Utilization %": 55,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 55,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005626880
+    }
+  },
+  {
+    "seconds": 55.27127566600393,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651205632,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 93,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005872640
+    }
+  },
+  {
+    "seconds": 56.29099395799858,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651205632,
+      "Tiler Utilization %": 54,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 54,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9966698496
+    }
+  },
+  {
+    "seconds": 57.315631875011604,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651205632,
+      "Tiler Utilization %": 37,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 37,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10010345472
+    }
+  },
+  {
+    "seconds": 58.341240333000314,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650402816,
+      "Tiler Utilization %": 52,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 52,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 93,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004807680
+    }
+  },
+  {
+    "seconds": 59.36536087500281,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650402816,
+      "Tiler Utilization %": 52,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 52,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10009493504
+    }
+  },
+  {
+    "seconds": 60.39221533300588,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651189248,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 9966698496
+    }
+  },
+  {
+    "seconds": 61.41421891600476,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651189248,
+      "Tiler Utilization %": 54,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 54,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10010034176
+    }
+  },
+  {
+    "seconds": 62.436931125004776,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651189248,
+      "Tiler Utilization %": 40,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 40,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 63.45869100000709,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651189248,
+      "Tiler Utilization %": 51,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 51,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 64.48515237501124,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650386432,
+      "Tiler Utilization %": 38,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 38,
+      "TiledSceneBytes": 884736,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10004807680
+    }
+  },
+  {
+    "seconds": 65.51116920800996,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650386432,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10009231360
+    }
+  },
+  {
+    "seconds": 66.53041883300466,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10650386432,
+      "Tiler Utilization %": 35,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 35,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005135360
+    }
+  },
+  {
+    "seconds": 67.56384829099989,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10651189248,
+      "Tiler Utilization %": 55,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 54,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 39321600,
+      "In use system memory": 10005610496
+    }
+  },
+  {
+    "seconds": 68.5900475410017,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10605608960,
+      "Tiler Utilization %": 29,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 29,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966370816
+    }
+  },
+  {
+    "seconds": 69.61558737501036,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644520960,
+      "Tiler Utilization %": 59,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 59,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005544960
+    }
+  },
+  {
+    "seconds": 70.6433087910118,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644520960,
+      "Tiler Utilization %": 39,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 38,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10009968640
+    }
+  },
+  {
+    "seconds": 71.66317104100017,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10605871104,
+      "Tiler Utilization %": 48,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 48,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 92,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9971318784
+    }
+  },
+  {
+    "seconds": 72.68633141600003,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644783104,
+      "Tiler Utilization %": 29,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 29,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005544960
+    }
+  },
+  {
+    "seconds": 73.71410962499795,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644783104,
+      "Tiler Utilization %": 50,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 50,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 90,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10009968640
+    }
+  },
+  {
+    "seconds": 74.74520954101172,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644783104,
+      "Tiler Utilization %": 36,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 35,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10009706496
+    }
+  },
+  {
+    "seconds": 75.76522987500357,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644783104,
+      "Tiler Utilization %": 68,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 68,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10010230784
+    }
+  },
+  {
+    "seconds": 76.78837145800935,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644783104,
+      "Tiler Utilization %": 34,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 33,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005544960
+    }
+  },
+  {
+    "seconds": 77.81367583300744,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644701184,
+      "Tiler Utilization %": 54,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 54,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005463040
+    }
+  },
+  {
+    "seconds": 78.8372276250011,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10643947520,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004447232
+    }
+  },
+  {
+    "seconds": 79.86472933299956,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 61,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 61,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005774336
+    }
+  },
+  {
+    "seconds": 80.88793004100444,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 34,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 33,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005250048
+    }
+  },
+  {
+    "seconds": 81.9142965409992,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 91,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 82.9331002500112,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 35,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 35,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966600192
+    }
+  },
+  {
+    "seconds": 83.95882995800639,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10643947520,
+      "Tiler Utilization %": 62,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 62,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004971520
+    }
+  },
+  {
+    "seconds": 84.98346458299784,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 35,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 35,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005250048
+    }
+  },
+  {
+    "seconds": 86.009024125,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10643947520,
+      "Tiler Utilization %": 56,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 56,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004709376
+    }
+  },
+  {
+    "seconds": 87.02721949999977,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 38,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 38,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966600192
+    }
+  },
+  {
+    "seconds": 88.04513162501098,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 58,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005774336
+    }
+  },
+  {
+    "seconds": 89.06303512500017,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 34,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 34,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005250048
+    }
+  },
+  {
+    "seconds": 90.08863366600417,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 91.11629320800421,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 36,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 36,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966862336
+    }
+  },
+  {
+    "seconds": 92.14185633300804,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10643947520,
+      "Tiler Utilization %": 55,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 55,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 92,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966059520
+    }
+  },
+  {
+    "seconds": 93.16955791600049,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 48,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 48,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005250048
+    }
+  },
+  {
+    "seconds": 94.19581104100507,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 61,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 61,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 95.21957283301163,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10643947520,
+      "Tiler Utilization %": 51,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 51,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004709376
+    }
+  },
+  {
+    "seconds": 96.2455976659985,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966600192
+    }
+  },
+  {
+    "seconds": 97.27213574999769,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 98.29904058300599,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 48,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 48,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 99.32053254100902,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 49,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 49,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 92,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966600192
+    }
+  },
+  {
+    "seconds": 100.33985379101068,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 47,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 46,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9919954944
+    }
+  },
+  {
+    "seconds": 101.35710379100055,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10009935872
+    }
+  },
+  {
+    "seconds": 102.3840468749986,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 43,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 43,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 91,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005774336
+    }
+  },
+  {
+    "seconds": 103.42003504101012,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644750336,
+      "Tiler Utilization %": 56,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 56,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 104.44539295800496,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644013056,
+      "Tiler Utilization %": 51,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 51,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9965862912
+    }
+  },
+  {
+    "seconds": 105.46388950000983,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10645749760,
+      "Tiler Utilization %": 32,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 32,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9967599616
+    }
+  },
+  {
+    "seconds": 106.49036854100996,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 26,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 26,
+      "TiledSceneBytes": 851968,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9966075904
+    }
+  },
+  {
+    "seconds": 107.51589725000667,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10636492800,
+      "Tiler Utilization %": 26,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 26,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779593216
+    }
+  },
+  {
+    "seconds": 108.54144158300187,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10628038656,
+      "Tiler Utilization %": 31,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 30,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 109.55971904100443,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10621747200,
+      "Tiler Utilization %": 25,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 25,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 110.58001970800979,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10614652928,
+      "Tiler Utilization %": 31,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 31,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9778724864
+    }
+  },
+  {
+    "seconds": 111.6061913750018,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10609491968,
+      "Tiler Utilization %": 26,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 26,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 112.62829995799984,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10607394816,
+      "Tiler Utilization %": 23,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 23,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 113.65332554100314,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10566385664,
+      "Tiler Utilization %": 22,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 22,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 114.6792897080013,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10566074368,
+      "Tiler Utilization %": 28,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 28,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9861447680
+    }
+  },
+  {
+    "seconds": 115.70113537499856,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10525048832,
+      "Tiler Utilization %": 24,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 24,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 116.72731895800098,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10512859136,
+      "Tiler Utilization %": 25,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 25,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 34078720,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 117.7532721250027,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10512859136,
+      "Tiler Utilization %": 33,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 33,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 34078720,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 118.7790598749998,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10512859136,
+      "Tiler Utilization %": 22,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 22,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 34078720,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 119.79541237500962,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10511089664,
+      "Tiler Utilization %": 30,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 30,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 34078720,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 120.82142291600758,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10511089664,
+      "Tiler Utilization %": 29,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 29,
+      "TiledSceneBytes": 294912,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 34078720,
+      "In use system memory": 9779527680
+    }
+  },
+  {
+    "seconds": 121.84463837499788,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 51,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 51,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10010001408
+    }
+  },
+  {
+    "seconds": 122.87295458299923,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 65,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 65,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10010001408
+    }
+  },
+  {
+    "seconds": 123.89964391601097,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 60,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 60,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 124.91765387500345,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 30,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 30,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 9935781888
+    }
+  },
+  {
+    "seconds": 125.94022170800599,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 65,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 65,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 92,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 126.95875570800854,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644815872,
+      "Tiler Utilization %": 63,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 62,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 127.98474908299977,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10648616960,
+      "Tiler Utilization %": 64,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 64,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10017865728
+    }
+  },
+  {
+    "seconds": 129.01140387500345,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10648616960,
+      "Tiler Utilization %": 44,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 44,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 9966338048
+    }
+  },
+  {
+    "seconds": 130.0376066660101,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10648616960,
+      "Tiler Utilization %": 67,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 67,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 131.06531454100332,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10648616960,
+      "Tiler Utilization %": 62,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 62,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 132.08138083299855,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10648616960,
+      "Tiler Utilization %": 47,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 47,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 133.10683150000114,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10647879680,
+      "Tiler Utilization %": 90,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 90,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10007674880
+    }
+  },
+  {
+    "seconds": 134.1328130000038,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10647879680,
+      "Tiler Utilization %": 98,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 98,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 99,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10007953408
+    }
+  },
+  {
+    "seconds": 135.15624829100852,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10647879680,
+      "Tiler Utilization %": 99,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 99,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 99,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10007691264
+    }
+  },
+  {
+    "seconds": 136.18118954100646,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10647912448,
+      "Tiler Utilization %": 93,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 93,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 99,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10007789568
+    }
+  },
+  {
+    "seconds": 137.20455704101187,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10648715264,
+      "Tiler Utilization %": 81,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 81,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 41680896,
+      "In use system memory": 10005512192
+    }
+  },
+  {
+    "seconds": 138.2297577910067,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 50,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 50,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 92,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 139.2530986250058,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 60,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 60,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 98,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 140.277630416007,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 53,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 53,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 141.30429520799953,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 38,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 38,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 142.32195662500453,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 71,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 71,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 143.34788537499844,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 93,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004725760
+    }
+  },
+  {
+    "seconds": 144.37276170800033,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 44,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 44,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 145.40017675000126,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644111360,
+      "Tiler Utilization %": 43,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 42,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 93,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10003660800
+    }
+  },
+  {
+    "seconds": 146.42135904100724,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 64,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 64,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 147.44763466600853,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 68,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 68,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 148.46952100000635,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 45,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 45,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 149.4915180829994,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 45,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 45,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 150.51720958300575,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004987904
+    }
+  },
+  {
+    "seconds": 151.54357554099988,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 64,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 63,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 152.56410775000404,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644111360,
+      "Tiler Utilization %": 47,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 47,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10003660800
+    }
+  },
+  {
+    "seconds": 153.583354375005,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 57,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 57,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 154.61028183301096,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 54,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 54,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 96,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 155.62885733300936,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 56,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 56,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 156.6543573329982,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 34,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 34,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 157.68021491600666,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644111360,
+      "Tiler Utilization %": 43,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 43,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10003660800
+    }
+  },
+  {
+    "seconds": 158.7068172500003,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 67,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 67,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004725760
+    }
+  },
+  {
+    "seconds": 159.72358812500897,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 63,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 63,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 160.7493001660041,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644111360,
+      "Tiler Utilization %": 34,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 34,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 94,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10003660800
+    }
+  },
+  {
+    "seconds": 161.77333879101207,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 59,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 59,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 162.78952820799896,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 61,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 61,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 97,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004463616
+    }
+  },
+  {
+    "seconds": 163.81593208300183,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 49,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 49,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004529152
+    }
+  },
+  {
+    "seconds": 164.84286120800243,
+    "gpu": {
+      "In use system memory (driver)": 0,
+      "Alloc system memory": 10644914176,
+      "Tiler Utilization %": 41,
+      "recoveryCount": 0,
+      "lastRecoveryTime": 0,
+      "Renderer Utilization %": 41,
+      "TiledSceneBytes": 950272,
+      "Device Utilization %": 95,
+      "SplitSceneCount": 0,
+      "Allocated PB Size": 37879808,
+      "In use system memory": 10004791296
+    }
+  }
+]

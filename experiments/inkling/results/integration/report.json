@@ -1,0 +1,35 @@
+{
+  "result": "accepted",
+  "model": "Inkling-2-Mini-UD-Q2_K_XL",
+  "model_sha256": "20292e8142b69535ca88a5d04439d0fdeb4dc698d44c002dca706dcf92901441",
+  "inference_host": "Apple M4, macOS, 16 GiB, Metal",
+  "measurement_host": "Linux aarch64 in Docker",
+  "guest": "x86_64, QEMU 9.2.0, Linux 6.12.10",
+  "test_bundle_sha256": "25da2c70774ff89e3126d24d9f16b922bb76dd0aeb0cfa4daa2d7246b09865be",
+  "context_tokens": 16384,
+  "reasoning_effort": "low",
+  "output_token_limit": 3072,
+  "baseline_instructions": 665420,
+  "candidate_instructions": 49693,
+  "reduction_fraction": 0.9253208499894803,
+  "attempt": 1,
+  "baseline_repeats": 2,
+  "candidate_repeats": 2,
+  "minimum_delta": 10000,
+  "minimum_reduction_fraction": 0.01,
+  "linux_package_tests_passed": 81,
+  "mac_package_tests_passed": 68,
+  "native_completion_seconds": 84.6,
+  "additional_tasks": "../additional-tasks/report.json",
+  "scope": [
+    "The Linux test ran the full Night acceptance path. Native Mac code ran each real completion.",
+    "The test used the pinned guest sources compiled for a Linux ARM host. It did not use the published Linux x86_64 bundle archive.",
+    "Full overnight runs still require Linux x86_64. Native Mac model commands are supported.",
+    "Q4 is pinned and selectable. It was not run on this 16 GiB Mac."
+  ],
+  "issues": [
+    "One smoke run counted 61303 and 60013 instructions. A later run counted 60013 twice and passed. The exact count checks were kept.",
+    "The first live patch had no final newline. Git rejected it. The parser now adds the required newline. A regression test and a fresh full acceptance run passed."
+  ],
+  "reproduce": "sh experiments/inkling/acceptance.sh DATA_DIRECTORY NEW_OUTPUT_DIRECTORY"
+}

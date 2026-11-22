@@ -1,0 +1,2 @@
+    Checking noctum v0.2.0 (/Users/sean/git/Noctum)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.23s

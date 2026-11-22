@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicBool;
 use crate::profile::ProfileDump;
 use crate::repo_config::RepoConfig;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MeasureRequest {
     pub worktree: std::path::PathBuf,
     pub harness: std::path::PathBuf,
@@ -21,7 +21,7 @@ pub struct MeasureRequest {
     pub memory_mb: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Measurement {
     pub total: u64,
     pub stdout: Vec<u8>,

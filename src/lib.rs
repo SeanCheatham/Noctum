@@ -18,8 +18,12 @@ pub mod process;
 pub mod profile;
 pub mod qemu;
 pub mod repo_config;
+pub mod runtime;
 pub mod selector;
+pub mod target;
 pub mod web;
+#[cfg(feature = "worker")]
+pub mod worker;
 pub mod worktree;
 
 use std::path::PathBuf;

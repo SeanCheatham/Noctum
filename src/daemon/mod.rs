@@ -9,12 +9,9 @@ use anyhow::Result;
 use chrono::Local;
 use tokio::sync::{mpsc, RwLock};
 
-use crate::builder::CargoHost;
 use crate::config::Config;
 use crate::db::Database;
-use crate::model::LlamaManager;
-use crate::orchestrator::{self, Night, RunOptions};
-use crate::qemu::QemuRunner;
+use crate::orchestrator::RunOptions;
 
 #[derive(Clone)]
 pub struct DaemonHandle {
@@ -88,30 +85,14 @@ impl Daemon {
 
     async fn pass(&self, ignore_window: bool, only_repo: Option<PathBuf>) {
         let config = self.config.read().await.clone();
-        let data = config.data_dir();
-        let asset_error = orchestrator::prepare_assets(&data)
-            .await
-            .err()
-            .map(|err| err.to_string());
-        let night = Night::new(
-            self.db.clone(),
-            config,
-            QemuRunner::new(data.clone(), self.config.read().await.guest.memory_mb),
-            LlamaManager::new(data),
-            CargoHost,
-        );
         let opts = RunOptions {
             ignore_window,
             stop: self.stop.clone(),
-            asset_error,
+            asset_error: None,
             only_repo,
         };
-        if let Err(err) = night.run_pass(&opts).await {
+        if let Err(err) = crate::runtime::run_pass(self.db.clone(), config, opts).await {
             tracing::error!("night pass failed: {err}");
-            let _ = self
-                .db
-                .set_daemon("error", "idle", Some(&err.to_string()))
-                .await;
         }
     }
 }

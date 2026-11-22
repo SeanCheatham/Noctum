@@ -23,6 +23,7 @@ pub struct DaemonState {
 
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Run {
+    pub target: String,
     pub id: i64,
     pub repository_id: i64,
     pub git_sha: String,
@@ -67,6 +68,7 @@ pub struct Candidate {
 
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Trial {
+    pub target: String,
     pub id: i64,
     pub candidate_id: i64,
     pub status: String,
@@ -87,6 +89,7 @@ pub struct Trial {
 
 #[derive(Debug, Clone, FromRow)]
 pub struct PendingCommit {
+    pub target: String,
     pub trial_id: i64,
     pub unified_diff: String,
     pub model_summary: Option<String>,

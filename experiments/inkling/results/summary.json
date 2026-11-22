@@ -1,0 +1,106 @@
+{
+  "finding": "Inkling 2 Mini UD-Q2_K_XL ran on this Apple M4 Mac with 16 GiB of memory.",
+  "settings": {
+    "gpu": "Metal",
+    "parallel_requests": 1,
+    "reasoning_effort": "low",
+    "temperature": 0.2,
+    "output_token_limit": 3072
+  },
+  "runs": [
+    {
+      "run": "qwen-q5-4k",
+      "report": "qwen-q5-4k/report.json",
+      "completed_requests": 3,
+      "patches_that_passed_all_host_checks": 0,
+      "mean_generation_tokens_per_second": 18.237419763744136,
+      "response_seconds": [
+        25.91226350000943,
+        24.797838750004303,
+        26.129133666996495
+      ],
+      "peak_sampled_rss_bytes": 5819727872,
+      "peak_system_gpu_bytes": null,
+      "swap_before": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)",
+      "swap_loaded": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)"
+    },
+    {
+      "run": "inkling-q2-4k",
+      "report": "inkling-q2-4k/report.json",
+      "completed_requests": 1,
+      "patches_that_passed_all_host_checks": 0,
+      "mean_generation_tokens_per_second": 17.397451005469563,
+      "response_seconds": [
+        181.8712926670123
+      ],
+      "peak_sampled_rss_bytes": null,
+      "peak_system_gpu_bytes": 10017865728,
+      "swap_before": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)",
+      "swap_loaded": null
+    },
+    {
+      "run": "inkling-q2-4k-low",
+      "report": "inkling-q2-4k-low/report.json",
+      "completed_requests": 3,
+      "patches_that_passed_all_host_checks": 3,
+      "mean_generation_tokens_per_second": 17.824834457432697,
+      "response_seconds": [
+        75.11056337499758,
+        75.50910829100758,
+        96.20515024999622
+      ],
+      "peak_sampled_rss_bytes": 9850191872,
+      "peak_system_gpu_bytes": 10020651008,
+      "swap_before": "vm.swapusage: total = 2048.00M  used = 1098.62M  free = 949.38M  (encrypted)",
+      "swap_loaded": "vm.swapusage: total = 2048.00M  used = 1595.12M  free = 452.88M  (encrypted)"
+    },
+    {
+      "run": "inkling-q2-16k-low",
+      "report": "inkling-q2-16k-low/report.json",
+      "completed_requests": 1,
+      "patches_that_passed_all_host_checks": 1,
+      "mean_generation_tokens_per_second": 17.781780716914827,
+      "response_seconds": [
+        75.48309679199883
+      ],
+      "peak_sampled_rss_bytes": 10153132032,
+      "peak_system_gpu_bytes": 10744741888,
+      "swap_before": "vm.swapusage: total = 2048.00M  used = 1595.12M  free = 452.88M  (encrypted)",
+      "swap_loaded": "vm.swapusage: total = 2048.00M  used = 1555.12M  free = 492.88M  (encrypted)"
+    }
+  ],
+  "reference_cases_per_patch": 3797,
+  "limitations": [
+    "One fixture was tested.",
+    "The 16384-token context test used a short prompt.",
+    "Guest instructions were not measured. The QEMU bundle is absent.",
+    "GPU memory values include other applications. Do not add GPU memory to resident memory.",
+    "The default reasoning run stopped during request 2. Request 1 used the output limit for reasoning and returned no patch.",
+    "Each request was independent. No repair request was sent.",
+    "The hot function was selected from a fixture. Guest profile counts were set to zero."
+  ],
+  "runtime": {
+    "url": "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/llama-b12588-mix-c0c3de8-bin-macos-arm64.tar.gz",
+    "archive_sha256": "229def18e27ed740ec4f3a6508f084b25630e08d8a87ada40b00622fc496ceb8",
+    "version": "version: 1.0.0-dev (build 12588, commit 883286076)\nbuilt with AppleClang 21.0.0.21000101 for Darwin arm64 (Compiled by the Unsloth team)"
+  },
+  "weights": [
+    {
+      "url": "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/Inkling-2-Mini-UD-Q2_K_XL.gguf",
+      "sha256": "20292e8142b69535ca88a5d04439d0fdeb4dc698d44c002dca706dcf92901441",
+      "bytes": 9138715328
+    },
+    {
+      "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q5_k_m.gguf",
+      "sha256": "586844eac4d6d6321689f0192c8aa8e69cd8625974a5cc2d925b1a03366e4d16",
+      "bytes": 5444831232
+    }
+  ],
+  "build_command": [
+    "cargo",
+    "build",
+    "--locked",
+    "--example",
+    "model_probe"
+  ]
+}

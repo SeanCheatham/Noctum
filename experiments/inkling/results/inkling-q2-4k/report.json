@@ -1,0 +1,67 @@
+{
+  "date_utc": "2026-11-22T12:41:04.286347+00:00",
+  "commit": "df2b333f7e35135a4713435c2d0a053318eeae51",
+  "model_sha256": "20292e8142b69535ca88a5d04439d0fdeb4dc698d44c002dca706dcf92901441",
+  "command": [
+    "/Users/sean/Library/Caches/noctum-inkling/runtime/llama-server",
+    "-m",
+    "/Users/sean/Library/Caches/noctum-inkling/Inkling-2-Mini-UD-Q2_K_XL.gguf",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "51241",
+    "-c",
+    "4096",
+    "-ngl",
+    "99",
+    "-np",
+    "1",
+    "-b",
+    "256",
+    "-ub",
+    "128",
+    "--jinja"
+  ],
+  "server_version": "version: 1.0.0-dev (build 12588, commit 883286076)\nbuilt with AppleClang 21.0.0.21000101 for Darwin arm64 (Compiled by the Unsloth team)",
+  "model_bytes": 9138715328,
+  "hardware": "Apple M4\n17179869184\n",
+  "scope": "Host inference and patch checks. No guest instruction measurement.",
+  "profile_counts": "Zero values. No guest profile was collected.",
+  "before": {
+    "swap": "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)",
+    "pressure": "The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 67%",
+    "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                     5507.\nPages active:                                 187942.\nPages inactive:                               486910.\nPages speculative:                              1538.\nPages throttled:                                   0.\nPages wired down:                             141147.\nPages purgeable:                               10093.\n\"Translation faults\":                      648280309.\nPages copy-on-write:                         5847217.\nPages zero filled:                         182764651.\nPages reactivated:                           4222323.\nPages purged:                                1541661.\nFile-backed pages:                            563329.\nAnonymous pages:                              113061.\nPages stored in compressor:                   414950.\nPages occupied by compressor:                 185060.\nDecompressions:                              1581970.\nCompressions:                                2793510.\nPageins:                                    18312105.\nPageouts:                                      23387.\nSwapins:                                           0.\nSwapouts:                                          0.\n"
+  },
+  "samples": [
+    {
+      "seed": 42,
+      "seconds": 181.8712926670123,
+      "usage": {
+        "completion_tokens": 3072,
+        "prompt_tokens": 494,
+        "total_tokens": 3566,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 494,
+        "prompt_ms": 5321.115,
+        "prompt_per_token_ms": 10.771487854251012,
+        "prompt_per_second": 92.83768533474658,
+        "predicted_n": 3072,
+        "predicted_ms": 176520.112,
+        "predicted_per_token_ms": 57.47968479322696,
+        "predicted_per_second": 17.397451005469563
+      },
+      "finish_reason": "length",
+      "error": "Expecting value: line 1 column 1 (char 0)",
+      "schema": false
+    }
+  ],
+  "load_seconds": 12.09425429199473,
+  "stopped": "Stopped during sample 2 after sample 1 used the output limit for reasoning.",
+  "samples_requested": 3,
+  "peak_observed_system_gpu_bytes": 10017865728
+}

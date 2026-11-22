@@ -1,0 +1,440 @@
+info: syncing channel updates for stable-aarch64-unknown-linux-gnu
+info: latest update on 2026-11-12 for version 1.100.0 (0ef1bc386 2026-11-09)
+info: downloading 6 components
+warn: the missing active toolchain `stable-aarch64-unknown-linux-gnu` has been auto-installed
+warn: this might cause rustup commands to take longer time to finish than expected
+info: you may opt out with `RUSTUP_AUTO_INSTALL=0` or `rustup set auto-install disable`
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded scopeguard v1.2.0
+  Downloaded sqlx-sqlite v0.8.6
+  Downloaded sync_wrapper v1.0.2
+  Downloaded tinyvec_macros v0.1.1
+  Downloaded tower-service v0.3.3
+  Downloaded toml_write v0.1.2
+  Downloaded tower-layer v0.3.3
+  Downloaded utf8parse v0.2.2
+  Downloaded anstyle-parse v0.2.7
+  Downloaded serde_urlencoded v0.7.1
+  Downloaded zerofrom v0.1.6
+  Downloaded xattr v1.6.1
+  Downloaded subtle v2.6.1
+  Downloaded toml_datetime v0.6.11
+  Downloaded indexmap v2.12.1
+  Downloaded utf8_iter v1.0.4
+  Downloaded serde_core v1.0.228
+  Downloaded twox-hash v1.6.3
+  Downloaded sha1 v0.10.6
+  Downloaded typed-arena v2.0.2
+  Downloaded pin-utils v0.1.0
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded serde_spanned v0.6.9
+  Downloaded yoke-derive v0.8.1
+  Downloaded zerofrom-derive v0.1.6
+  Downloaded signature v2.2.0
+  Downloaded adler2 v2.0.1
+  Downloaded strsim v0.11.1
+  Downloaded try-lock v0.2.5
+  Downloaded want v0.3.1
+  Downloaded version_check v0.9.5
+  Downloaded itoa v1.0.16
+  Downloaded lazy_static v1.5.0
+  Downloaded nu-ansi-term v0.50.3
+  Downloaded sqlx-macros v0.8.6
+  Downloaded untrusted v0.9.0
+  Downloaded shlex v1.3.0
+  Downloaded thiserror-impl v2.0.17
+  Downloaded tinystr v0.8.2
+  Downloaded anstream v0.6.21
+  Downloaded walkdir v2.5.0
+  Downloaded matchers v0.2.0
+  Downloaded block-buffer v0.10.4
+  Downloaded same-file v1.0.6
+  Downloaded atomic-waker v1.1.2
+  Downloaded rand_pcg v0.10.3
+  Downloaded tokio-rustls v0.26.4
+  Downloaded simd-adler32 v0.3.10
+  Downloaded sqlx-macros-core v0.8.6
+  Downloaded toml v0.8.23
+  Downloaded whoami v1.6.1
+  Downloaded unicode-properties v0.1.4
+  Downloaded cfg_aliases v0.2.2
+  Downloaded crypto-common v0.1.7
+  Downloaded errno v0.3.14
+  Downloaded unicase v2.8.1
+  Downloaded writeable v0.6.2
+  Downloaded anstyle v1.0.13
+  Downloaded zeroize v1.8.2
+  Downloaded serde_path_to_error v0.1.20
+  Downloaded sha2 v0.10.9
+  Downloaded slab v0.4.11
+  Downloaded stringprep v0.1.5
+  Downloaded zerovec-derive v0.11.2
+  Downloaded anstyle-query v1.1.5
+  Downloaded spki v0.7.3
+  Downloaded static_assertions v1.1.0
+  Downloaded tokio-macros v2.6.0
+  Downloaded signal-hook-registry v1.4.7
+  Downloaded addr2line v0.24.2
+  Downloaded thiserror v2.0.17
+  Downloaded thread_local v1.1.9
+  Downloaded potential_utf v0.1.4
+  Downloaded assert-json-diff v2.0.2
+  Downloaded option-ext v0.2.0
+  Downloaded tracing-attributes v0.1.31
+  Downloaded fnv v1.0.7
+  Downloaded smallvec v1.15.1
+  Downloaded percent-encoding v2.3.2
+  Downloaded yoke v0.8.1
+  Downloaded spin v0.9.8
+  Downloaded tokio-stream v0.1.17
+  Downloaded synstructure v0.13.2
+  Downloaded tracing-log v0.2.0
+  Downloaded num_cpus v1.17.0
+  Downloaded tracing-core v0.1.36
+  Downloaded socket2 v0.6.1
+  Downloaded num-iter v0.1.45
+  Downloaded futures-channel v0.3.31
+  Downloaded hex v0.4.3
+  Downloaded serde_derive v1.0.228
+  Downloaded cfg-if v1.0.4
+  Downloaded concurrent-queue v2.5.0
+  Downloaded deadpool-runtime v0.1.4
+  Downloaded tempfile v3.23.0
+  Downloaded unicode-bidi v0.3.18
+  Downloaded tinyvec v1.10.0
+  Downloaded sharded-slab v0.1.7
+  Downloaded allocator-api2 v0.2.21
+  Downloaded rust-embed-impl v8.9.0
+  Downloaded rustc-hash v2.1.3
+  Downloaded parking v2.2.1
+  Downloaded is_terminal_polyfill v1.70.2
+  Downloaded lru-slab v0.1.3
+  Downloaded md-5 v0.10.6
+  Downloaded mime v0.3.17
+  Downloaded unicode-ident v1.0.22
+  Downloaded atoi v2.0.0
+  Downloaded const-oid v0.9.6
+  Downloaded tar v0.4.46
+  Downloaded wiremock v0.6.5
+  Downloaded serde v1.0.228
+  Downloaded askama_escape v0.10.3
+  Downloaded futures-io v0.3.31
+  Downloaded ipnet v2.11.0
+  Downloaded rust-embed-utils v8.9.0
+  Downloaded deadpool v0.12.3
+  Downloaded matchit v0.7.3
+  Downloaded zerotrie v0.2.3
+  Downloaded crossbeam-utils v0.8.21
+  Downloaded httpdate v1.0.3
+  Downloaded lock_api v0.4.14
+  Downloaded sqlx-mysql v0.8.6
+  Downloaded typenum v1.19.0
+  Downloaded url v2.5.7
+  Downloaded num-integer v0.1.46
+  Downloaded toml_edit v0.22.27
+  Downloaded askama_derive v0.12.5
+  Downloaded mime_guess v2.0.5
+  Downloaded askama v0.12.1
+  Downloaded tower v0.5.2
+  Downloaded autocfg v1.5.0
+  Downloaded ppv-lite86 v0.2.21
+  Downloaded tokio-util v0.7.17
+  Downloaded pem-rfc7468 v0.7.0
+  Downloaded rand_chacha v0.3.1
+  Downloaded zerovec v0.11.5
+  Downloaded byteorder v1.5.0
+  Downloaded quote v1.0.42
+  Downloaded tower-http v0.6.8
+  Downloaded sqlx-core v0.8.6
+  Downloaded unicode-normalization v0.1.25
+  Downloaded sqlx-postgres v0.8.6
+  Downloaded serde_json v1.0.146
+  Downloaded base64ct v1.7.3
+  Downloaded pkg-config v0.3.32
+  Downloaded fastrand v2.3.0
+  Downloaded askama_parser v0.2.1
+  Downloaded rand_core v0.6.4
+  Downloaded directories v5.0.1
+  Downloaded futures-sink v0.3.31
+  Downloaded icu_properties_data v2.1.2
+  Downloaded either v1.15.0
+  Downloaded filetime v0.2.30
+  Downloaded futures-util v0.3.31
+  Downloaded sqlx v0.8.6
+  Downloaded hashbrown v0.15.5
+  Downloaded winnow v0.7.14
+  Downloaded aho-corasick v1.1.4
+  Downloaded chacha20 v0.10.2
+  Downloaded clap_builder v4.5.53
+  Downloaded webpki-roots v1.0.12
+  Downloaded rustversion v1.0.22
+  Downloaded tracing-subscriber v0.3.22
+  Downloaded vcpkg v0.2.15
+  Downloaded hkdf v0.12.4
+  Downloaded zlib-rs v0.6.8
+  Downloaded clap v4.5.53
+  Downloaded axum-core v0.4.5
+  Downloaded httparse v1.10.1
+  Downloaded home v0.5.12
+  Downloaded idna_adapter v1.2.1
+  Downloaded zerocopy v0.8.31
+  Downloaded litemap v0.8.1
+  Downloaded dotenvy v0.15.7
+  Downloaded rand_core v0.10.1
+  Downloaded rustls-pki-types v1.13.2
+  Downloaded find-msvc-tools v0.1.5
+  Downloaded hyper-util v0.1.19
+  Downloaded iana-time-zone v0.1.64
+  Downloaded icu_provider v2.1.1
+  Downloaded icu_properties v2.1.2
+  Downloaded once_cell v1.21.3
+  Downloaded memmap2 v0.9.12
+  Downloaded syn v2.0.111
+  Downloaded der v0.7.10
+  Downloaded icu_collections v2.1.1
+  Downloaded idna v1.1.0
+  Downloaded async-trait v0.1.89
+  Downloaded tracing v0.1.44
+  Downloaded pin-project-lite v0.2.16
+  Downloaded quinn-udp v0.5.16
+  Downloaded rustc-demangle v0.1.28
+  Downloaded axum-macros v0.4.2
+  Downloaded parking_lot v0.12.5
+  Downloaded event-listener v5.4.1
+  Downloaded http-body v1.0.1
+  Downloaded tokio v1.48.0
+  Downloaded humansize v2.1.3
+  Downloaded chrono v0.4.42
+  Downloaded digest v0.10.7
+  Downloaded log v0.4.29
+  Downloaded crc-catalog v2.4.0
+  Downloaded foldhash v0.1.5
+  Downloaded glob-match v0.2.1
+  Downloaded crc v3.4.0
+  Downloaded futures-core v0.3.31
+  Downloaded anyhow v1.0.100
+  Downloaded futures-task v0.3.31
+  Downloaded icu_locale_core v2.1.1
+  Downloaded flate2 v1.1.11
+  Downloaded displaydoc v0.2.5
+  Downloaded cpp_demangle v0.4.5
+  Downloaded generic-array v0.14.7
+  Downloaded flume v0.11.1
+  Downloaded hashlink v0.10.0
+  Downloaded hmac v0.12.1
+  Downloaded futures-executor v0.3.31
+  Downloaded futures-macro v0.3.31
+  Downloaded colorchoice v1.0.4
+  Downloaded fallible-iterator v0.3.0
+  Downloaded equivalent v1.0.2
+  Downloaded http v1.4.0
+  Downloaded pkcs8 v0.10.2
+  Downloaded ryu v1.0.21
+  Downloaded cpufeatures v0.2.17
+  Downloaded dirs-sys v0.4.1
+  Downloaded form_urlencoded v1.2.2
+  Downloaded http-body-util v0.1.3
+  Downloaded hyper-rustls v0.27.7
+  Downloaded icu_normalizer_data v2.1.1
+  Downloaded getrandom v0.2.16
+  Downloaded bitflags v2.10.0
+  Downloaded basic-toml v0.1.10
+  Downloaded hyper v1.8.1
+  Downloaded h2 v0.4.12
+  Downloaded num-traits v0.2.19
+  Downloaded pkcs1 v0.7.5
+  Downloaded miniz_oxide v0.9.1
+  Downloaded crossbeam-queue v0.3.12
+  Downloaded getrandom v0.4.3
+  Downloaded base64 v0.22.1
+  Downloaded parking_lot_core v0.9.12
+  Downloaded ruzstd v0.7.3
+  Downloaded heck v0.5.0
+  Downloaded rsa v0.9.9
+  Downloaded futures v0.3.31
+  Downloaded memchr v2.7.6
+  Downloaded proc-macro2 v1.0.103
+  Downloaded quinn v0.11.12
+  Downloaded rand v0.8.5
+  Downloaded rustls-webpki v0.103.8
+  Downloaded bytes v1.11.0
+  Downloaded clap_lex v0.7.6
+  Downloaded icu_normalizer v2.1.1
+  Downloaded getrandom v0.3.4
+  Downloaded minimal-lexical v0.2.1
+  Downloaded rand v0.10.4
+  Downloaded cc v1.2.50
+  Downloaded clap_derive v4.5.49
+  Downloaded futures-intrusive v0.5.0
+  Downloaded mio v1.1.1
+  Downloaded crc32fast v1.5.5
+  Downloaded nom v7.1.3
+  Downloaded num-bigint-dig v0.8.6
+  Downloaded iri-string v0.7.9
+  Downloaded libm v0.2.15
+  Downloaded reqwest v0.12.28
+  Downloaded regex v1.12.2
+  Downloaded axum v0.7.9
+  Downloaded hashbrown v0.16.1
+  Downloaded quinn-proto v0.11.19
+  Downloaded gimli v0.31.1
+  Downloaded regex-syntax v0.8.8
+  Downloaded object v0.36.7
+  Downloaded rustls v0.23.35
+  Downloaded rustix v1.1.3
+  Downloaded regex-automata v0.4.13
+  Downloaded libc v0.2.178
+  Downloaded rust-embed v8.9.0
+  Downloaded ring v0.17.14
+  Downloaded linux-raw-sys v0.11.0
+  Downloaded libsqlite3-sys v0.30.1
+   Compiling noctum v0.2.0 (/work)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.60s
+     Running unittests src/lib.rs (target/debug/build/noctum/64d7a71bfbc2a8c1/out/noctum-64d7a71bfbc2a8c1)
+
+running 83 tests
+test config::tests::daytime_window_includes_the_start_and_excludes_the_end ... ok
+test builder::tests::abort_profile_is_detected ... ok
+test config::tests::defaults_match_the_plan ... ok
+test builder::tests::parses_libtest_list ... ok
+test config::tests::database_file_is_perf_db ... ok
+test config::tests::equal_hours_are_an_empty_window ... ok
+test config::tests::overnight_window_wraps_past_midnight ... ok
+test builder::tests::bench_harness_false_is_read_from_the_manifest ... ok
+test config::tests::old_endpoint_list_is_a_parse_error ... ok
+test config::tests::overnight_window_key_belongs_to_the_evening_it_started ... ok
+test diffcheck::tests::a_misnumbered_hunk_is_applied_where_the_old_lines_match ... ok
+test diffcheck::tests::allows_a_comment_in_production_code ... ok
+test diffcheck::tests::an_off_by_one_second_hunk_still_applies ... ok
+test diffcheck::tests::empty_diff_is_rejected ... ok
+test config::tests::round_trip_save ... ok
+test fence::tests::dependency_is_a_path_dev_dependency ... ok
+test diffcheck::tests::rejects_manifests_protected_paths_and_escapes ... ok
+test fence::tests::guard_is_the_first_statement_and_does_not_add_a_line ... ok
+test diffcheck::tests::rejects_a_rewritten_expected_value ... ok
+test diffcheck::tests::a_misnumbered_hunk_still_rejects_a_lowered_bound ... ok
+test fence::tests::installed_crate_contains_the_out_instruction ... ok
+test diffcheck::tests::rejects_a_deleted_assertion_and_a_lowered_bound ... ok
+test fence::tests::missing_function_is_an_error ... ok
+test gate::tests::accepts_a_real_win ... ok
+test gate::tests::rejects_a_tiny_body_and_a_small_win ... ok
+test gate::tests::rejects_each_failed_check ... ok
+test guest_smoke::fenced_musl_harness_counts_guest_instructions ... ignored, boots the pinned QEMU guest; run qemu/smoke.sh
+test gate::tests::rejects_no_change_and_a_slowdown ... ok
+test hashutil::tests::hashes_known_vector ... ok
+test hashutil::tests::last_lines_keeps_the_tail ... ok
+test hashutil::tests::tail_keeps_the_end ... ok
+test model::tests::parses_a_schema_object ... ok
+test model::tests::extra_text_is_rejected ... ok
+test model::tests::prompt_names_the_test_and_forbids_new_dependencies ... ok
+test model::tests::server_uses_one_slot_and_low_reasoning ... ok
+test lockfile::tests::qemu_bundle_is_pinned_without_a_download_url ... ok
+test model::tests::extracts_flat_and_wrapped_server_packages ... ok
+test lockfile::tests::model_lock_selects_matching_packages_and_quant_files ... ok
+test model::tests::host_resource_checks_return_bytes ... ok
+test model::tests::sends_low_reasoning_and_the_output_limit ... ok
+test model::tests::download_keeps_a_matching_file_and_drops_a_mismatch ... ok
+test orchestrator::tests::adaptive_benches_are_named ... ok
+test model::tests::a_completion_without_a_final_newline_can_be_applied ... ok
+test builder::tests::musl_target_is_visible_here_or_the_error_names_the_command ... ok
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+test orchestrator::tests::an_unmapped_profile_does_not_invent_a_function ... ok
+test orchestrator::tests::short_libtest_names_match_the_module_path ... ok
+test ports::tests::libtest_duration_is_not_part_of_the_comparison ... ok
+test process::tests::captures_stdout ... ok
+test orchestrator::tests::a_listed_fn_main_bench_is_measured_and_can_be_kept ... ok
+test profile::tests::a_second_fence_is_an_error_record ... ok
+test profile::tests::discards_a_function_under_one_percent_and_protected_files ... ok
+test profile::tests::parses_a_dump_and_drops_kernel_pcs ... ok
+test profile::tests::static_elf_has_no_interpreter ... ok
+test qemu::tests::map_line_is_the_load_bias ... ok
+test qemu::tests::measurement_command_is_the_pinned_guest ... ok
+test real_pass::a_lowered_for_bound_ends_sampling_and_a_host_failure_does_not ... ok
+test orchestrator::tests::a_diff_that_drops_an_assertion_is_rejected_before_another_measurement ... ok
+test real_pass::real_model_proposes_a_diff_and_the_gate_decides ... ignored, runs llama.cpp and the pinned QEMU guest; see qemu/real-pass.sh
+test real_pass::the_fixture_rejects_a_bound_shrink_a_dropped_assert_and_a_rewritten_total ... ok
+test repo_config::tests::empty_file_uses_plan_defaults ... ok
+test repo_config::tests::missing_file_is_an_error ... ok
+test repo_config::tests::mutation_keys_are_named_in_the_error ... ok
+test repo_config::tests::parses_the_documented_shape ... ok
+test repo_config::tests::world_writable_file_is_rejected ... ok
+test selector::tests::classifies_plain_custom_ignore_and_denylist ... ok
+test selector::tests::direct_callees_include_encode_once ... ok
+test selector::tests::harness_prefix_parses_separately_from_a_module_path ... ok
+test selector::tests::scan_order_is_largest_body_first_and_capped ... ok
+test selector::tests::skip_glob_matches_the_test_name ... ok
+test source_tests::rust_sources_do_not_mention_the_old_model_client ... ok
+test web::handlers::tests::morning_words_name_the_night ... ok
+test orchestrator::tests::a_lowered_for_bound_is_rejected_without_another_sample ... ok
+test worktree::tests::a_miscounted_hunk_still_applies ... ok
+test worktree::tests::apply_and_commit_stay_out_of_the_original_checkout ... ok
+test web::handlers::tests::repository_page_reads_candidate_counts_from_perf_db ... ok
+test orchestrator::tests::a_diff_that_breaks_another_assertion_is_rejected_by_the_host_suite ... ok
+test orchestrator::tests::a_slower_diff_is_reset ... ok
+test real_pass::deleting_the_scan_fails_the_host_check_and_the_linear_count_passes ... ok
+test orchestrator::tests::canned_diff_commits_on_perf_and_leaves_the_clone ... ok
+test process::tests::timeout_kills_a_sleep ... ok
+test orchestrator::tests::a_disagreed_rebaseline_does_not_score_the_next_candidate ... ok
+test orchestrator::tests::an_accept_stacks_the_next_function_on_the_new_baseline ... ok
+test orchestrator::tests::a_later_candidate_that_only_beats_the_old_baseline_is_rejected ... ok
+
+test result: ok. 81 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 3.58s
+
+     Running unittests src/main.rs (target/debug/build/noctum/077371f8320527d0/out/noctum-077371f8320527d0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests noctum
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/noctum/64d7a71bfbc2a8c1/out/noctum-64d7a71bfbc2a8c1)
+
+running 1 test
+test guest_smoke::fenced_musl_harness_counts_guest_instructions ... 
+thread 'guest_smoke::fenced_musl_harness_counts_guest_instructions' (3450) panicked at src/guest_smoke.rs:54:5:
+assertion `left == right` failed: encode_batch counts 61303 and 60013
+stdout 
+running 1 test
+test tests::encode_batch ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.04s
+
+
+go
+NOCTUM_RUN
+NOCTUM_DONE
+reboot: Power down
+
+  left: 61303
+ right: 60013
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+SMOKE small_loop total=6013 encode_batch total=61303
+FAILED
+
+failures:
+
+failures:
+    guest_smoke::fenced_musl_harness_counts_guest_instructions
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 82 filtered out; finished in 5.51s
+
+error: test failed, to rerun pass `--lib`

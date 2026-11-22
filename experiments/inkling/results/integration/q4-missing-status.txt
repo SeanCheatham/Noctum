@@ -1,0 +1,1 @@
+model: model is missing at /Users/sean/Library/Caches/noctum-inkling/production-check/models/Inkling-2-Mini-UD-Q4_K_M.gguf

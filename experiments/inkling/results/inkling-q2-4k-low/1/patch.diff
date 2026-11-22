@@ -1,0 +1,30 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -3,18 +3,14 @@
+ /// Number of ordered pairs `(i, j)` with `data[i] == data[j]`, including `i == j`.
+ #[inline(never)]
+ pub fn equal_pairs(data: &[u8]) -> u64 {
+-    let mut count = 0u64;
+-    let mut i = 0;
+-    while i < data.len() {
+-        let mut j = 0;
+-        while j < data.len() {
+-            if data[i] == data[j] {
+-                count = count.wrapping_add(1);
+-            }
+-            j += 1;
+-        }
+-        i += 1;
+-    }
+-    count
++    let mut counts = [0u64; 256];
++    for &x in data {
++        counts[x as usize] += 1;
++    }
++    let mut count = 0u64;
++    for &f in &counts {
++        count = count.wrapping_add(f.wrapping_mul(f));
++    }
++    count
+ }

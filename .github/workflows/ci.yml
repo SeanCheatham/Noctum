@@ -39,4 +39,17 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  mac:
+    name: Mac checks
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: x86_64-unknown-linux-musl
+      - run: cargo test -p noctum --features worker --locked
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p noctum --all-targets --features worker --locked -- -D warnings

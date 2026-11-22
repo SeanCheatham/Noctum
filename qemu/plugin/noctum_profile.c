@@ -34,6 +34,7 @@ static GHashTable *hist;
 static char *output_path;
 static struct qemu_plugin_register *rax_handle;
 static int flushed;
+static int arm64;
 
 static void add_count(uint64_t pc, uint64_t n)
 {
@@ -91,9 +92,14 @@ static int insn_is_fence(struct qemu_plugin_insn *insn)
     size_t n = qemu_plugin_insn_data(insn, buf, sizeof buf);
     size_t i;
 
+    if (arm64) {
+        if (n == 4 && buf[0] == 0x3f && buf[1] == 0xc6 && buf[2] == 0x89 && buf[3] == 0xd2) return 1;
+        if (n == 4 && buf[0] == 0x5f && buf[1] == 0xc6 && buf[2] == 0x89 && buf[3] == 0xd2) return 2;
+        return 0;
+    }
     for (i = 0; i + 1 < n; i++) {
         if (buf[i] == 0xE6 && buf[i + 1] == 0xE9) {
-            return 1;
+            return 3;
         }
     }
     return 0;
@@ -122,7 +128,7 @@ static int read_al(void)
 
 static void on_fence(unsigned int vcpu_index, void *userdata)
 {
-    int al = read_al();
+    int al = arm64 ? (int)(uintptr_t)userdata : read_al();
 
     (void)vcpu_index;
     (void)userdata;
@@ -175,6 +181,7 @@ static void vcpu_init(qemu_plugin_id_t id, unsigned int vcpu_index)
 
     (void)id;
     (void)vcpu_index;
+    if (arm64) return;
     regs = qemu_plugin_get_registers();
     for (i = 0; i < regs->len; i++) {
         qemu_plugin_reg_descriptor *reg =
@@ -218,7 +225,7 @@ static void tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
         struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
         if (insn_is_fence(insn)) {
             qemu_plugin_register_vcpu_insn_exec_cb(insn, on_fence, QEMU_PLUGIN_CB_R_REGS,
-                                                   NULL);
+                                                   (void *)(uintptr_t)insn_is_fence(insn));
         } else {
             uint64_t *pc = g_new(uint64_t, 1);
             *pc = qemu_plugin_insn_vaddr(insn);
@@ -240,7 +247,8 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
 {
     int i;
 
-    (void)info;
+    arm64 = strcmp(info->target_name, "aarch64") == 0;
+    if (!arm64 && strcmp(info->target_name, "x86_64") != 0) return -1;
     hist = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, g_free);
     for (i = 0; i < argc; i++) {
         if (g_str_has_prefix(argv[i], "output=")) {

@@ -1,6 +1,7 @@
 # Copy to ~/.config/noctum/config.toml, or pass --config.
-# Unknown keys are an error. The model and the QEMU bundle are lockfiles,
-# not fields in this file.
+# Unknown keys are an error. Model files and the QEMU bundle are pinned.
+# Optional. Defaults to the platform data directory.
+# data_dir = "/var/lib/noctum"
 
 [general]
 log_level = "info"
@@ -28,5 +29,6 @@ measure_repeats = 2
 [guest]
 memory_mb = 1024
 
-# Optional. Defaults to the platform data directory.
-# data_dir = "/var/lib/noctum"
+[model]
+# Q2 is the default for 16 GB machines. Q4 needs more memory and disk space.
+quant = "q2"

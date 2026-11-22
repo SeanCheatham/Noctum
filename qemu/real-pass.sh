@@ -1,18 +1,8 @@
 #!/bin/sh
-# One night with a real llama.cpp completion and the pinned guest.
-#
-# `cargo test` does not run this. The production lockfile stays pointed at
-# Qwen2.5-Coder-7B-Instruct Q5_K_M. Point NOCTUM_GGUF at a coder GGUF this
-# machine can load, and NOCTUM_LLAMA_SERVER at the pinned llama-server.
-# The QEMU stage is qemu/out/stage from qemu/build-bundle.sh unless
-# NOCTUM_QEMU_STAGE is set.
-#
-# The fixture does not name a test or a function. The night measures what it
-# discovers, ranks guest PCs from the plugin dump, and asks the model about
-# whichever in-repo function that ranking puts first. The script exits non-zero
-# unless that edit drops the guest count by at least 1% and 10,000 instructions
-# and the commit lands on noctum/perf. A gate rejection is not a pass. An
-# unmapped profile is not a pass.
+# Run the full guest acceptance test with a real model completion.
+# Set NOCTUM_QEMU_STAGE and NOCTUM_GGUF to the test assets.
+# Set NOCTUM_LLAMA_SERVER for local inference, or NOCTUM_MODEL_BRIDGE
+# for native Mac inference through examples/model_probe.rs.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 STAGE="${NOCTUM_QEMU_STAGE:-$ROOT/qemu/out/stage}"
@@ -24,7 +14,7 @@ if [ -z "${NOCTUM_GGUF:-}" ] || [ ! -f "$NOCTUM_GGUF" ]; then
     echo "Set NOCTUM_GGUF to a coder GGUF this machine can load." >&2
     exit 1
 fi
-if [ -z "${NOCTUM_LLAMA_SERVER:-}" ] || [ ! -x "$NOCTUM_LLAMA_SERVER" ]; then
+if [ -z "${NOCTUM_MODEL_BRIDGE:-}" ] && { [ -z "${NOCTUM_LLAMA_SERVER:-}" ] || [ ! -x "${NOCTUM_LLAMA_SERVER:-}" ]; }; then
     echo "Set NOCTUM_LLAMA_SERVER to the pinned llama-server binary." >&2
     exit 1
 fi

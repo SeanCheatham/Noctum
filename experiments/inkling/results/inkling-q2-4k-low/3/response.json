@@ -1,0 +1,37 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"diff\":\"diff --git a/src/lib.rs b/src/lib.rs\\n--- a/src/lib.rs\\n+++ b/src/lib.rs\\n@@ -3,17 +3,13 @@\\n /// Number of ordered pairs `(i, j)` with `data[i] == data[j]`, including `i == j`.\\n #[inline(never)]\\n pub fn equal_pairs(data: &[u8]) -> u64 {\\n-    let mut count = 0u64;\\n-    let mut i = 0;\\n-    while i < data.len() {\\n-        let mut j = 0;\\n-        while j < data.len() {\\n-            if data[i] == data[j] {\\n-                count = count.wrapping_add(1);\\n-            }\\n-            j += 1;\\n-        }\\n-        i += 1;\\n-    }\\n-    count\\n+    let mut freq = [0u64; 256];\\n+    for &v in data {\\n+        freq[v as usize] = freq[v as usize].wrapping_add(1);\\n+    }\\n+    let mut count = 0u64;\\n+    for &f in &freq {\\n+        count = count.wrapping_add(f.wrapping_mul(f));\\n+    }\\n+    count\\n }\\n\",\"summary\":\"Replaced the O(n^2) pair scan with a 256-bin frequency count and sum of squared frequencies, preserving the exact wrapping u64 result.\"}",
+        "reasoning_content": "We need answer with unified diff and short summary. Need reduce number of guest instructions retired inside one single-threaded Rust test body. Preserve assertions, fixed loop bounds, libtest success. Do not add deps. Do not edit noctum.toml etc. Return unified diff and short summary. Fence not in source. Do not delete work of fixed loop. Replace hot function with cheaper algorithm returning same value for every input. Do not delete computation assertions observe, do not replace with constant.\n\nWe need inspect pattern? Not provided. Hot function equal_pairs computes number of ordered pairs equal including i==j. Cheaper algorithm: count frequencies of each byte value (0..=255), then sum freq^2. That's O(n + 256) instead of O(n^2). Need same value for every input. Implement in src/lib.rs replacing function body. Need diff with exact lines. We need know file context lines 3-20. Hot function source lines 3-20 likely:\n1? Let's infer: File src/lib.rs lines 3-20 are hot function. Need produce diff --git line and hunks. We can include only changed lines. Need copy unchanged/removed lines exactly. We can replace body lines. Need know exact source lines. Provided hot function source exactly. We can craft diff:\ndiff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -3,18 +3,13 @@\n /// Number ...\n #[inline(never)]\n pub fn equal_pairs(data: &[u8]) -> u64 {\n-    let mut count = 0u64;\n-    let mut i = 0;\n-    while i < data.len() {\n-        let mut j = 0;\n-        while j < data.len() {\n-            if data[i] == data[j] {\n-                count = count.wrapping_add(1);\n-            }\n-            j += 1;\n-        }\n-        i += 1;\n-    }\n-    count\n+    let mut freq = [0u64; 256];\n+    for &v in data {\n+        freq[v as usize] = freq[v as usize].wrapping_add(1);\n+    }\n+    let mut count = 0u64;\n+    for &f in &freq {\n+        count = count.wrapping_add(f.wrapping_mul(f));\n+    }\n+    count\n }\nNeed ensure same value for every input: wrapping arithmetic? Original count wrapping_add(1) each pair; sum of n^2 could exceed u64? data len maybe small. Frequencies squared sum equals count mathematically; wrapping_mul could differ if f^2 overflows? f <= len, len maybe < 2^32? u64 no overflow for realistic. But to be exact for every input, use u64 and wrapping? Original count increments wrapping_add(1), total = number pairs mod 2^64. New count = sum f^2 mod 2^64. Since sum f^2 = number pairs mathematically, mod same. Use wrapping_mul and wrapping_add to match. Good.\n\nNeed maybe keep #[inline(never)]? It's hot function; inline never maybe prevents inlining, but we can keep. The instruction says reduce guest instructions retired inside one single-threaded Rust test body. Replacing hot function with cheaper algorithm. Keep signature.\n\nNeed ensure diff includes only changed lines inside hunk. We can include context lines. Need exact indentation. The hot function source has 4 spaces indentation inside. Good.\n\nNeed final only diff and summary. No extra. Ensure no mention fence. Need maybe include test unchanged? No.\n\nNeed be careful: The diff line count: original function lines: doc comment, attribute, pub fn, let mut count, let mut i, while i, let mut j, while j, if, count add, }, j +=1, }, i +=1, }, count, } = 17? Let's count: doc(1), attr(2), pub fn(3), let mut count(4), let mut i(5), while i(6), let mut j(7), while j(8), if(9), count add(10), }(11), j +=1(12), }(13), i +=1(14), }(15), count(16), }(17). Lines 3-20 inclusive = 18 lines? Maybe includes blank line? Provided source block has trailing blank line. Fine.\n\nHunk header can be @@ -3,17 +3,13 @@ maybe. Need exact line numbers? We don't know line 3 start exactly but given. Use @@ -3,17 +3,13 @@. If wrong, still okay? Better use no line numbers? Unified diff requires hunk header. We can use @@ -3,17 +3,13 @@.\n\nNeed ensure removed lines exactly from source. Use minus lines exactly. Added lines. Context lines: doc comment and attribute and pub fn and closing brace. Include them as context.\n\nFinal concise."
+      }
+    }
+  ],
+  "created": 1795351763,
+  "model": "/Users/sean/Library/Caches/noctum-inkling/Inkling-2-Mini-UD-Q2_K_XL.gguf",
+  "system_fingerprint": "b12588-883286076",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 1627,
+    "prompt_tokens": 494,
+    "total_tokens": 2121,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "id": "chatcmpl-yRCgPeQfGkgKYh8cjZLjloDBXxp9Vp8N",
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 494,
+    "prompt_ms": 4756.573,
+    "prompt_per_token_ms": 9.628690283400811,
+    "prompt_per_second": 103.85628476636435,
+    "predicted_n": 1627,
+    "predicted_ms": 91391.81,
+    "predicted_per_token_ms": 56.20652521525215,
+    "predicted_per_second": 17.79152858445412
+  }
+}

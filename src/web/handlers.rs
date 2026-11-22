@@ -32,8 +32,14 @@ pub async fn home(State(state): State<Arc<AppState>>) -> Response {
             "{}:00–{}:00",
             config.schedule.start_hour, config.schedule.end_hour
         ),
-        model: format!("{:?}", lockfile::model_stamp(&config.data_dir())),
-        qemu: format!("{:?}", lockfile::qemu_stamp(&config.data_dir())),
+        model: format!(
+            "{:?}",
+            lockfile::model_stamp(&config.data_dir(), config.model.quant)
+        ),
+        qemu: format!(
+            "{:?}",
+            crate::runtime::measurement_state(&config.data_dir()).await
+        ),
         repositories: repos
             .into_iter()
             .map(|repo| RepoRow {
@@ -65,6 +71,10 @@ pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>)
         None => 0,
     };
     let page = RepositoryTemplate {
+        target: run
+            .as_ref()
+            .map(|run| run.target.clone())
+            .unwrap_or_default(),
         name: repo.name,
         path: repo.path,
         git_sha: run
@@ -120,6 +130,7 @@ pub async fn trial(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> R
     };
     let (outcome, why) = trial_words(&trial.status, trial.reason.as_deref());
     let page = TrialTemplate {
+        target: trial.target,
         test_name: trial.test_name,
         symbol: trial.symbol,
         outcome,
@@ -172,7 +183,7 @@ pub async fn save_settings(
 }
 
 fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
-    let model = lockfile::ModelLock::load().ok();
+    let model = lockfile::ModelLock::load_quant(config.model.quant).ok();
     let qemu = lockfile::QemuLock::load().ok();
     SettingsTemplate {
         start_hour: config.schedule.start_hour,
@@ -190,7 +201,9 @@ fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
             .unwrap_or_default(),
         qemu_lock: qemu
             .map(|lock| {
-                if lock.published() {
+                if cfg!(target_os = "macos") {
+                    format!("{} (Docker worker)", lock.id)
+                } else if lock.published() {
                     lock.id
                 } else if !lock.sha256.is_empty() {
                     format!("{} (pinned, no download URL)", lock.id)
@@ -291,8 +304,11 @@ pub async fn api_status(State(state): State<Arc<AppState>>) -> Json<StatusBody> 
             .map(|d| d.phase.clone())
             .unwrap_or_else(|| "idle".into()),
         detail: daemon.and_then(|d| d.detail),
-        model: stamp_name(lockfile::model_stamp(&config.data_dir())),
-        qemu: stamp_name(lockfile::qemu_stamp(&config.data_dir())),
+        model: stamp_name(lockfile::model_stamp(
+            &config.data_dir(),
+            config.model.quant,
+        )),
+        qemu: stamp_name(crate::runtime::measurement_state(&config.data_dir()).await),
     })
 }
 

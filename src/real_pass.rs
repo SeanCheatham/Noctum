@@ -1,11 +1,6 @@
-//! One night with a real llama.cpp completion and the pinned guest.
-//!
-//! `cargo test` skips the guest run. `qemu/real-pass.sh` runs it. The production lockfile
-//! stays on Qwen2.5-Coder-7B-Instruct Q5_K_M. `NOCTUM_GGUF` is the file this
-//! process actually loads. The fixture leaves `tests` empty. The night measures
-//! the discovered test, reads the plugin's guest-PC ranking, and asks the model
-//! about whichever in-repo function that ranking puts first. A profile that
-//! does not map back to source fails the run. A measured rejection fails it too.
+//! Run the full acceptance test with a local model and the pinned guest.
+//! Set NOCTUM_MODEL_BRIDGE to use native Mac inference from a Linux test.
+//! The bridge transfers prompts and completions through local files.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,7 +11,9 @@ use crate::builder::CargoHost;
 use crate::lockfile::{ModelLock, QemuLock};
 use crate::model::{self, LlamaEndpoint};
 use crate::orchestrator::{Night, RunOptions};
+#[cfg(target_os = "linux")]
 use crate::ports::HostCheck;
+use crate::ports::{ChatMessage, Completion, Inferencer};
 use crate::qemu::QemuRunner;
 
 fn required(name: &str) -> PathBuf {
@@ -30,7 +27,11 @@ fn required(name: &str) -> PathBuf {
 #[ignore = "runs llama.cpp and the pinned QEMU guest; see qemu/real-pass.sh"]
 async fn real_model_proposes_a_diff_and_the_gate_decides() {
     let stage = required("NOCTUM_QEMU_STAGE");
-    let server = required("NOCTUM_LLAMA_SERVER");
+    let server = if std::env::var_os("NOCTUM_MODEL_BRIDGE").is_some() {
+        PathBuf::new()
+    } else {
+        required("NOCTUM_LLAMA_SERVER")
+    };
     let gguf = required("NOCTUM_GGUF");
     let lock = ModelLock::load().unwrap();
     let available = model::mem_available().unwrap();
@@ -40,16 +41,6 @@ async fn real_model_proposes_a_diff_and_the_gate_decides() {
         lock.gguf_filename,
         gguf.display()
     );
-    assert_eq!(
-        lock.gguf_filename, "qwen2.5-coder-7b-instruct-q5_k_m.gguf",
-        "production pin moved"
-    );
-    if gguf.file_name().and_then(|name| name.to_str()) != Some(lock.gguf_filename.as_str()) {
-        assert!(
-            available < production_need,
-            "a smaller model was loaded while the pinned 7B file would fit"
-        );
-    }
 
     // The ranking comes from the guest dump. Print the PCs and the mapped
     // functions. A completion that git cannot apply never reaches QEMU. The
@@ -71,6 +62,56 @@ async fn real_model_proposes_a_diff_and_the_gate_decides() {
         return;
     }
     panic!("three completions and the guest never measured a candidate\n{missed}");
+}
+
+static BRIDGE_SEQUENCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+enum TestModel {
+    Local(LlamaEndpoint),
+    Bridge(PathBuf),
+}
+
+impl Inferencer for TestModel {
+    async fn complete(
+        &self,
+        messages: &[ChatMessage],
+        cancel: &AtomicBool,
+    ) -> anyhow::Result<Completion> {
+        match self {
+            Self::Local(endpoint) => endpoint.complete(messages, cancel).await,
+            Self::Bridge(directory) => {
+                let index = BRIDGE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let messages: Vec<_> = messages
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "role": m.role, "content": m.content,
+                        })
+                    })
+                    .collect();
+                let pending = directory.join("pending-request.json");
+                std::fs::write(&pending, serde_json::to_vec_pretty(&messages)?)?;
+                std::fs::rename(pending, directory.join(format!("request-{index}.json")))?;
+                let response = directory.join(format!("response-{index}.json"));
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1800);
+                while tokio::time::Instant::now() < deadline {
+                    if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                        anyhow::bail!("inference cancelled");
+                    }
+                    if response.is_file() {
+                        let text = std::fs::read_to_string(response)?;
+                        let value: serde_json::Value = serde_json::from_str(&text)?;
+                        if let Some(error) = value["error"].as_str() {
+                            anyhow::bail!("native inference failed: {error}");
+                        }
+                        return model::parse_completion(&text);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                anyhow::bail!("native inference did not respond");
+            }
+        }
+    }
 }
 
 enum Sample {
@@ -214,9 +255,12 @@ async fn one_night(stage: &Path, server: &Path, gguf: &Path, attempt: u32) -> Re
         db.clone(),
         config,
         QemuRunner::new(data.path(), 512),
-        LlamaEndpoint {
-            server: server.to_path_buf(),
-            gguf: gguf.to_path_buf(),
+        match std::env::var_os("NOCTUM_MODEL_BRIDGE") {
+            Some(path) => TestModel::Bridge(path.into()),
+            None => TestModel::Local(LlamaEndpoint {
+                server: server.to_path_buf(),
+                gguf: gguf.to_path_buf(),
+            }),
         },
         CargoHost,
     );
@@ -461,6 +505,7 @@ fn the_fixture_rejects_a_bound_shrink_a_dropped_assert_and_a_rewritten_total() {
     .expect("a linear count keeps the asserted total");
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn deleting_the_scan_fails_the_host_check_and_the_linear_count_passes() {
     let repo = init_fixture();

@@ -1,0 +1,90 @@
+   Compiling noctum v0.2.0 (/Users/sean/git/Noctum)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.08s
+     Running unittests src/lib.rs (target/debug/build/noctum/39d399552f3cb001/out/noctum-39d399552f3cb001)
+
+running 70 tests
+test config::tests::equal_hours_are_an_empty_window ... ok
+test config::tests::daytime_window_includes_the_start_and_excludes_the_end ... ok
+test config::tests::overnight_window_wraps_past_midnight ... ok
+test config::tests::defaults_match_the_plan ... ok
+test config::tests::database_file_is_perf_db ... ok
+test builder::tests::abort_profile_is_detected ... ok
+test config::tests::overnight_window_key_belongs_to_the_evening_it_started ... ok
+test diffcheck::tests::empty_diff_is_rejected ... ok
+test builder::tests::parses_libtest_list ... ok
+test diffcheck::tests::a_misnumbered_hunk_is_applied_where_the_old_lines_match ... ok
+test diffcheck::tests::an_off_by_one_second_hunk_still_applies ... ok
+test diffcheck::tests::allows_a_comment_in_production_code ... ok
+test config::tests::old_endpoint_list_is_a_parse_error ... ok
+test fence::tests::dependency_is_a_path_dev_dependency ... ok
+test builder::tests::bench_harness_false_is_read_from_the_manifest ... ok
+test diffcheck::tests::rejects_manifests_protected_paths_and_escapes ... ok
+test gate::tests::rejects_a_tiny_body_and_a_small_win ... ok
+test gate::tests::accepts_a_real_win ... ok
+test gate::tests::rejects_each_failed_check ... ok
+test guest_smoke::fenced_musl_harness_counts_guest_instructions ... ignored, boots the pinned QEMU guest; run qemu/smoke.sh
+test gate::tests::rejects_no_change_and_a_slowdown ... ok
+test hashutil::tests::last_lines_keeps_the_tail ... ok
+test hashutil::tests::hashes_known_vector ... ok
+test hashutil::tests::tail_keeps_the_end ... ok
+test fence::tests::guard_is_the_first_statement_and_does_not_add_a_line ... ok
+test fence::tests::missing_function_is_an_error ... ok
+test config::tests::round_trip_save ... ok
+test model::tests::extra_text_is_rejected ... ok
+test fence::tests::installed_crate_contains_the_out_instruction ... ok
+test diffcheck::tests::a_misnumbered_hunk_still_rejects_a_lowered_bound ... ok
+test diffcheck::tests::rejects_a_rewritten_expected_value ... ok
+test model::tests::prompt_names_the_test_and_forbids_new_dependencies ... ok
+test model::tests::parses_a_schema_object ... ok
+test lockfile::tests::qemu_bundle_is_pinned_without_a_download_url ... ok
+test model::tests::server_uses_one_slot_and_low_reasoning ... ok
+test ports::tests::libtest_duration_is_not_part_of_the_comparison ... ok
+test diffcheck::tests::rejects_a_deleted_assertion_and_a_lowered_bound ... ok
+test profile::tests::a_second_fence_is_an_error_record ... ok
+test profile::tests::discards_a_function_under_one_percent_and_protected_files ... ok
+test profile::tests::parses_a_dump_and_drops_kernel_pcs ... ok
+test profile::tests::static_elf_has_no_interpreter ... ok
+test qemu::tests::map_line_is_the_load_bias ... ok
+test qemu::tests::measurement_command_is_the_pinned_guest ... ok
+test real_pass::a_lowered_for_bound_ends_sampling_and_a_host_failure_does_not ... ok
+test model::tests::sends_low_reasoning_and_the_output_limit ... ok
+test lockfile::tests::model_lock_selects_matching_packages_and_quant_files ... ok
+test real_pass::real_model_proposes_a_diff_and_the_gate_decides ... ignored, runs llama.cpp and the pinned QEMU guest; see qemu/real-pass.sh
+test process::tests::captures_stdout ... ok
+test repo_config::tests::empty_file_uses_plan_defaults ... ok
+test model::tests::extracts_flat_and_wrapped_server_packages ... ok
+test repo_config::tests::missing_file_is_an_error ... ok
+test repo_config::tests::mutation_keys_are_named_in_the_error ... ok
+test repo_config::tests::parses_the_documented_shape ... ok
+test repo_config::tests::world_writable_file_is_rejected ... ok
+test selector::tests::harness_prefix_parses_separately_from_a_module_path ... ok
+test selector::tests::classifies_plain_custom_ignore_and_denylist ... ok
+test selector::tests::skip_glob_matches_the_test_name ... ok
+test web::handlers::tests::morning_words_name_the_night ... ok
+test selector::tests::direct_callees_include_encode_once ... ok
+test selector::tests::scan_order_is_largest_body_first_and_capped ... ok
+test model::tests::download_keeps_a_matching_file_and_drops_a_mismatch ... ok
+test source_tests::rust_sources_do_not_mention_the_old_model_client ... ok
+test model::tests::a_completion_without_a_final_newline_can_be_applied ... ok
+test model::tests::host_resource_checks_return_bytes ... ok
+test builder::tests::musl_target_is_visible_here_or_the_error_names_the_command ... ok
+test web::handlers::tests::repository_page_reads_candidate_counts_from_perf_db ... ok
+test worktree::tests::a_miscounted_hunk_still_applies ... ok
+test real_pass::the_fixture_rejects_a_bound_shrink_a_dropped_assert_and_a_rewritten_total ... ok
+test worktree::tests::apply_and_commit_stay_out_of_the_original_checkout ... ok
+test process::tests::timeout_kills_a_sleep ... ok
+
+test result: ok. 68 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 1.02s
+
+     Running unittests src/main.rs (target/debug/build/noctum/dbaed11cc276275b/out/noctum-dbaed11cc276275b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests noctum
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

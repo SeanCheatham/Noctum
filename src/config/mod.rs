@@ -1,6 +1,6 @@
 //! Application configuration at `~/.config/noctum/config.toml`.
 //!
-//! The model and the QEMU bundle are lockfiles, not fields in this file.
+//! The model files and the QEMU bundle are pinned in lockfiles.
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Local, Timelike};
@@ -16,6 +16,7 @@ pub struct Config {
     pub schedule: ScheduleConfig,
     pub gate: GateConfig,
     pub guest: GuestConfig,
+    pub model: ModelConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
 }
@@ -73,6 +74,20 @@ pub struct GateConfig {
 pub struct GuestConfig {
     #[serde(default = "default_memory")]
     pub memory_mb: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelQuant {
+    #[default]
+    Q2,
+    Q4,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ModelConfig {
+    pub quant: ModelQuant,
 }
 
 fn default_log_level() -> String {
@@ -325,6 +340,7 @@ mod tests {
         assert_eq!(config.gate.max_scan, 20);
         assert_eq!(config.gate.measure_repeats, 2);
         assert_eq!(config.guest.memory_mb, 1024);
+        assert_eq!(config.model.quant, ModelQuant::Q2);
         assert_eq!(config.general.author_name, "Noctum");
         assert_eq!(config.general.author_email, "noctum@localhost");
     }
@@ -363,10 +379,17 @@ model = "qwen2.5-coder"
     fn round_trip_save() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let config = Config::default();
+        let config = Config {
+            model: ModelConfig {
+                quant: ModelQuant::Q4,
+            },
+            ..Config::default()
+        };
         config.save(Some(&path)).unwrap();
         let loaded = Config::load(Some(&path)).unwrap();
         assert_eq!(loaded.gate.max_candidates, 3);
         assert_eq!(loaded.web.host, "127.0.0.1");
+        assert_eq!(loaded.model.quant, ModelQuant::Q4);
+        assert!(toml::from_str::<Config>("[model]\nquant = 'q3'").is_err());
     }
 }

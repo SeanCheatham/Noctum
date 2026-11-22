@@ -1,0 +1,3 @@
+# Preserve captured output and patch context lines.
+results/**/*.diff -whitespace
+results/**/*.txt -whitespace
