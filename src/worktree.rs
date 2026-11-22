@@ -264,6 +264,15 @@ pub fn diff_paths(diff: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub fn same_path(left: &Path, right: &Path) -> bool {
+    left == right
+        || left
+            .canonicalize()
+            .ok()
+            .zip(right.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

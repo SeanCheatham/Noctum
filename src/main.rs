@@ -7,14 +7,14 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tokio::sync::RwLock;
 
-use noctum::builder::CargoHost;
 use noctum::config::Config;
 use noctum::daemon::Daemon;
 use noctum::db::Database;
 use noctum::lockfile::{self, AssetState};
-use noctum::model::{self, LlamaManager};
-use noctum::orchestrator::{self, Night, RunOptions};
-use noctum::qemu::{self, QemuRunner};
+use noctum::model;
+use noctum::orchestrator::RunOptions;
+use noctum::qemu;
+use noctum::runtime;
 use noctum::web::start_server;
 use noctum::AppState;
 
@@ -32,6 +32,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    Runtime {
+        #[command(subcommand)]
+        command: RuntimeCommand,
+    },
     /// Daemon plus the localhost dashboard
     Start,
     /// One pass, ignoring the window
@@ -48,6 +52,12 @@ enum Command {
         command: QemuCommand,
     },
     /// Daemon phase, lockfile state, and the latest run of each repository
+    Status,
+}
+
+#[derive(Subcommand)]
+enum RuntimeCommand {
+    Prepare,
     Status,
 }
 
@@ -92,6 +102,31 @@ async fn main() -> Result<()> {
                 Ok(())
             }
         },
+        Command::Runtime { command } => match command {
+            RuntimeCommand::Prepare => {
+                if cfg!(target_os = "macos") {
+                    let data = config.data_dir();
+                    tokio::select! {
+                        result = runtime::prepare_image(&data) => result,
+                        signal = tokio::signal::ctrl_c() => { signal?; anyhow::bail!("runtime preparation was cancelled"); },
+                    }
+                } else {
+                    qemu::fetch(&config.data_dir()).await
+                }
+            }
+            RuntimeCommand::Status => {
+                if cfg!(target_os = "macos") {
+                    if !runtime::image_ready().await {
+                        anyhow::bail!("Linux worker is not ready; run noctum runtime prepare");
+                    }
+                    println!("Linux worker ready");
+                } else {
+                    lockfile::verify_qemu(&config.data_dir())?;
+                    println!("QEMU ready");
+                }
+                Ok(())
+            }
+        },
         Command::Status => status(&config).await,
     }
 }
@@ -115,10 +150,13 @@ async fn start(config: Config, config_path: Option<PathBuf>) -> Result<()> {
             }
         })
     };
+    let mut task = tokio::spawn(daemon.run());
     tokio::select! {
-        _ = daemon.run() => {}
-        _ = tokio::signal::ctrl_c() => {
+        result = &mut task => result?,
+        signal = tokio::signal::ctrl_c() => {
+            signal?;
             state.daemon.request_stop();
+            task.await?;
         }
     }
     web.abort();
@@ -127,27 +165,23 @@ async fn start(config: Config, config_path: Option<PathBuf>) -> Result<()> {
 
 async fn run_once(config: Config, repo: Option<PathBuf>) -> Result<()> {
     let db = open_db(&config).await?;
-    let data = config.data_dir();
-    let asset_error = orchestrator::prepare_assets(&data, config.model.quant)
-        .await
-        .err()
-        .map(|err| err.to_string());
-    let night = Night::new(
-        db,
-        config.clone(),
-        QemuRunner::new(data.clone(), config.guest.memory_mb),
-        LlamaManager::new(data, config.model.quant),
-        CargoHost,
-    );
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    night
-        .run_pass(&RunOptions {
-            ignore_window: true,
-            stop,
-            asset_error,
-            only_repo: repo,
-        })
-        .await
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let opts = RunOptions {
+        ignore_window: true,
+        stop: stop.clone(),
+        asset_error: None,
+        only_repo: repo.map(|p| p.canonicalize()).transpose()?,
+    };
+    let future = runtime::run_pass(db, config, opts);
+    tokio::pin!(future);
+    tokio::select! {
+        result = &mut future => result,
+        signal = tokio::signal::ctrl_c() => {
+            signal?;
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            future.await
+        }
+    }
 }
 
 async fn model_status(config: &Config) -> Result<()> {
@@ -168,7 +202,18 @@ async fn status(config: &Config) -> Result<()> {
         stamp(lockfile::model_stamp(&data, config.model.quant))
     );
     println!("llama {}", stamp(lockfile::llama_stamp(&data)));
-    println!("qemu {}", stamp(lockfile::qemu_stamp(&data)));
+    if cfg!(target_os = "macos") {
+        println!(
+            "worker {}",
+            if runtime::image_ready().await {
+                "ready"
+            } else {
+                "missing"
+            }
+        );
+    } else {
+        println!("qemu {}", stamp(lockfile::qemu_stamp(&data)));
+    }
     if !config.database_path().is_file() {
         println!("phase idle");
         return Ok(());

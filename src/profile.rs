@@ -9,11 +9,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use object::{Object, ObjectSymbol};
+use object::{Object, ObjectSegment, ObjectSymbol};
 
 use crate::selector::FnSpan;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProfileDump {
     pub total: u64,
     pub blocks: Vec<(u64, u64)>,
@@ -230,6 +230,17 @@ pub fn symbolize(bytes: &[u8], addrs: &[u64]) -> Result<Vec<Option<LineHit>>> {
         }));
     }
     Ok(out)
+}
+
+pub fn elf_load_bias(bytes: &[u8], mapped_base: u64) -> Result<u64> {
+    let elf = object::File::parse(bytes).context("parse measured ELF")?;
+    let image_base = elf
+        .segments()
+        .filter(|segment| segment.file_range().1 > 0)
+        .filter_map(|segment| segment.address().checked_sub(segment.file_range().0))
+        .min()
+        .context("measured ELF has no load segment")?;
+    Ok(mapped_base.wrapping_sub(image_base))
 }
 
 pub fn elf_has_repo_line(bytes: &[u8], worktree: &Path) -> Result<bool> {

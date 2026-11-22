@@ -16,6 +16,7 @@ pub struct HomeTemplate {
 #[derive(Template)]
 #[template(path = "repository.html")]
 pub struct RepositoryTemplate {
+    pub target: String,
     pub name: String,
     pub path: String,
     pub git_sha: String,
@@ -30,6 +31,7 @@ pub struct RepositoryTemplate {
 #[derive(Template)]
 #[template(path = "trial.html")]
 pub struct TrialTemplate {
+    pub target: String,
     pub test_name: String,
     pub symbol: String,
     pub outcome: String,

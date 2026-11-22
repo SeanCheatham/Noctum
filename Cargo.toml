@@ -10,9 +10,18 @@ description = "A local overnight daemon that keeps a Rust change when a test get
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/SeanCheatham/Noctum"
 readme = "README.md"
+default-run = "noctum"
 keywords = ["performance", "rust", "qemu", "llama", "benchmark"]
 categories = ["development-tools", "command-line-utilities"]
 authors = ["Sean Cheatham"]
+
+[features]
+worker = []
+
+[[bin]]
+name = "noctum-worker"
+path = "src/bin/noctum-worker.rs"
+required-features = ["worker"]
 
 [dependencies]
 addr2line = "0.24"
@@ -29,7 +38,7 @@ mime_guess = "2"
 object = "0.36"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
-rust-embed = "8"
+rust-embed = { version = "8", features = ["include-exclude"] }
 rustc-demangle = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

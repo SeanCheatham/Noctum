@@ -26,6 +26,14 @@ OUT="$ROOT/qemu/out"
 STAGE="$OUT/stage"
 BUNDLE_ID="qemu-9.2.0-linux-6.12.10"
 GUEST_CROSS_COMPILE="${GUEST_CROSS_COMPILE:-}"
+GUEST_ARCH="${NOCTUM_GUEST_ARCH:-x86_64}"
+case "$GUEST_ARCH" in
+    x86_64) KERNEL_ARCH=x86; BUSYBOX_ARCH=x86_64; KERNEL_IMAGE=arch/x86/boot/bzImage; FRAGMENT=kernel.fragment ;;
+    aarch64) KERNEL_ARCH=arm64; BUSYBOX_ARCH=arm64; KERNEL_IMAGE=arch/arm64/boot/Image; FRAGMENT=kernel-arm64.fragment; BUNDLE_ID="$BUNDLE_ID-aarch64" ;;
+    *) echo "unsupported guest architecture: $GUEST_ARCH" >&2; exit 1 ;;
+esac
+QEMU_BINARY="qemu-system-$GUEST_ARCH"
+
 
 QEMU_TAR="qemu-9.2.0.tar.xz"
 QEMU_URL="https://download.qemu.org/qemu-9.2.0.tar.xz"
@@ -115,12 +123,12 @@ gcc -shared -fPIC -fvisibility=hidden -O2 -Wall -Wextra \
     "$ROOT/qemu/plugin/noctum_profile.c" \
     $(pkg-config --libs glib-2.0)
 
-if [ ! -x "$SRC/qemu-9.2.0/build/qemu-system-x86_64" ]; then
+if [ ! -x "$SRC/qemu-9.2.0/build/$QEMU_BINARY" ]; then
     echo "configuring and building qemu"
     (
         cd "$SRC/qemu-9.2.0"
         ./configure \
-            --target-list=x86_64-softmmu \
+            --target-list="$GUEST_ARCH-softmmu" \
             --enable-plugins \
             --enable-virtfs \
             --disable-werror \
@@ -143,9 +151,9 @@ if [ ! -x "$SRC/qemu-9.2.0/build/qemu-system-x86_64" ]; then
     )
 fi
 
-cp "$SRC/qemu-9.2.0/build/qemu-system-x86_64" "$STAGE/qemu-system-x86_64"
+cp "$SRC/qemu-9.2.0/build/$QEMU_BINARY" "$STAGE/$QEMU_BINARY"
 cp "$SRC/qemu-9.2.0/build/qemu-img" "$STAGE/qemu-img"
-chmod +x "$STAGE/qemu-system-x86_64" "$STAGE/qemu-img"
+chmod +x "$STAGE/$QEMU_BINARY" "$STAGE/qemu-img"
 rm -rf "$STAGE/pc-bios"
 mkdir -p "$STAGE/pc-bios"
 find "$SRC/qemu-9.2.0/pc-bios" -type f \
@@ -156,13 +164,13 @@ if [ ! -f "$STAGE/pc-bios/bios-256k.bin" ]; then
     exit 1
 fi
 
-if [ ! -f "$SRC/linux-6.12.10/arch/x86/boot/bzImage" ]; then
+if [ ! -f "$SRC/linux-6.12.10/$KERNEL_IMAGE" ]; then
     echo "configuring and building the kernel"
     (
         cd "$SRC/linux-6.12.10"
-        make ARCH=x86 CROSS_COMPILE="$GUEST_CROSS_COMPILE" tinyconfig
-        ./scripts/kconfig/merge_config.sh -m .config "$ROOT/qemu/kernel.fragment"
-        make ARCH=x86 CROSS_COMPILE="$GUEST_CROSS_COMPILE" olddefconfig
+        make ARCH="$KERNEL_ARCH" CROSS_COMPILE="$GUEST_CROSS_COMPILE" tinyconfig
+        ./scripts/kconfig/merge_config.sh -m .config "$ROOT/qemu/$FRAGMENT"
+        make ARCH="$KERNEL_ARCH" CROSS_COMPILE="$GUEST_CROSS_COMPILE" olddefconfig
         for opt in \
             CONFIG_64BIT \
             CONFIG_BLK_DEV_INITRD \
@@ -174,16 +182,13 @@ if [ ! -f "$SRC/linux-6.12.10/arch/x86/boot/bzImage" ]; then
             CONFIG_SHMEM \
             CONFIG_TMPFS \
             CONFIG_DEVTMPFS \
-            CONFIG_SERIAL_8250 \
-            CONFIG_SERIAL_8250_CONSOLE \
             CONFIG_PCI \
             CONFIG_VIRTIO_PCI \
             CONFIG_VIRTIO_BLK \
             CONFIG_NET_9P \
             CONFIG_NET_9P_VIRTIO \
             CONFIG_9P_FS \
-            CONFIG_X86_IOPL_IOPERM \
-            CONFIG_ACPI
+            CONFIG_VIRTIO_PCI
         do
             if ! grep -q "^${opt}=y$" .config; then
                 echo "kernel config missing $opt" >&2
@@ -191,10 +196,10 @@ if [ ! -f "$SRC/linux-6.12.10/arch/x86/boot/bzImage" ]; then
                 exit 1
             fi
         done
-        make ARCH=x86 CROSS_COMPILE="$GUEST_CROSS_COMPILE" -j"$jobs" bzImage
+        make ARCH="$KERNEL_ARCH" CROSS_COMPILE="$GUEST_CROSS_COMPILE" -j"$jobs" "${KERNEL_IMAGE##*/}"
     )
 fi
-cp "$SRC/linux-6.12.10/arch/x86/boot/bzImage" "$STAGE/vmlinuz"
+cp "$SRC/linux-6.12.10/$KERNEL_IMAGE" "$STAGE/vmlinuz"
 
 "${GUEST_CROSS_COMPILE}gcc" -std=c11 -static -O2 -Wall -Wextra -o "$OUT/runner" "$ROOT/qemu/runner/runner.c"
 
@@ -205,7 +210,7 @@ if [ ! -x "$BB/busybox" ]; then
         cd "$BB"
         # allnoconfig's second pass forces every bool back to n, so a seeded
         # KCONFIG_ALLCONFIG does not survive. Merge the fragment afterwards.
-        make ARCH=x86_64 CROSS_COMPILE="$GUEST_CROSS_COMPILE" allnoconfig
+        make ARCH="$BUSYBOX_ARCH" CROSS_COMPILE="$GUEST_CROSS_COMPILE" allnoconfig
         awk '
             NR == FNR {
                 if ($0 ~ /^CONFIG_[A-Za-z0-9_]+=/ || $0 ~ /^# CONFIG_[A-Za-z0-9_]+ is not set$/) {
@@ -228,7 +233,7 @@ if [ ! -x "$BB/busybox" ]; then
             }
         ' "$ROOT/qemu/busybox.fragment" .config > .config.merged
         mv .config.merged .config
-        yes '' | make ARCH=x86_64 CROSS_COMPILE="$GUEST_CROSS_COMPILE" oldconfig >/dev/null
+        yes '' | make ARCH="$BUSYBOX_ARCH" CROSS_COMPILE="$GUEST_CROSS_COMPILE" oldconfig >/dev/null
         for opt in CONFIG_STATIC CONFIG_BUSYBOX CONFIG_SH_IS_ASH CONFIG_ASH CONFIG_MOUNT CONFIG_POWEROFF; do
             if ! grep -q "^${opt}=y$" .config; then
                 echo "busybox config missing $opt" >&2
@@ -236,7 +241,7 @@ if [ ! -x "$BB/busybox" ]; then
                 exit 1
             fi
         done
-        make ARCH=x86_64 CROSS_COMPILE="$GUEST_CROSS_COMPILE" -j"$jobs"
+        make ARCH="$BUSYBOX_ARCH" CROSS_COMPILE="$GUEST_CROSS_COMPILE" -j"$jobs"
     )
 fi
 applets="$("$BB/busybox" --list)"
@@ -272,10 +277,11 @@ fi
 
 (
     cd "$STAGE"
-    sha256sum qemu-system-x86_64 qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz > MANIFEST
+    printf '%s\n' "$GUEST_ARCH" > ARCH
+    sha256sum ARCH "$QEMU_BINARY" qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz > MANIFEST
     find pc-bios -type f | sort | xargs sha256sum >> MANIFEST
     tar -czf "$OUT/noctum-qemu-$BUNDLE_ID.tar.gz" \
-        qemu-system-x86_64 qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz pc-bios MANIFEST
+        ARCH "$QEMU_BINARY" qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz pc-bios MANIFEST
 )
 
 echo "bundle $OUT/noctum-qemu-$BUNDLE_ID.tar.gz"

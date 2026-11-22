@@ -1,0 +1,83 @@
+{
+  "date": "2026-11-22",
+  "host": {
+    "os": "macOS",
+    "cpu": "Apple M4",
+    "memory_gib": 16
+  },
+  "model": {
+    "name": "Inkling 2 Mini",
+    "quant": "UD-Q2_K_XL",
+    "runtime": "b12588-mix-c0c3de8",
+    "inference": "native Metal"
+  },
+  "guest": {
+    "target": "aarch64-unknown-linux-musl",
+    "cpu": "cortex-a72",
+    "qemu": "9.2.0",
+    "kernel": "6.12.10",
+    "acceleration": "TCG",
+    "icount": "shift=0,sleep=on"
+  },
+  "cli": {
+    "status": "ok",
+    "accepted_trials": 1,
+    "fixture": "qemu/fixtures/observed/src/lib.rs",
+    "baseline_count": 316564,
+    "candidate_count": 52644,
+    "reduction_percent": 83.3702,
+    "baseline_pair_agreed": true,
+    "candidate_pair_agreed": true,
+    "host_check_passed": true,
+    "stdout_matched": true,
+    "user_head_preserved": true,
+    "user_checkout_clean": true,
+    "worker_removed": true,
+    "target_in_commit": true
+  },
+  "arm_fences": {
+    "loop_1000": [
+      6011,
+      6011
+    ],
+    "loop_2000": [
+      12011,
+      12011
+    ]
+  },
+  "lifecycle": {
+    "worker_removed_after_controller_sigkill": true,
+    "startup_cancelled_without_a_worker_leak": true
+  },
+  "reference": {
+    "cases": 3797,
+    "diffcheck": true,
+    "applies": true,
+    "host_tests": true,
+    "reference_tests": true
+  },
+  "checks": {
+    "mac_unit_tests": 73,
+    "linux_unit_tests": 85,
+    "mac_clippy": true,
+    "format": true,
+    "shell_syntax": true,
+    "workflow_yaml": true
+  },
+  "limits": [
+    "The model test used one fixture. It does not establish general patch quality.",
+    "Linux ARM64 instruction counts do not measure macOS execution time.",
+    "ARM64 and x86_64 counts must stay separate.",
+    "The Intel Mac path was not tested on Intel hardware."
+  ],
+  "x86_fences": {
+    "small_loop": [
+      6013,
+      6013
+    ],
+    "encode_batch": [
+      60013,
+      60013
+    ]
+  }
+}

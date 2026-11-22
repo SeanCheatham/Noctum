@@ -36,7 +36,10 @@ pub async fn home(State(state): State<Arc<AppState>>) -> Response {
             "{:?}",
             lockfile::model_stamp(&config.data_dir(), config.model.quant)
         ),
-        qemu: format!("{:?}", lockfile::qemu_stamp(&config.data_dir())),
+        qemu: format!(
+            "{:?}",
+            crate::runtime::measurement_state(&config.data_dir()).await
+        ),
         repositories: repos
             .into_iter()
             .map(|repo| RepoRow {
@@ -68,6 +71,10 @@ pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>)
         None => 0,
     };
     let page = RepositoryTemplate {
+        target: run
+            .as_ref()
+            .map(|run| run.target.clone())
+            .unwrap_or_default(),
         name: repo.name,
         path: repo.path,
         git_sha: run
@@ -123,6 +130,7 @@ pub async fn trial(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> R
     };
     let (outcome, why) = trial_words(&trial.status, trial.reason.as_deref());
     let page = TrialTemplate {
+        target: trial.target,
         test_name: trial.test_name,
         symbol: trial.symbol,
         outcome,
@@ -193,7 +201,9 @@ fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
             .unwrap_or_default(),
         qemu_lock: qemu
             .map(|lock| {
-                if lock.published() {
+                if cfg!(target_os = "macos") {
+                    format!("{} (Docker worker)", lock.id)
+                } else if lock.published() {
                     lock.id
                 } else if !lock.sha256.is_empty() {
                     format!("{} (pinned, no download URL)", lock.id)
@@ -298,7 +308,7 @@ pub async fn api_status(State(state): State<Arc<AppState>>) -> Json<StatusBody> 
             &config.data_dir(),
             config.model.quant,
         )),
-        qemu: stamp_name(lockfile::qemu_stamp(&config.data_dir())),
+        qemu: stamp_name(crate::runtime::measurement_state(&config.data_dir()).await),
     })
 }
 

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CmdOutput {
     pub success: bool,
     pub timed_out: bool,
@@ -53,14 +53,72 @@ pub async fn run(
     {
         command.process_group(0);
     }
-    spawn(command, timeout).await
+    spawn(command, timeout, None).await
 }
 
 pub async fn sh(cwd: &Path, script: &str, timeout: Duration) -> CmdOutput {
     run(cwd, "sh", &["-c", script], &[], timeout).await
 }
 
-async fn spawn(mut command: Command, timeout: Duration) -> CmdOutput {
+pub async fn run_input(
+    cwd: &Path,
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    input: Vec<u8>,
+) -> CmdOutput {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
+    spawn(command, timeout, Some(input)).await
+}
+
+pub async fn run_logged(
+    cwd: &Path,
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    log: &Path,
+) -> anyhow::Result<CmdOutput> {
+    let file = std::fs::File::create(log)?;
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(file.try_clone()?)
+        .stderr(file)
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
+    Ok(spawn(command, timeout, None).await)
+}
+
+struct SpawnedGroup(u32);
+impl Drop for SpawnedGroup {
+    fn drop(&mut self) {
+        if self.0 == 0 {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-s", "KILL", "--", &format!("-{}", self.0)])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
+async fn spawn(mut command: Command, timeout: Duration, input: Option<Vec<u8>>) -> CmdOutput {
     let started = Instant::now();
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -75,7 +133,14 @@ async fn spawn(mut command: Command, timeout: Duration) -> CmdOutput {
             };
         }
     };
+    if let (Some(mut pipe), Some(input)) = (child.stdin.take(), input) {
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let _ = pipe.write_all(&input).await;
+        });
+    }
     let pid = child.id().unwrap_or(0);
+    let group = SpawnedGroup(pid);
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     // Reads run beside the wait. Dropping a Child while a read is still
@@ -97,6 +162,7 @@ async fn spawn(mut command: Command, timeout: Duration) -> CmdOutput {
             (status, true)
         }
     };
+    drop(group);
     let (out, err) = pipes(stdout_task, stderr_task).await;
 
     match finished {
@@ -223,6 +289,59 @@ mod tests {
         let output = run(dir.path(), "echo", &["hello"], &[], Duration::from_secs(5)).await;
         assert!(output.success);
         assert_eq!(output.stdout.trim(), "hello");
+    }
+
+    #[tokio::test]
+    async fn passes_request_bytes_and_closes_stdin() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = b"{\"request\":42}\n".to_vec();
+        let output = run_input(
+            directory.path(),
+            "cat",
+            &[],
+            Duration::from_secs(5),
+            input.clone(),
+        )
+        .await;
+        assert!(output.success, "{}", output.combined());
+        assert_eq!(output.stdout.as_bytes(), input);
+    }
+
+    #[tokio::test]
+    async fn cancellation_kills_child_processes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_path_buf();
+        let task = tokio::spawn(async move {
+            run(
+                &path,
+                "sh",
+                &["-c", "sleep 30 & echo $! > child.pid; wait"],
+                &[],
+                Duration::from_secs(60),
+            )
+            .await
+        });
+        for _ in 0..100 {
+            if directory.path().join("child.pid").is_file() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let pid = std::fs::read_to_string(directory.path().join("child.pid")).unwrap();
+        task.abort();
+        let _ = task.await;
+        for _ in 0..100 {
+            let output = std::process::Command::new("ps")
+                .args(["-o", "stat=", "-p", pid.trim()])
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&output.stdout);
+            if state.trim().is_empty() || state.trim().starts_with('Z') {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("child process {pid} is still running");
     }
 
     #[tokio::test]

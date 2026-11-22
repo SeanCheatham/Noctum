@@ -76,6 +76,14 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
+        let target_column: Option<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('runs') WHERE name = 'target'")
+                .fetch_optional(&self.pool)
+                .await?;
+        if target_column.is_none() {
+            sqlx::query("ALTER TABLE runs ADD COLUMN target TEXT NOT NULL DEFAULT 'x86_64-unknown-linux-musl'")
+                .execute(&self.pool).await?;
+        }
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS test_baselines (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +247,15 @@ impl Database {
         Ok(row.try_get("id")?)
     }
 
+    pub async fn set_run_target(&self, id: i64, target: &str) -> Result<()> {
+        sqlx::query("UPDATE runs SET target = ? WHERE id = ?")
+            .bind(target)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn finish_run(
         &self,
         id: i64,
@@ -258,12 +275,18 @@ impl Database {
         Ok(())
     }
 
-    pub async fn repo_finished_window(&self, repository_id: i64, window_key: &str) -> Result<bool> {
+    pub async fn repo_finished_window(
+        &self,
+        repository_id: i64,
+        window_key: &str,
+        target: &str,
+    ) -> Result<bool> {
         let row: Option<(i64,)> = sqlx::query_as(
-            "SELECT id FROM runs WHERE repository_id = ? AND window_key = ? AND status = 'ok' LIMIT 1",
+            "SELECT id FROM runs WHERE repository_id = ? AND window_key = ? AND target = ? AND status = 'ok' LIMIT 1",
         )
         .bind(repository_id)
         .bind(window_key)
+        .bind(target)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some())
@@ -413,18 +436,20 @@ impl Database {
         test_name: &str,
         symbol: &str,
         file_blob: &str,
+        target: &str,
     ) -> Result<bool> {
         let row: Option<(i64,)> = sqlx::query_as(
             "SELECT t.id FROM trials t
              JOIN candidates c ON c.id = t.candidate_id
              JOIN runs r ON r.id = c.run_id
-             WHERE r.repository_id = ? AND c.test_name = ? AND c.symbol = ? AND c.file_blob = ?
+             WHERE r.repository_id = ? AND c.test_name = ? AND c.symbol = ? AND c.file_blob = ? AND r.target = ?
              LIMIT 1",
         )
         .bind(repository_id)
         .bind(test_name)
         .bind(symbol)
         .bind(file_blob)
+        .bind(target)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some())
@@ -433,7 +458,7 @@ impl Database {
     pub async fn pending_commits(&self, repository_id: i64) -> Result<Vec<PendingCommit>> {
         Ok(sqlx::query_as(
             "SELECT t.id AS trial_id, t.unified_diff AS unified_diff, t.model_summary AS model_summary,
-                    c.test_name AS test_name, t.baseline_count AS baseline_count,
+                    c.test_name AS test_name, r.target AS target, t.baseline_count AS baseline_count,
                     t.insn_count AS insn_count, t.improvement_ratio AS improvement_ratio
              FROM trials t
              JOIN candidates c ON c.id = t.candidate_id
@@ -462,11 +487,12 @@ impl Database {
 
     pub async fn trials_for_run(&self, run_id: i64) -> Result<Vec<Trial>> {
         Ok(sqlx::query_as(
-            "SELECT t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
+            "SELECT r.target, t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
                     t.baseline_count, t.insn_count, t.improvement_ratio, t.host_check_passed,
                     t.stdout_matched, t.tool_output, c.test_name, c.harness, c.symbol, c.file
              FROM trials t
              JOIN candidates c ON c.id = t.candidate_id
+             JOIN runs r ON r.id = c.run_id
              WHERE c.run_id = ?
              ORDER BY t.id",
         )
@@ -477,11 +503,12 @@ impl Database {
 
     pub async fn trial(&self, id: i64) -> Result<Option<Trial>> {
         Ok(sqlx::query_as(
-            "SELECT t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
+            "SELECT r.target, t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
                     t.baseline_count, t.insn_count, t.improvement_ratio, t.host_check_passed,
                     t.stdout_matched, t.tool_output, c.test_name, c.harness, c.symbol, c.file
              FROM trials t
              JOIN candidates c ON c.id = t.candidate_id
+             JOIN runs r ON r.id = c.run_id
              WHERE t.id = ?",
         )
         .bind(id)
@@ -500,5 +527,78 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0.unwrap_or(0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+    use crate::target::GuestTarget;
+
+    #[tokio::test]
+    async fn target_keeps_run_history_separate() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = Database::new(&temp.path().join("perf.db")).await.unwrap();
+        db.run_migrations().await.unwrap();
+        let repo = db.add_repository("/fixture", "fixture").await.unwrap();
+        let run = db
+            .insert_run(repo, "head", None, "ok", Some("night"))
+            .await
+            .unwrap();
+        // Old rows retain the original x86 target.
+        sqlx::query("ALTER TABLE runs DROP COLUMN target")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        db.run_migrations().await.unwrap();
+        let x86 = GuestTarget::X86_64.triple();
+        let arm = GuestTarget::Aarch64.triple();
+        assert_eq!(db.latest_run(repo).await.unwrap().unwrap().target, x86);
+        assert!(db.repo_finished_window(repo, "night", x86).await.unwrap());
+        assert!(!db.repo_finished_window(repo, "night", arm).await.unwrap());
+        let candidate = db
+            .insert_candidate(
+                run,
+                "test",
+                "lib",
+                1,
+                "hot",
+                "src/lib.rs",
+                1,
+                2,
+                200_000,
+                1.0,
+                "blob",
+            )
+            .await
+            .unwrap();
+        let trial = db
+            .insert_trial(
+                candidate,
+                "accepted",
+                None,
+                Some("Reduce work"),
+                Some("diff"),
+                Some(200_000),
+                Some(100_000),
+                Some(0.5),
+                true,
+                true,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(db
+            .trial_exists(repo, "test", "hot", "blob", x86)
+            .await
+            .unwrap());
+        assert!(!db
+            .trial_exists(repo, "test", "hot", "blob", arm)
+            .await
+            .unwrap());
+        assert_eq!(db.trial(trial).await.unwrap().unwrap().target, x86);
+        assert_eq!(db.pending_commits(repo).await.unwrap()[0].target, x86);
+        db.set_run_target(run, arm).await.unwrap();
+        assert_eq!(db.trials_for_run(run).await.unwrap()[0].target, arm);
     }
 }

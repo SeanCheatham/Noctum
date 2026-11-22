@@ -9,8 +9,9 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use crate::ports::{CheckOutput, HostCheck};
-use crate::process::{self, bench_env};
+use crate::process::bench_env;
 use crate::repo_config::RepoConfig;
+use crate::runtime::Execution;
 use crate::MUSL_TARGET;
 
 #[derive(Debug, Clone)]
@@ -68,31 +69,41 @@ pub fn musl_target_installed() -> Result<bool> {
 }
 
 pub async fn resolve_package(worktree: &Path, requested: Option<&str>) -> Result<ResolvedPackage> {
-    let output = process::run(
-        worktree,
-        "cargo",
-        &[
-            "metadata",
-            "--format-version",
-            "1",
-            "--no-deps",
-            "--offline",
-        ],
-        &[],
-        Duration::from_secs(120),
-    )
-    .await;
+    resolve_package_with(&Execution::Native, worktree, requested).await
+}
+
+pub async fn resolve_package_with(
+    execution: &Execution,
+    worktree: &Path,
+    requested: Option<&str>,
+) -> Result<ResolvedPackage> {
+    let output = execution
+        .run(
+            worktree,
+            "cargo",
+            &[
+                "metadata",
+                "--format-version",
+                "1",
+                "--no-deps",
+                "--offline",
+            ],
+            &[],
+            Duration::from_secs(120),
+        )
+        .await;
     let output = if output.success {
         output
     } else {
-        process::run(
-            worktree,
-            "cargo",
-            &["metadata", "--format-version", "1", "--no-deps"],
-            &[],
-            Duration::from_secs(180),
-        )
-        .await
+        execution
+            .run(
+                worktree,
+                "cargo",
+                &["metadata", "--format-version", "1", "--no-deps"],
+                &[],
+                Duration::from_secs(180),
+            )
+            .await
     };
     if !output.success {
         bail!("cargo metadata failed: {}", output.combined());
@@ -249,21 +260,40 @@ pub async fn build_tests(
     package: &str,
     repo: &RepoConfig,
 ) -> Result<Vec<BuiltHarness>> {
+    build_tests_with(&Execution::Native, worktree, package, repo).await
+}
+
+pub async fn build_tests_with(
+    execution: &Execution,
+    worktree: &Path,
+    package: &str,
+    repo: &RepoConfig,
+) -> Result<Vec<BuiltHarness>> {
     let mut args = vec![
         "test".to_string(),
         "--no-run".into(),
         "--release".into(),
         "--message-format=json".into(),
         "--target".into(),
-        MUSL_TARGET.into(),
+        execution.target().triple().into(),
         "-p".into(),
         package.into(),
     ];
     args.extend(feature_args(repo));
-    build_harnesses(worktree, &args, repo.timeout_seconds, "test").await
+    build_harnesses(execution, worktree, &args, repo.timeout_seconds, "test").await
 }
 
 pub async fn build_bench(
+    worktree: &Path,
+    package: &str,
+    bench: &str,
+    repo: &RepoConfig,
+) -> Result<Vec<BuiltHarness>> {
+    build_bench_with(&Execution::Native, worktree, package, bench, repo).await
+}
+
+pub async fn build_bench_with(
+    execution: &Execution,
     worktree: &Path,
     package: &str,
     bench: &str,
@@ -274,14 +304,14 @@ pub async fn build_bench(
         "--no-run".into(),
         "--message-format=json".into(),
         "--target".into(),
-        MUSL_TARGET.into(),
+        execution.target().triple().into(),
         "-p".into(),
         package.into(),
         "--bench".into(),
         bench.into(),
     ];
     args.extend(feature_args(repo));
-    build_harnesses(worktree, &args, repo.timeout_seconds, "bench").await
+    build_harnesses(execution, worktree, &args, repo.timeout_seconds, "bench").await
 }
 
 pub fn pick_bench(harnesses: &[BuiltHarness], name: &str) -> Result<PathBuf> {
@@ -294,20 +324,22 @@ pub fn pick_bench(harnesses: &[BuiltHarness], name: &str) -> Result<PathBuf> {
 }
 
 async fn build_harnesses(
+    execution: &Execution,
     worktree: &Path,
     args: &[String],
     timeout_secs: u64,
     fallback_kind: &str,
 ) -> Result<Vec<BuiltHarness>> {
     let env = bench_env();
-    let output = process::run(
-        worktree,
-        "cargo",
-        args,
-        &env,
-        Duration::from_secs(timeout_secs),
-    )
-    .await;
+    let output = execution
+        .run(
+            worktree,
+            "cargo",
+            args,
+            &env,
+            Duration::from_secs(timeout_secs),
+        )
+        .await;
     if !output.success {
         bail!(
             "cargo failed: {}",
@@ -363,16 +395,30 @@ fn parse_artifacts(
 }
 
 pub async fn list_tests(executable: &Path, timeout_secs: u64) -> Result<Vec<ListedTest>> {
-    let output = process::run(
-        executable.parent().unwrap_or_else(|| Path::new(".")),
-        executable,
-        &["--list"],
-        &[],
-        Duration::from_secs(timeout_secs.min(120)),
-    )
-    .await;
+    list_tests_with(&Execution::Native, executable, timeout_secs).await
+}
+
+pub async fn list_tests_with(
+    execution: &Execution,
+    executable: &Path,
+    timeout_secs: u64,
+) -> Result<Vec<ListedTest>> {
+    let output = execution
+        .run(
+            executable.parent().unwrap_or_else(|| Path::new(".")),
+            executable,
+            &["--list"],
+            &[],
+            Duration::from_secs(timeout_secs.min(120)),
+        )
+        .await;
     if !output.success {
-        bail!("harness --list failed: {}", output.combined());
+        bail!(
+            "harness --list failed (exit {:?}, timeout {}): {}",
+            output.code,
+            output.timed_out,
+            output.combined()
+        );
     }
     Ok(parse_test_list(&output.stdout))
 }
@@ -399,27 +445,40 @@ pub struct CargoHost;
 
 impl HostCheck for CargoHost {
     async fn run(&self, worktree: &Path, repo: &RepoConfig, package: &str) -> Result<CheckOutput> {
-        let timeout = Duration::from_secs(repo.timeout_seconds);
-        let output = if repo.check_command.trim().is_empty() {
-            let mut args = vec![
-                "test".to_string(),
-                "--release".into(),
-                "--target".into(),
-                MUSL_TARGET.into(),
-                "-p".into(),
-                package.into(),
-            ];
-            args.extend(feature_args(repo));
-            process::run(worktree, "cargo", &args, &bench_env(), timeout).await
-        } else {
-            process::sh(worktree, &repo.check_command, timeout).await
-        };
-        Ok(CheckOutput {
-            success: output.success,
-            timed_out: output.timed_out,
-            output: output.combined(),
-        })
+        host_check_with(&Execution::Native, worktree, repo, package).await
     }
+}
+
+pub async fn host_check_with(
+    execution: &Execution,
+    worktree: &Path,
+    repo: &RepoConfig,
+    package: &str,
+) -> Result<CheckOutput> {
+    let timeout = Duration::from_secs(repo.timeout_seconds);
+    let output = if repo.check_command.trim().is_empty() {
+        let mut args = vec![
+            "test".to_string(),
+            "--release".into(),
+            "--target".into(),
+            execution.target().triple().into(),
+            "-p".into(),
+            package.into(),
+        ];
+        args.extend(feature_args(repo));
+        execution
+            .run(worktree, "cargo", &args, &bench_env(), timeout)
+            .await
+    } else {
+        execution
+            .run(worktree, "sh", &["-c", &repo.check_command], &[], timeout)
+            .await
+    };
+    Ok(CheckOutput {
+        success: output.success,
+        timed_out: output.timed_out,
+        output: output.combined(),
+    })
 }
 
 #[cfg(test)]

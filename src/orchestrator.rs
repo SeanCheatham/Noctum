@@ -50,6 +50,7 @@ pub struct Night<M, I, H> {
     pub measurer: M,
     pub inferencer: I,
     pub host: H,
+    execution: crate::runtime::Execution,
 }
 
 pub async fn prepare_assets(data_dir: &Path, quant: crate::config::ModelQuant) -> Result<()> {
@@ -79,7 +80,13 @@ where
             measurer,
             inferencer,
             host,
+            execution: crate::runtime::Execution::Native,
         }
+    }
+
+    pub fn with_execution(mut self, execution: crate::runtime::Execution) -> Self {
+        self.execution = execution;
+        self
     }
 
     pub async fn run_pass(&self, opts: &RunOptions) -> Result<()> {
@@ -93,7 +100,7 @@ where
                 break;
             }
             if let Some(only) = &opts.only_repo {
-                if Path::new(&repo.path) != only {
+                if !worktree::same_path(Path::new(&repo.path), only) {
                     continue;
                 }
             }
@@ -124,6 +131,7 @@ where
                 .finish_early(repo, "", "skipped", "repository path is missing", None)
                 .await;
         }
+        let user_repo = user_repo.canonicalize()?;
         let head = match worktree::head_sha(&user_repo).await {
             Ok(sha) => sha,
             Err(err) => {
@@ -140,7 +148,7 @@ where
                     .await
             }
         };
-        if !builder::musl_target_installed()? {
+        if !self.execution.ensure_target(&user_repo).await? {
             return self
                 .finish_early(
                     repo,
@@ -173,9 +181,14 @@ where
                 self.window_key(opts).as_deref(),
             )
             .await?;
+        self.db
+            .set_run_target(run_id, self.execution.target().triple())
+            .await?;
         let result = self
             .after_sync(repo, opts, run_id, &user_repo, &dest, &repo_config)
             .await;
+        let cleanup = worktree::restore_tracked(&dest, &repo_config.clean_paths).await;
+        let result = result.and(cleanup);
         if let Err(err) = &result {
             let _ = self
                 .db
@@ -242,7 +255,9 @@ where
     }
 
     async fn select_and_build(&self, dest: &Path, repo_config: &RepoConfig) -> Result<BuildSet> {
-        let package = builder::resolve_package(dest, repo_config.package.as_deref()).await?;
+        let package =
+            builder::resolve_package_with(&self.execution, dest, repo_config.package.as_deref())
+                .await?;
         if builder::forces_abort(&package.workspace_root, &package.manifest)? {
             bail!("panic = \"abort\" is set; the fence would not close");
         }
@@ -257,9 +272,17 @@ where
         let mut linked = Vec::new();
         if build_tests {
             inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
-            let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
-            linked =
-                link_harnesses(dest, &selected, &harnesses, repo_config.timeout_seconds).await?;
+            let harnesses =
+                builder::build_tests_with(&self.execution, dest, &package.name, repo_config)
+                    .await?;
+            linked = link_harnesses(
+                &self.execution,
+                dest,
+                &selected,
+                &harnesses,
+                repo_config.timeout_seconds,
+            )
+            .await?;
         }
         if !benches.score.is_empty() {
             ensure_fence_manifest(&package.manifest, &fence_dir)?;
@@ -268,8 +291,14 @@ where
                 // stripped again before the model sees the tree.
                 let mut unit = linked_bench(&package, target, PathBuf::new());
                 inject_main(&target.src_path)?;
-                let built =
-                    builder::build_bench(dest, &package.name, &target.name, repo_config).await?;
+                let built = builder::build_bench_with(
+                    &self.execution,
+                    dest,
+                    &package.name,
+                    &target.name,
+                    repo_config,
+                )
+                .await?;
                 unit.executable = builder::pick_bench(&built, &target.name)?;
                 linked.push(unit);
             }
@@ -445,6 +474,7 @@ where
                         &test.identity.discovered.fn_path,
                         &hot.name,
                         &blob,
+                        self.execution.target().triple(),
                     )
                     .await?
                 {
@@ -548,7 +578,13 @@ where
                 }
                 if self
                     .db
-                    .trial_exists(repo.id, &pick.test_name, &pick.hot.name, &blob_now)
+                    .trial_exists(
+                        repo.id,
+                        &pick.test_name,
+                        &pick.hot.name,
+                        &blob_now,
+                        self.execution.target().triple(),
+                    )
                     .await?
                 {
                     continue;
@@ -748,14 +784,17 @@ where
         let hot = refreshed_hot(dest, &pick.hot);
         let test_source = function_source(dest, &test.identity.discovered);
         let callees = callee_sources(dest, &hot);
-        let messages = model::build_messages(&PromptInput {
-            test_name: &test.identity.score_name,
-            test_source: &test_source,
-            hot: &hot,
-            callee_sources: &callees,
-            repair_diff,
-            repair_output,
-        });
+        let messages = model::build_messages_for_target(
+            &PromptInput {
+                test_name: &test.identity.score_name,
+                test_source: &test_source,
+                hot: &hot,
+                callee_sources: &callees,
+                repair_diff,
+                repair_output,
+            },
+            self.execution.target().triple(),
+        );
         let cancel = Arc::new(AtomicBool::new(false));
         let watcher = spawn_cancel(
             cancel.clone(),
@@ -886,7 +925,7 @@ where
         repo_config: &RepoConfig,
         test: &ScoredTest,
     ) -> Result<CheckOutput> {
-        let package = pick_package(dest, repo_config).await?;
+        let package = pick_package(&self.execution, dest, repo_config).await?;
         let check = self.host.run(dest, repo_config, &package).await?;
         if !check.success {
             return Ok(check);
@@ -895,7 +934,7 @@ where
             return Ok(check);
         };
         builder::clean_paths(dest, &repo_config.clean_paths)?;
-        match builder::build_bench(dest, &package, name, repo_config).await {
+        match builder::build_bench_with(&self.execution, dest, &package, name, repo_config).await {
             Ok(_) => Ok(check),
             Err(err) => Ok(CheckOutput {
                 success: false,
@@ -912,12 +951,16 @@ where
         test: &ScoredTest,
     ) -> Result<LinkedTest> {
         builder::clean_paths(dest, &repo_config.clean_paths)?;
-        let package = builder::resolve_package(dest, repo_config.package.as_deref()).await?;
+        let package =
+            builder::resolve_package_with(&self.execution, dest, repo_config.package.as_deref())
+                .await?;
         let fence_dir = fence::install_fence_crate(&self.config.data_dir())?;
         if let Some(name) = &test.identity.bench {
             ensure_fence_manifest(&package.manifest, &fence_dir)?;
             inject_main(&test.identity.discovered.file)?;
-            let built = builder::build_bench(dest, &package.name, name, repo_config).await?;
+            let built =
+                builder::build_bench_with(&self.execution, dest, &package.name, name, repo_config)
+                    .await?;
             let executable = builder::pick_bench(&built, name)?;
             check_elf(dest, &executable)?;
             restore_fences(
@@ -932,9 +975,16 @@ where
         }
         let selected = vec![test.identity.discovered.clone()];
         inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
-        let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
-        let mut linked =
-            link_harnesses(dest, &selected, &harnesses, repo_config.timeout_seconds).await?;
+        let harnesses =
+            builder::build_tests_with(&self.execution, dest, &package.name, repo_config).await?;
+        let mut linked = link_harnesses(
+            &self.execution,
+            dest,
+            &selected,
+            &harnesses,
+            repo_config.timeout_seconds,
+        )
+        .await?;
         restore_fences(dest, &package.manifest, &source_files(&selected)).await?;
         linked.pop().context("rebuild produced no harness")
     }
@@ -952,7 +1002,9 @@ where
         }
         self.phase("measuring", "rebaseline").await;
         builder::clean_paths(dest, &repo_config.clean_paths)?;
-        let package = builder::resolve_package(dest, repo_config.package.as_deref()).await?;
+        let package =
+            builder::resolve_package_with(&self.execution, dest, repo_config.package.as_deref())
+                .await?;
         let fence_dir = fence::install_fence_crate(&self.config.data_dir())?;
         let tests: Vec<DiscoveredTest> = measured
             .iter()
@@ -964,8 +1016,17 @@ where
             Vec::new()
         } else {
             inject_selected(dest, &package.manifest, &fence_dir, &tests)?;
-            let harnesses = builder::build_tests(dest, &package.name, repo_config).await?;
-            link_harnesses(dest, &tests, &harnesses, repo_config.timeout_seconds).await?
+            let harnesses =
+                builder::build_tests_with(&self.execution, dest, &package.name, repo_config)
+                    .await?;
+            link_harnesses(
+                &self.execution,
+                dest,
+                &tests,
+                &harnesses,
+                repo_config.timeout_seconds,
+            )
+            .await?
         };
         let mut bench_bins: HashMap<String, PathBuf> = HashMap::new();
         if measured.iter().any(|test| test.identity.bench.is_some()) {
@@ -980,7 +1041,9 @@ where
             }
             inject_main(&test.identity.discovered.file)?;
             sources.push(test.identity.discovered.file.clone());
-            let built = builder::build_bench(dest, &package.name, name, repo_config).await?;
+            let built =
+                builder::build_bench_with(&self.execution, dest, &package.name, name, repo_config)
+                    .await?;
             bench_bins.insert(name.clone(), builder::pick_bench(&built, name)?);
         }
         restore_fences(dest, &package.manifest, &sources).await?;
@@ -1041,8 +1104,8 @@ where
         improvement: f64,
     ) -> Result<()> {
         let message = format!(
-            "{summary}\n\nTest: {}\nBaseline: {}\nCandidate: {}\nRatio: {improvement:.6}\n",
-            pick.test_name, test.baseline.total, measurement.total
+            "{summary}\n\nTest: {}\nTarget: {}\nBaseline: {}\nCandidate: {}\nRatio: {improvement:.6}\n",
+            pick.test_name, self.execution.target().triple(), test.baseline.total, measurement.total
         );
         let paths = worktree::diff_paths(diff);
         let sha = worktree::commit(
@@ -1207,6 +1270,9 @@ where
     ) -> Result<()> {
         let pending = self.db.pending_commits(repository_id).await?;
         for item in pending {
+            if item.target != self.execution.target().triple() {
+                continue;
+            }
             let base = worktree::head_sha(dest).await?;
             if worktree::apply(dest, &item.unified_diff, false)
                 .await
@@ -1215,9 +1281,10 @@ where
                 continue;
             }
             let message = format!(
-                "{}\n\nTest: {}\nBaseline: {}\nCandidate: {}\nRatio: {:.6}\n",
+                "{}\n\nTest: {}\nTarget: {}\nBaseline: {}\nCandidate: {}\nRatio: {:.6}\n",
                 item.model_summary.unwrap_or_default(),
                 item.test_name,
+                item.target,
                 item.baseline_count.unwrap_or(0),
                 item.insn_count.unwrap_or(0),
                 item.improvement_ratio.unwrap_or(0.0)
@@ -1298,6 +1365,9 @@ where
         perf: Option<&str>,
     ) -> Result<()> {
         let id = self.db.insert_run(repo.id, sha, None, status, None).await?;
+        self.db
+            .set_run_target(id, self.execution.target().triple())
+            .await?;
         self.db.finish_run(id, status, Some(error), perf).await?;
         Ok(())
     }
@@ -1309,7 +1379,9 @@ where
         let Some(key) = self.window_key(opts) else {
             return Ok(false);
         };
-        self.db.repo_finished_window(repo.id, &key).await
+        self.db
+            .repo_finished_window(repo.id, &key, self.execution.target().triple())
+            .await
     }
 
     fn proceed(&self, opts: &RunOptions) -> bool {
@@ -1525,6 +1597,7 @@ fn inject_selected(
 }
 
 async fn link_harnesses(
+    execution: &crate::runtime::Execution,
     dest: &Path,
     selected: &[DiscoveredTest],
     harnesses: &[BuiltHarness],
@@ -1532,7 +1605,7 @@ async fn link_harnesses(
 ) -> Result<Vec<LinkedTest>> {
     let mut listed = Vec::new();
     for harness in harnesses {
-        let tests = builder::list_tests(&harness.executable, timeout).await?;
+        let tests = builder::list_tests_with(execution, &harness.executable, timeout).await?;
         for test in tests {
             listed.push((harness.clone(), test));
         }
@@ -1831,8 +1904,13 @@ fn spawn_cancel(
     })
 }
 
-async fn pick_package(dest: &Path, repo_config: &RepoConfig) -> Result<String> {
-    let package = builder::resolve_package(dest, repo_config.package.as_deref()).await?;
+async fn pick_package(
+    execution: &crate::runtime::Execution,
+    dest: &Path,
+    repo_config: &RepoConfig,
+) -> Result<String> {
+    let package =
+        builder::resolve_package_with(execution, dest, repo_config.package.as_deref()).await?;
     Ok(package.name)
 }
 

@@ -1,5 +1,5 @@
 //! Pinned system-mode QEMU. The guest is the ruler: one vCPU, TCG, icount,
-//! no NIC, no virtio-rng, CPU model `qemu64`, and a fresh disk overlay.
+//! no NIC, no virtio-rng, a fixed CPU model, and a fresh disk overlay.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -13,10 +13,14 @@ use crate::lockfile::qemu_dir;
 use crate::ports::{MeasureRequest, Measurement, Measurer};
 use crate::process::{self, signal_group};
 use crate::profile::{self, ProfileDump};
+use crate::target::GuestTarget;
 
 pub struct QemuRunner {
     pub data_dir: PathBuf,
     pub memory_mb: u32,
+    bundle_override: Option<PathBuf>,
+    snapshot_override: Option<PathBuf>,
+    target: GuestTarget,
 }
 
 impl QemuRunner {
@@ -24,28 +28,46 @@ impl QemuRunner {
         Self {
             data_dir: data_dir.into(),
             memory_mb,
+            bundle_override: None,
+            snapshot_override: None,
+            target: GuestTarget::X86_64,
+        }
+    }
+
+    pub fn at_bundle(bundle: PathBuf, snapshots: PathBuf, memory_mb: u32) -> Self {
+        Self {
+            data_dir: PathBuf::new(),
+            memory_mb,
+            bundle_override: Some(bundle),
+            snapshot_override: Some(snapshots),
+            target: GuestTarget::native(),
         }
     }
 
     fn bundle(&self) -> PathBuf {
-        qemu_dir(&self.data_dir)
+        self.bundle_override
+            .clone()
+            .unwrap_or_else(|| qemu_dir(&self.data_dir))
     }
 }
 
 impl Measurer for QemuRunner {
     async fn measure(&self, req: &MeasureRequest) -> Result<Measurement> {
         let bundle = self.bundle();
-        ensure_tools(&bundle)?;
+        ensure_tools(&bundle, self.target)?;
         std::fs::create_dir_all(&req.scratch)?;
-        ensure_snapshot(&bundle, self.memory_mb).await?;
+        let snapshots = self.snapshot_override.as_deref().unwrap_or(&bundle);
+        std::fs::create_dir_all(snapshots)?;
+        ensure_snapshot(&bundle, snapshots, self.memory_mb, self.target).await?;
         let overlay = req.scratch.join("overlay.qcow2");
-        std::fs::copy(bundle.join("ready.qcow2"), &overlay)?;
+        std::fs::copy(snapshots.join("ready.qcow2"), &overlay)?;
         write_job(&req.scratch.join("job"), &req.guest_exe, &req.args)?;
         let dump_path = req.scratch.join("dump.txt");
         let serial_sock = req.scratch.join("serial.sock");
         let qmp_sock = req.scratch.join("qmp.sock");
         let args = measurement_args(&QemuLaunch {
             bundle: bundle.clone(),
+            target: self.target,
             memory_mb: self.memory_mb,
             disk: overlay.clone(),
             loadvm: true,
@@ -56,7 +78,7 @@ impl Measurer for QemuRunner {
             qmp: qmp_sock.clone(),
         });
         let started = Instant::now();
-        let mut child = spawn_qemu(&bundle, &args, &req.scratch)?;
+        let mut child = spawn_qemu(&bundle, &args, &req.scratch, self.target)?;
         let pid = child.id().unwrap_or(0);
         let launch = async {
             wait_until_running(&qmp_sock).await?;
@@ -79,7 +101,11 @@ impl Measurer for QemuRunner {
         let serial_log = serial_text(&req.scratch);
         match status {
             Ok(Ok(status)) if status.code().is_some() => {
-                read_measurement(&req.scratch, &dump_path, started.elapsed(), &serial_log)
+                let mut measured =
+                    read_measurement(&req.scratch, &dump_path, started.elapsed(), &serial_log)?;
+                let elf = std::fs::read(&req.harness)?;
+                measured.load_bias = profile::elf_load_bias(&elf, measured.load_bias)?;
+                Ok(measured)
             }
             Ok(Ok(_)) | Ok(Err(_)) => {
                 signal_group(pid, "-KILL");
@@ -102,6 +128,7 @@ impl Measurer for QemuRunner {
 }
 
 pub(crate) struct QemuLaunch {
+    target: GuestTarget,
     bundle: PathBuf,
     memory_mb: u32,
     disk: PathBuf,
@@ -118,9 +145,9 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
         "-accel".into(),
         "tcg".into(),
         "-machine".into(),
-        "pc".into(),
+        launch.target.machine().into(),
         "-cpu".into(),
-        "qemu64".into(),
+        launch.target.cpu().into(),
         "-smp".into(),
         "1".into(),
         "-m".into(),
@@ -132,7 +159,7 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
         "-nic".into(),
         "none".into(),
         "-icount".into(),
-        "shift=0,sleep=off".into(),
+        launch.target.icount().into(),
         "-no-reboot".into(),
         "-kernel".into(),
         launch.bundle.join("vmlinuz").display().to_string(),
@@ -143,43 +170,43 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
             .display()
             .to_string(),
         "-append".into(),
-        "console=ttyS0,115200 nokaslr panic=1 loglevel=3 earlyprintk=serial".into(),
+        launch.target.console().into(),
         "-drive".into(),
         format!(
             "if=none,id=disk,file={},format=qcow2",
-            launch.disk.display()
+            qemu_option(&launch.disk)
         ),
         "-device".into(),
         "virtio-blk-pci,drive=disk".into(),
         "-fsdev".into(),
         format!(
             "local,id=work,path={},security_model=none,readonly=on",
-            launch.worktree.display()
+            qemu_option(&launch.worktree)
         ),
         "-device".into(),
         "virtio-9p-pci,fsdev=work,mount_tag=work".into(),
         "-fsdev".into(),
         format!(
             "local,id=scratch,path={},security_model=none",
-            launch.scratch.display()
+            qemu_option(&launch.scratch)
         ),
         "-device".into(),
         "virtio-9p-pci,fsdev=scratch,mount_tag=scratch".into(),
         "-chardev".into(),
         format!(
             "socket,id=ser,path={},server=on,wait=off,logfile={}",
-            launch.serial.display(),
-            launch.scratch.join("serial.log").display()
+            qemu_option(&launch.serial),
+            qemu_option(&launch.scratch.join("serial.log"))
         ),
         "-serial".into(),
         "chardev:ser".into(),
         "-qmp".into(),
-        format!("unix:{},server=on,wait=off", launch.qmp.display()),
+        format!("unix:{},server=on,wait=off", qemu_option(&launch.qmp)),
         "-plugin".into(),
         format!(
             "{},output={}",
-            launch.bundle.join("noctum_profile.so").display(),
-            launch.dump.display()
+            qemu_option(&launch.bundle.join("noctum_profile.so")),
+            qemu_option(&launch.dump)
         ),
     ];
     if launch.loadvm {
@@ -189,9 +216,13 @@ pub(crate) fn measurement_args(launch: &QemuLaunch) -> Vec<String> {
     args
 }
 
-fn ensure_tools(bundle: &Path) -> Result<()> {
+fn qemu_option(path: &Path) -> String {
+    path.to_string_lossy().replace(',', ",,")
+}
+
+fn ensure_tools(bundle: &Path, target: GuestTarget) -> Result<()> {
     for name in [
-        "qemu-system-x86_64",
+        target.binary(),
         "qemu-img",
         "noctum_profile.so",
         "vmlinuz",
@@ -210,9 +241,14 @@ fn ensure_tools(bundle: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
-    let ready = bundle.join("ready.qcow2");
-    let stamp = bundle.join("ready.stamp");
+async fn ensure_snapshot(
+    bundle: &Path,
+    snapshots: &Path,
+    memory_mb: u32,
+    target: GuestTarget,
+) -> Result<()> {
+    let ready = snapshots.join("ready.qcow2");
+    let stamp = snapshots.join("ready.stamp");
     let current = snapshot_stamp(bundle, memory_mb)?;
     if ready.is_file() && std::fs::read_to_string(&stamp).ok().as_deref() == Some(current.as_str())
     {
@@ -220,7 +256,7 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
     }
     let img = bundle.join("qemu-img");
     let created = process::run(
-        bundle,
+        snapshots,
         &img,
         &["create", "-f", "qcow2", "ready.qcow2", "2G"],
         &[],
@@ -230,7 +266,7 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
     if !created.success {
         bail!("qemu-img create failed: {}", created.combined());
     }
-    let scratch = bundle.join("snapshot-scratch");
+    let scratch = snapshots.join("snapshot-scratch");
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch)?;
     std::fs::write(scratch.join("job"), b"/bin/true\n")?;
@@ -238,6 +274,7 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
     let qmp = scratch.join("qmp.sock");
     let args = measurement_args(&QemuLaunch {
         bundle: bundle.to_path_buf(),
+        target,
         memory_mb,
         disk: ready.clone(),
         loadvm: false,
@@ -247,7 +284,7 @@ async fn ensure_snapshot(bundle: &Path, memory_mb: u32) -> Result<()> {
         serial: serial.clone(),
         qmp: qmp.clone(),
     });
-    let mut child = spawn_qemu(bundle, &args, &scratch)?;
+    let mut child = spawn_qemu(bundle, &args, &scratch, target)?;
     let pid = child.id().unwrap_or(0);
     let held = hold_until(&serial, "NOCTUM_READY", Duration::from_secs(180)).await;
     let held = match held {
@@ -343,10 +380,15 @@ fn snapshot_stamp(bundle: &Path, memory_mb: u32) -> Result<String> {
     Ok(format!("{kernel} {initrd} {memory_mb}\n"))
 }
 
-fn spawn_qemu(bundle: &Path, args: &[String], log_dir: &Path) -> Result<tokio::process::Child> {
+fn spawn_qemu(
+    bundle: &Path,
+    args: &[String],
+    log_dir: &Path,
+    target: GuestTarget,
+) -> Result<tokio::process::Child> {
     let stdout = std::fs::File::create(log_dir.join("qemu.stdout"))?;
     let stderr = std::fs::File::create(log_dir.join("qemu.stderr"))?;
-    let mut command = tokio::process::Command::new(bundle.join("qemu-system-x86_64"));
+    let mut command = tokio::process::Command::new(bundle.join(target.binary()));
     command
         .args(args)
         .current_dir(bundle)
@@ -584,8 +626,9 @@ mod tests {
 
     #[test]
     fn measurement_command_is_the_pinned_guest() {
-        let launch = QemuLaunch {
+        let mut launch = QemuLaunch {
             bundle: PathBuf::from("/bundle"),
+            target: GuestTarget::X86_64,
             memory_mb: 1024,
             disk: PathBuf::from("/tmp/overlay.qcow2"),
             loadvm: true,
@@ -609,6 +652,15 @@ mod tests {
         assert!(!text.contains("virtio-rng"));
         assert!(text.contains("pc-bios"));
         assert!(text.contains("logfile="));
+        launch.target = GuestTarget::Aarch64;
+        launch.worktree = PathBuf::from("/work, tests");
+        let text = measurement_args(&launch).join(" ");
+        assert!(text.contains("path=/work,, tests,security_model=none"));
+        assert!(text.contains("-machine virt,gic-version=2"));
+        assert!(text.contains("-cpu cortex-a72"));
+        assert!(text.contains("console=ttyAMA0"));
+        assert!(text.contains("-accel tcg"));
+        assert!(text.contains("-icount shift=0,sleep=on"));
     }
 
     #[test]

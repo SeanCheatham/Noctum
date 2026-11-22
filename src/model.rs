@@ -36,6 +36,10 @@ pub struct PromptInput<'a> {
 }
 
 pub fn build_messages(input: &PromptInput<'_>) -> Vec<ChatMessage> {
+    build_messages_for_target(input, crate::MUSL_TARGET)
+}
+
+pub fn build_messages_for_target(input: &PromptInput<'_>, target: &str) -> Vec<ChatMessage> {
     let system = "\
 You reduce the number of guest instructions retired inside one single-threaded Rust test body. \
 Preserve assertions, fixed loop bounds, and libtest success. Do not add dependencies. \
@@ -46,7 +50,7 @@ Do not delete a computation the assertions observe, and do not replace it with a
 Begin the diff with a diff --git line. Copy unchanged and removed lines exactly from the source, \
 including indentation. Put every changed line inside a hunk.";
     let mut user = format!(
-        "Test: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
+        "Target: {target}\nTest: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
         input.test_name,
         input.hot.name,
         input.hot.file,
@@ -77,7 +81,7 @@ including indentation. Put every changed line inside a hunk.";
     const CHAR_BUDGET: usize = 48_000;
     if user.len() > CHAR_BUDGET {
         user = format!(
-            "Test: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
+            "Target: {target}\nTest: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
             input.test_name,
             input.hot.name,
             input.hot.file,
