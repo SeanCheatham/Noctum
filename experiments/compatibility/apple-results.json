@@ -1,0 +1,674 @@
+{
+  "image": "docker.io/library/noctum-worker:43517e02259e212b17febefb-aarch64",
+  "counts": [
+    6011,
+    6011,
+    12011,
+    12011
+  ],
+  "worker_removed_between_repeats": true,
+  "profile": [
+    "ram-insn-v2",
+    "79612b1e80e348e25fb866b9610acf9a2344b52e5634780623b9f40f82490482"
+  ],
+  "base64": {
+    "revision": "e14400697453bcc85997119b874bc03d9601d0af",
+    "counts": [
+      2484378,
+      2484378
+    ],
+    "suite": [
+      [
+        "179",
+        "0",
+        "0"
+      ]
+    ]
+  },
+  "passed": true,
+  "remaining_containers": [],
+  "builder": "builder is not running",
+  "fixture_sha256": "7d0af823a58cf9fe81c804d158379185db7e30e57a56ae5b44cfc3996b607821",
+  "scope": "The top-level counts are from the worker protocol check. Later CLI and model results have separate fields.",
+  "image_digest": "sha256:02545318a942fcd3eed637aa5c2832796e275dccfecb8f917fb87d2159b03433",
+  "worker_protocol_memory_mb": 512,
+  "production_cli_measurement": {
+    "image": "noctum-worker:b99b5f6b8abb1fa5bf712d64-aarch64",
+    "command_exit": 0,
+    "source_kept": true,
+    "run": {
+      "id": 1,
+      "repository_id": 1,
+      "git_sha": "04e89ec7247717451ad06fee3ac6d394e3b8047b",
+      "package": "base64",
+      "started_at": "2026-11-22 21:22:27",
+      "finished_at": "2026-11-22 21:23:24",
+      "status": "ok",
+      "error": null,
+      "window_key": null,
+      "perf_sha": "04e89ec7247717451ad06fee3ac6d394e3b8047b",
+      "target": "aarch64-unknown-linux-musl",
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+    },
+    "tests": [
+      {
+        "id": 1,
+        "run_id": 1,
+        "harness": "unittests src/lib.rs",
+        "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "status": "measured",
+        "insn_count": 2484943,
+        "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+        "binary_sha256": "cea764f911cc40b0068b387d7547ab0a968b3b03bf631dcadb24175920282b06",
+        "wall_ms": 726,
+        "reason": null
+      }
+    ]
+  },
+  "live_regressions": {
+    "host_source_growth_then_rebuild": true,
+    "repeated_guest_counts_after_worker_restart": true,
+    "worker_stops_after_controller_exit": true,
+    "counts": [
+      6011,
+      6011,
+      12011,
+      12011
+    ]
+  },
+  "inference_phase": {
+    "observed_at_unix": 1795382786.215424,
+    "running_containers": [],
+    "vm_processes": [],
+    "model_processes": [
+      "72803 805648 /private/tmp/noctum-compat.qtBzNE/data/llama.cpp/b12588-mix-c0c3de8/macos-aarch64/llama-server"
+    ],
+    "builder_state": [
+      "stopped"
+    ],
+    "passed": true
+  },
+  "model_run": {
+    "run": {
+      "id": 5,
+      "repository_id": 9,
+      "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "package": "base64",
+      "started_at": "2026-11-22 21:24:50",
+      "finished_at": "2026-11-22 21:34:33",
+      "status": "ok",
+      "error": null,
+      "window_key": null,
+      "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "target": "aarch64-unknown-linux-musl",
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+    },
+    "trials": [
+      {
+        "id": 3,
+        "candidate_id": 3,
+        "status": "rejected",
+        "reason": "error: patch fragment without header at /var/folders/7b/n6khlmg13zjghfygs9szttzr0000gn/T/.tmp0KUts8:3: @@ -165,87 +165,25 @@\n",
+        "model_summary": "Replaced the unrolled 8-branch decode_chunk_8 body with a single enumerated loop that computes the same 6-bit morsel accumulation and identical error behavior, reducing per-chunk instruction overhead while preserving the test's assertions and fixed loop bounds.",
+        "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n@@ -165,87 +165,25 @@\n /// Decode 8 bytes of input into 6 bytes of output.\n ///\n /// `input` is the 8 bytes to decode.\n /// `index_at_start_of_input` is the offset in the overall input (used for reporting errors\n /// accurately)\n /// `decode_table` is the lookup table for the particular base64 alphabet.\n /// `output` will have its first 6 bytes overwritten\n // yes, really inline (worth 30-50% speedup)\n #[inline(always)]\n fn decode_chunk_8(\n     input: &[u8],\n     index_at_start_of_input: usize,\n     decode_table: &[u8; 256],\n     output: &mut [u8],\n ) -> Result<(), DecodeError> {\n-    let morsel = decode_table[usize::from(input[0])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n-    }\n-    let mut accum = u64::from(morsel) << 58;\n-\n-    let morsel = decode_table[usize::from(input[1])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 1,\n-            input[1],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 52;\n-\n-    let morsel = decode_table[usize::from(input[2])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 2,\n-            input[2],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 46;\n-\n-    let morsel = decode_table[usize::from(input[3])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 3,\n-            input[3],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 40;\n-\n-    let morsel = decode_table[usize::from(input[4])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 4,\n-            input[4],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 34;\n-\n-    let morsel = decode_table[usize::from(input[5])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 5,\n-            input[5],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 28;\n-\n-    let morsel = decode_table[usize::from(input[6])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 6,\n-            input[6],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 22;\n-\n-    let morsel = decode_table[usize::from(input[7])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 7,\n-            input[7],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 16;\n-\n-    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n-\n-    Ok(())\n+    let mut accum = 0u64;\n+    for (i, &byte) in input.iter().enumerate() {\n+        let morsel = decode_table[usize::from(byte)];\n+        if morsel == INVALID_VALUE {\n+            return Err(DecodeError::InvalidByte(index_at_start_of_input + i, byte));\n+        }\n+        accum |= u64::from(morsel) << (58 - 6 * i);\n+    }\n+    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n+    Ok(())\n }\n",
+        "baseline_count": 2484943,
+        "insn_count": null,
+        "improvement_ratio": null,
+        "host_check_passed": 0,
+        "stdout_matched": 0,
+        "tool_output": null
+      }
+    ],
+    "inference_completed": true,
+    "source_kept": true,
+    "accepted": false,
+    "result": "Missing file headers caused Git to reject the patch. Header repair is being checked."
+  },
+  "captured_response_replay": {
+    "mode": "saved model response",
+    "responses_used": 1,
+    "run": {
+      "error": null,
+      "finished_at": "2026-11-22 21:58:34",
+      "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "id": 1,
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85",
+      "package": "base64",
+      "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "repository_id": 1,
+      "started_at": "2026-11-22 21:55:37",
+      "status": "ok",
+      "target": "aarch64-unknown-linux-musl",
+      "window_key": null
+    },
+    "tests": [
+      {
+        "binary_sha256": "746d368fb94503e59a06b64153fdeafb2ca4e321c5d87ab957169f3ee783c21e",
+        "harness": "unittests src/lib.rs",
+        "id": 1,
+        "insn_count": 2484250,
+        "reason": null,
+        "run_id": 1,
+        "status": "measured",
+        "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+        "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "wall_ms": 798
+      }
+    ],
+    "trials": [
+      {
+        "baseline_count": 2484250,
+        "candidate_id": 1,
+        "file": "src/engine/general_purpose/decode.rs",
+        "harness": "unittests src/lib.rs",
+        "host_check_passed": true,
+        "id": 1,
+        "improvement_ratio": -0.0013911643353124686,
+        "insn_count": 2487706,
+        "model_summary": "Replaced the unrolled 8-branch decode_chunk_8 body with a single enumerated loop that computes the same 6-bit morsel accumulation and identical error behavior, reducing per-chunk instruction overhead while preserving the test's assertions and fixed loop bounds.",
+        "reason": "slower",
+        "status": "rejected",
+        "stdout_matched": true,
+        "symbol": "decode_chunk_8",
+        "target": "aarch64-unknown-linux-musl",
+        "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "tool_output": null,
+        "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n--- a/src/engine/general_purpose/decode.rs\n+++ b/src/engine/general_purpose/decode.rs\n@@ -165,87 +165,25 @@\n /// Decode 8 bytes of input into 6 bytes of output.\n ///\n /// `input` is the 8 bytes to decode.\n /// `index_at_start_of_input` is the offset in the overall input (used for reporting errors\n /// accurately)\n /// `decode_table` is the lookup table for the particular base64 alphabet.\n /// `output` will have its first 6 bytes overwritten\n // yes, really inline (worth 30-50% speedup)\n #[inline(always)]\n fn decode_chunk_8(\n     input: &[u8],\n     index_at_start_of_input: usize,\n     decode_table: &[u8; 256],\n     output: &mut [u8],\n ) -> Result<(), DecodeError> {\n-    let morsel = decode_table[usize::from(input[0])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n-    }\n-    let mut accum = u64::from(morsel) << 58;\n-\n-    let morsel = decode_table[usize::from(input[1])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 1,\n-            input[1],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 52;\n-\n-    let morsel = decode_table[usize::from(input[2])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 2,\n-            input[2],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 46;\n-\n-    let morsel = decode_table[usize::from(input[3])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 3,\n-            input[3],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 40;\n-\n-    let morsel = decode_table[usize::from(input[4])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 4,\n-            input[4],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 34;\n-\n-    let morsel = decode_table[usize::from(input[5])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 5,\n-            input[5],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 28;\n-\n-    let morsel = decode_table[usize::from(input[6])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 6,\n-            input[6],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 22;\n-\n-    let morsel = decode_table[usize::from(input[7])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 7,\n-            input[7],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 16;\n-\n-    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n-\n-    Ok(())\n+    let mut accum = 0u64;\n+    for (i, &byte) in input.iter().enumerate() {\n+        let morsel = decode_table[usize::from(byte)];\n+        if morsel == INVALID_VALUE {\n+            return Err(DecodeError::InvalidByte(index_at_start_of_input + i, byte));\n+        }\n+        accum |= u64::from(morsel) << (58 - 6 * i);\n+    }\n+    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n+    Ok(())\n }\n"
+      }
+    ],
+    "algorithm_unchanged": true,
+    "original_source_kept": true
+  },
+  "heartbeat_clock_check": {
+    "probe_log": "/tmp/noctum-apple-heartbeat-probe-20261122/log.txt",
+    "guest_seconds_ahead_of_file": [
+      -1,
+      0,
+      1
+    ],
+    "observation": "The guest read a host file modification time one second ahead of its clock. The old heartbeat check treated a future time as a missing heartbeat.",
+    "failed_replay_log": "/tmp/noctum-apple-retry-check.stderr",
+    "failed_measurement_log": "/tmp/noctum-apple-startup-check.stderr",
+    "fix": "Use the absolute clock difference. Stop the worker if the difference is more than 20 seconds.",
+    "validation": "The Rust tests and Clippy passed. The final live guest and controller exit checks passed.",
+    "live_log": "/tmp/noctum-heartbeat-live-test.log",
+    "counts": [
+      6011,
+      6011,
+      12011,
+      12011
+    ],
+    "host_checks": {
+      "passed": 113,
+      "ignored": 6,
+      "all_targets": true,
+      "all_features": true,
+      "clippy_warnings_denied": true
+    }
+  },
+  "output_checks": {
+    "repeated_measurements": "Standard error bytes must match between repeated runs.",
+    "patch_check": "Standard error bytes must match the baseline.",
+    "tests": "A non-UTF-8 byte change fails the repeat check. A standard error change fails the acceptance check.",
+    "test_log": "/tmp/noctum-output-tests.log",
+    "clippy_log": "/tmp/noctum-output-clippy.log",
+    "passed": 114,
+    "ignored": 6
+  },
+  "retry_check": {
+    "mode": "saved model response",
+    "stdout": "/tmp/noctum-apple-retry-fixed.stdout",
+    "stderr": "/tmp/noctum-apple-retry-fixed.stderr",
+    "runs": [
+      {
+        "id": 1,
+        "repository_id": 1,
+        "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "package": "base64",
+        "started_at": "2026-11-22 22:20:38",
+        "finished_at": "2026-11-22 22:24:04",
+        "status": "ok",
+        "error": null,
+        "window_key": null,
+        "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "target": "aarch64-unknown-linux-musl",
+        "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+      },
+      {
+        "id": 2,
+        "repository_id": 1,
+        "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "package": "base64",
+        "started_at": "2026-11-22 22:24:06",
+        "finished_at": "2026-11-22 22:25:12",
+        "status": "ok",
+        "error": null,
+        "window_key": null,
+        "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "target": "aarch64-unknown-linux-musl",
+        "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+      },
+      {
+        "id": 3,
+        "repository_id": 1,
+        "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "package": "base64",
+        "started_at": "2026-11-22 22:25:17",
+        "finished_at": "2026-11-22 22:28:11",
+        "status": "ok",
+        "error": null,
+        "window_key": null,
+        "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "target": "aarch64-unknown-linux-musl",
+        "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+      }
+    ],
+    "trials_per_run": [
+      1,
+      0,
+      1
+    ],
+    "responses_used": 2,
+    "original_source_and_head_kept": true,
+    "last_result": {
+      "mode": "saved model response",
+      "responses_used": 2,
+      "retry_checked": true,
+      "run": {
+        "error": null,
+        "finished_at": "2026-11-22 22:28:11",
+        "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "id": 3,
+        "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85",
+        "package": "base64",
+        "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+        "repository_id": 1,
+        "started_at": "2026-11-22 22:25:17",
+        "status": "ok",
+        "target": "aarch64-unknown-linux-musl",
+        "window_key": null
+      },
+      "tests": [
+        {
+          "binary_sha256": "a054894e5dec0a624e2a0c893e372393b41bf705c822bf16418fd56d4ec7767a",
+          "harness": "unittests src/lib.rs",
+          "id": 3,
+          "insn_count": 2484250,
+          "reason": null,
+          "run_id": 3,
+          "status": "measured",
+          "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+          "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+          "wall_ms": 709
+        }
+      ],
+      "trials": [
+        {
+          "baseline_count": 2484250,
+          "candidate_id": 2,
+          "file": "src/engine/general_purpose/decode.rs",
+          "harness": "unittests src/lib.rs",
+          "host_check_passed": true,
+          "id": 2,
+          "improvement_ratio": -0.0013911643353124686,
+          "insn_count": 2487706,
+          "model_summary": "Replaced the unrolled 8-branch decode_chunk_8 body with a single enumerated loop that computes the same 6-bit morsel accumulation and identical error behavior, reducing per-chunk instruction overhead while preserving the test's assertions and fixed loop bounds.",
+          "reason": "slower",
+          "status": "rejected",
+          "stdout_matched": true,
+          "symbol": "decode_chunk_8",
+          "target": "aarch64-unknown-linux-musl",
+          "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+          "tool_output": null,
+          "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n--- a/src/engine/general_purpose/decode.rs\n+++ b/src/engine/general_purpose/decode.rs\n@@ -165,87 +165,25 @@\n /// Decode 8 bytes of input into 6 bytes of output.\n ///\n /// `input` is the 8 bytes to decode.\n /// `index_at_start_of_input` is the offset in the overall input (used for reporting errors\n /// accurately)\n /// `decode_table` is the lookup table for the particular base64 alphabet.\n /// `output` will have its first 6 bytes overwritten\n // yes, really inline (worth 30-50% speedup)\n #[inline(always)]\n fn decode_chunk_8(\n     input: &[u8],\n     index_at_start_of_input: usize,\n     decode_table: &[u8; 256],\n     output: &mut [u8],\n ) -> Result<(), DecodeError> {\n-    let morsel = decode_table[usize::from(input[0])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n-    }\n-    let mut accum = u64::from(morsel) << 58;\n-\n-    let morsel = decode_table[usize::from(input[1])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 1,\n-            input[1],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 52;\n-\n-    let morsel = decode_table[usize::from(input[2])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 2,\n-            input[2],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 46;\n-\n-    let morsel = decode_table[usize::from(input[3])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 3,\n-            input[3],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 40;\n-\n-    let morsel = decode_table[usize::from(input[4])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 4,\n-            input[4],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 34;\n-\n-    let morsel = decode_table[usize::from(input[5])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 5,\n-            input[5],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 28;\n-\n-    let morsel = decode_table[usize::from(input[6])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 6,\n-            input[6],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 22;\n-\n-    let morsel = decode_table[usize::from(input[7])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 7,\n-            input[7],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 16;\n-\n-    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n-\n-    Ok(())\n+    let mut accum = 0u64;\n+    for (i, &byte) in input.iter().enumerate() {\n+        let morsel = decode_table[usize::from(byte)];\n+        if morsel == INVALID_VALUE {\n+            return Err(DecodeError::InvalidByte(index_at_start_of_input + i, byte));\n+        }\n+        accum |= u64::from(morsel) << (58 - 6 * i);\n+    }\n+    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n+    Ok(())\n }\n"
+        }
+      ]
+    }
+  },
+  "final_worker_checks": {
+    "log": "/tmp/noctum-final-worker-tests.log",
+    "passed": 3,
+    "seconds": 50.78,
+    "counts": [
+      6011,
+      6011,
+      12011,
+      12011
+    ],
+    "source_growth": true,
+    "pinned_toolchain": "1.99.0",
+    "stop_after_suspension": true,
+    "stop_after_external_removal": true,
+    "worker_removed_after_controller_kill": true,
+    "no_running_containers": true,
+    "builder_states": [
+      "stopped"
+    ]
+  },
+  "current_cli_resource_check": {
+    "run_id": 6,
+    "stdout": "/tmp/noctum-current-native-model.stdout",
+    "stderr": "/tmp/noctum-current-native-model.stderr",
+    "result": "Model start was refused because available RAM was below the model file size plus the 1 GiB reserve.",
+    "required_bytes": 10212457152,
+    "available_bytes": 9792525387,
+    "model_started": false,
+    "cli_exit_code": 1
+  },
+  "project_disk_checks": {
+    "reserve_bytes": 2147483648,
+    "period_seconds": 2,
+    "host_test_log": "/tmp/noctum-project-disk-final-tests.log",
+    "clippy_log": "/tmp/noctum-project-disk-final-clippy.log",
+    "passed": 115,
+    "ignored": 7,
+    "live_test_log": "/tmp/noctum-project-disk-live.log",
+    "live_status": "passed",
+    "live_seconds": 4.81,
+    "live_scope": "An injected low space check stopped a real running command and removed the Apple worker. The test did not fill the host disk.",
+    "worker_suite_log": "/tmp/noctum-project-disk-worker-suite.log",
+    "worker_suite_passed": 3,
+    "worker_suite_seconds": 52.98,
+    "worker_image": "noctum-worker:638b36366537455b74574ecd-aarch64",
+    "cli_sha256": "450b6d7b13b92f0e0bde143eeedfc0bbd2d8d375a4359569120ac44f894b0c9f"
+  },
+  "current_cli_unbounded_reasoning": {
+    "run_id": 7,
+    "stdout": "/tmp/noctum-current-native-model-retry.stdout",
+    "stderr": "/tmp/noctum-current-native-model-retry.stderr",
+    "inference_phase": {
+      "observed_at_unix": 1795387272.964431,
+      "running_containers": [],
+      "vm_processes": [],
+      "model_processes": [
+        "63521 794016       00:28 /private/tmp/noctum-compat.qtBzNE/data/llama.cpp/b12588-mix-c0c3de8/macos-aarch64/llama-server"
+      ],
+      "builder_states": [
+        "stopped"
+      ]
+    },
+    "response_token_limit": 8192,
+    "result": "The response reached the token limit. No patch was applied.",
+    "exit_code": 1,
+    "source_head_index_and_branches_kept": true,
+    "server_stopped": true
+  },
+  "git_path_checks": {
+    "before_log": "/tmp/noctum-git-spaces-before.log",
+    "before_exit_code": 101,
+    "after_log": "/tmp/noctum-bounded-reasoning-tests.log",
+    "result": "passed",
+    "file_names": [
+      "tests/my file.rs",
+      "tests/my b/file.rs",
+      "tests/\u00e9 file.rs"
+    ],
+    "checks": [
+      "Keep valid Git patches.",
+      "Add only missing file headers.",
+      "Pass git apply --check.",
+      "Reject protected path edits.",
+      "Reject assertion removal."
+    ]
+  },
+  "bounded_reasoning_first_run": {
+    "run": {
+      "id": 8,
+      "repository_id": 9,
+      "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "package": "base64",
+      "started_at": "2026-11-22 22:53:12",
+      "finished_at": "2026-11-22 23:02:47",
+      "status": "ok",
+      "error": null,
+      "window_key": null,
+      "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "target": "aarch64-unknown-linux-musl",
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+    },
+    "trials": [
+      {
+        "id": 6,
+        "candidate_id": 6,
+        "status": "rejected",
+        "reason": "error: patch failed: src/engine/general_purpose/decode.rs:165\nerror: src/engine/general_purpose/decode.rs: patch does not apply\n",
+        "model_summary": "Restored the invalid-byte checks in decode_chunk_8 while keeping the same decode logic and output. This preserves the error behavior required by the test suite and avoids the previous diff's incorrect removal of validation.",
+        "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n--- a/src/engine/general_purpose/decode.rs\n+++ b/src/engine/general_purpose/decode.rs\n@@ -165,7 +165,7 @@\n     let morsel = decode_table[usize::from(input[0])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n+    }\n     let mut accum = u64::from(morsel) << 58;\n \n     let morsel = decode_table[usize::from(input[1])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 1, input[1]));\n+    }\n     accum |= u64::from(morsel) << 52;\n \n     let morsel = decode_table[usize::from(input[2])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 2, input[2]));\n+    }\n     accum |= u64::from(morsel) << 46;\n \n     let morsel = decode_table[usize::from(input[3])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 3, input[3]));\n+    }\n     accum |= u64::from(morsel) << 40;\n \n     let morsel = decode_table[usize::from(input[4])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 4, input[4]));\n+    }\n     accum |= u64::from(morsel) << 34;\n \n     let morsel = decode_table[usize::from(input[5])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 5, input[5]));\n+    }\n     accum |= u64::from(morsel) << 28;\n \n     let morsel = decode_table[usize::from(input[6])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 6, input[6]));\n+    }\n     accum |= u64::from(morsel) << 22;\n \n     let morsel = decode_table[usize::from(input[7])];\n+    if morsel == INVALID_VALUE {\n+        return Err(DecodeError::InvalidByte(index_at_start_of_input + 7, input[7]));\n+    }\n     accum |= u64::from(morsel) << 16;\n \n     output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n \n     Ok(())\n }\n",
+        "baseline_count": 2484943,
+        "insn_count": null,
+        "improvement_ratio": null,
+        "host_check_passed": 0,
+        "stdout_matched": 0,
+        "tool_output": null,
+        "symbol": "decode_chunk_8",
+        "file": "src/engine/general_purpose/decode.rs"
+      }
+    ],
+    "model_requests": 2,
+    "reasoning_token_limit": 2048,
+    "response_token_limit": 8192,
+    "stdout": "/tmp/noctum-bounded-native-model.stdout",
+    "stderr": "/tmp/noctum-bounded-native-model.stderr",
+    "inference_phase": {
+      "observed_at_unix": 1795388099.856383,
+      "running_containers": [],
+      "vm_processes": [],
+      "model_processes": [
+        "73655 5161040       00:39 /private/tmp/noctum-compat.qtBzNE/data/llama.cpp/b12588-mix-c0c3de8/macos-aarch64/llama-server"
+      ],
+      "model_arguments": "/private/tmp/noctum-compat.qtBzNE/data/llama.cpp/b12588-mix-c0c3de8/macos-aarch64/llama-server -m /private/tmp/noctum-compat.qtBzNE/data/models/Inkling-2-Mini-UD-Q2_K_XL.gguf --host 127.0.0.1 --port 61690 -c 16384 -t 9 -ngl 99 -np 1 -b 256 -ub 128 --reasoning-effort low --reasoning-budget 2048 --jinja",
+      "builder_states": [
+        "stopped"
+      ]
+    },
+    "first_patch_host_tests": {
+      "passed": 166,
+      "failed": 13
+    },
+    "repair_result": "The repair used the failed source as its base. Noctum reset to the original source before apply. The patch was rejected.",
+    "source_head_index_and_branches_kept": true,
+    "follow_up_fix": "Restore the original source before the repair request. State the replacement diff base in the prompt."
+  },
+  "production_cli_full_run": {
+    "mode": "native model and production CLI",
+    "worker_image": "noctum-worker:e96596a5a2b935b3f936bdd4-aarch64",
+    "run": {
+      "id": 9,
+      "repository_id": 9,
+      "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "package": "base64",
+      "started_at": "2026-11-22 23:09:10",
+      "finished_at": "2026-11-22 23:16:13",
+      "status": "ok",
+      "error": null,
+      "window_key": null,
+      "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "target": "aarch64-unknown-linux-musl",
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=b7258af3df8101af5812a20b6e5eb92dd3595eba21a9e9f06d893230d4726c85"
+    },
+    "tests": [
+      {
+        "id": 9,
+        "run_id": 9,
+        "harness": "unittests src/lib.rs",
+        "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "status": "measured",
+        "insn_count": 2484943,
+        "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+        "binary_sha256": "7b96658b330b9bd14f015fa94632a1faf81bfbf4b39c8a8ef778b6b73e1073ed",
+        "wall_ms": 709,
+        "reason": null
+      }
+    ],
+    "trials": [
+      {
+        "id": 7,
+        "candidate_id": 7,
+        "status": "rejected",
+        "reason": "slower",
+        "model_summary": "Replaced the unrolled per-byte blocks in decode_chunk_8 with a single indexed loop that preserves the same lookup, first-invalid-byte error, accumulation, and output bytes.",
+        "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n--- a/src/engine/general_purpose/decode.rs\n+++ b/src/engine/general_purpose/decode.rs\n@@ -165,88 +165,38 @@\n /// Decode 8 bytes of input into 6 bytes of output.\n ///\n /// `input` is the 8 bytes to decode.\n /// `index_at_start_of_input` is the offset in the overall input (used for reporting errors\n /// accurately)\n /// `decode_table` is the lookup table for the particular base64 alphabet.\n /// `output` will have its first 6 bytes overwritten\n // yes, really inline (worth 30-50% speedup)\n #[inline(always)]\n fn decode_chunk_8(\n     input: &[u8],\n     index_at_start_of_input: usize,\n     decode_table: &[u8; 256],\n     output: &mut [u8],\n ) -> Result<(), DecodeError> {\n-    let morsel = decode_table[usize::from(input[0])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n-    }\n-    let mut accum = u64::from(morsel) << 58;\n-\n-    let morsel = decode_table[usize::from(input[1])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 1,\n-            input[1],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 52;\n-\n-    let morsel = decode_table[usize::from(input[2])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 2,\n-            input[2],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 46;\n-\n-    let morsel = decode_table[usize::from(input[3])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 3,\n-            input[3],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 40;\n-\n-    let morsel = decode_table[usize::from(input[4])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 4,\n-            input[4],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 34;\n-\n-    let morsel = decode_table[usize::from(input[5])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 5,\n-            input[5],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 28;\n-\n-    let morsel = decode_table[usize::from(input[6])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 6,\n-            input[6],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 22;\n-\n-    let morsel = decode_table[usize::from(input[7])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 7,\n-            input[7],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 16;\n-\n-    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n-\n-    Ok(())\n+    let mut accum = 0u64;\n+    for (i, &byte) in input.iter().enumerate() {\n+        let morsel = decode_table[usize::from(byte)];\n+        if morsel == INVALID_VALUE {\n+            return Err(DecodeError::InvalidByte(index_at_start_of_input + i, byte));\n+        }\n+        accum |= u64::from(morsel) << (58 - 6 * i);\n+    }\n+    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n+    Ok(())\n }\n",
+        "baseline_count": 2484943,
+        "insn_count": 2488399,
+        "improvement_ratio": -0.0013907763679086402,
+        "host_check_passed": 1,
+        "stdout_matched": 1,
+        "tool_output": null,
+        "symbol": "decode_chunk_8",
+        "file": "src/engine/general_purpose/decode.rs"
+      }
+    ],
+    "model_requests": 1,
+    "reasoning_token_budget": 2048,
+    "response_token_limit": 8192,
+    "stdout": "/tmp/noctum-repair-native-model.stdout",
+    "stderr": "/tmp/noctum-repair-native-model.stderr",
+    "phases": {
+      "observations": [
+        {
+          "time": 1795389017.005725,
+          "phase": "inferring",
+          "detail": "decode_chunk_8",
+          "running_containers": [],
+          "owned_workers": [],
+          "vm_processes": [],
+          "model_processes": [
+            "85839 929088       00:00 /private/tmp/noctum-compat.qtBzNE/data/llama.cpp/b12588-mix-c0c3de8/macos-aarch64/llama-server"
+          ],
+          "model_arguments": "/private/tmp/noctum-compat.qtBzNE/data/llama.cpp/b12588-mix-c0c3de8/macos-aarch64/llama-server -m /private/tmp/noctum-compat.qtBzNE/data/models/Inkling-2-Mini-UD-Q2_K_XL.gguf --host 127.0.0.1 --port 62275 -c 16384 -t 9 -ngl 99 -np 1 -b 256 -ub 128 --reasoning-effort low --reasoning-budget 2048 --jinja"
+        },
+        {
+          "time": 1795389254.323256,
+          "phase": "checking",
+          "detail": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+          "running_containers": [],
+          "owned_workers": [],
+          "vm_processes": [
+            "86185  34272       00:01 /opt/homebrew/Cellar/container/1.7.1_1/libexec/container-plugins/container-runtime-linux/bin/container-runtime-linux",
+            "86186 255040       00:01 /System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine"
+          ],
+          "model_processes": []
+        }
+      ],
+      "violations": []
+    },
+    "source_state": {
+      "head": "e14400697453bcc85997119b874bc03d9601d0af",
+      "index": "09a277a082d8e7a57316cd9f54da0c58a6500c17c0b59d0fbc9df5aabd1ccea7",
+      "branches": "",
+      "source_sha256": "dc6d9786bb0e2c78b2dd4bce59f110c571d5bc7c6949961519aae936cd55abf7"
+    },
+    "source_head_index_and_branches_kept": true,
+    "no_running_containers_or_model_servers": true,
+    "exit_code": 0,
+    "saved_response_used": false,
+    "accepted_optimization": false
+  },
+  "repair_base_regression": {
+    "log": "/tmp/noctum-repair-base-test.log",
+    "passed": true,
+    "checks": [
+      "The first host check sees the failed patch.",
+      "The repair request sees the original source.",
+      "The replacement diff applies to the original source.",
+      "The second host check sees the replacement.",
+      "The Git commit is kept."
+    ]
+  },
+  "final_checks": {
+    "rust_workspace": {
+      "passed": 117,
+      "failed": 0,
+      "ignored": 7,
+      "all_targets": true,
+      "all_features": true,
+      "log": "/tmp/noctum-final-workspace-tests.log"
+    },
+    "clippy": {
+      "warnings_denied": true,
+      "workspace": true,
+      "log": "/tmp/noctum-final-workspace-clippy.log"
+    },
+    "python": {
+      "passed": 3,
+      "log": "/tmp/noctum-final-python-tests.log"
+    },
+    "formatting": "passed",
+    "doctor_log": "/tmp/noctum-final-doctor.log",
+    "review_log": "/tmp/noctum-final-review.log",
+    "status_log": "/tmp/noctum-final-status.log",
+    "local_qemu_archive_matches_lock": true,
+    "all_resources_stopped": true
+  },
+  "completion_audit": {
+    "objective": "Let us get Noctum into a state that it can work on real-world projects.",
+    "requirements": [
+      {
+        "requirement": "Use existing Rust projects and Cargo workspaces.",
+        "result": "proved",
+        "evidence": [
+          "production-results.json: four supported upstream projects and one expected build failure.",
+          "Final Rust workspace tests: package selection, features, test selection, and Git paths."
+        ]
+      },
+      {
+        "requirement": "Keep the original source and Git state.",
+        "result": "proved",
+        "evidence": [
+          "production_cli_full_run.source_state matches the saved state before the tests.",
+          "The matrix source states match. The earlier base64 matrix config differs only by the added protected_paths settings."
+        ]
+      },
+      {
+        "requirement": "Use repeated guest counts and correctness checks.",
+        "result": "proved",
+        "evidence": [
+          "The native model patch passed the package checks. Both guest measurements matched. The slower patch was rejected.",
+          "Live fence, raw output, source growth, and pinned toolchain checks passed."
+        ]
+      },
+      {
+        "requirement": "Run the native model and Apple worker in separate phases.",
+        "result": "proved",
+        "evidence": [
+          "production_cli_full_run.phases: model with no VM, then VM with no model.",
+          "Worker exit after controller death, suspension, and external removal checks passed."
+        ]
+      },
+      {
+        "requirement": "Provide setup, measurement, run, review, and retry commands.",
+        "result": "proved",
+        "evidence": [
+          "Final CLI tests and doctor, review, and status command logs.",
+          "Saved response history check: trial counts 1, 0, and 1."
+        ]
+      },
+      {
+        "requirement": "Handle memory, disk, model, and repair failures.",
+        "result": "proved",
+        "evidence": [
+          "The RAM check stopped model startup when memory was too low.",
+          "The response token limit kept an incomplete patch out of the source.",
+          "Native process group and Apple worker removal tests passed at the disk reserve.",
+          "The repair base regression passed."
+        ]
+      },
+      {
+        "requirement": "Keep build inputs pinned and document the setup.",
+        "result": "proved",
+        "evidence": [
+          "The local QEMU archive matches qemu.lock.toml.",
+          "The final doctor checks verified model and server files.",
+          "README.md states setup steps and supported workloads."
+        ]
+      }
+    ],
+    "limits": [
+      "Tests must build for the selected Linux musl target and give repeatable counts.",
+      "Linux guest instruction counts do not measure macOS elapsed time.",
+      "Apple Containers mode is opt-in.",
+      "The base64 test did not produce an accepted optimization.",
+      "These checks do not establish support for every Rust project."
+    ]
+  }
+}

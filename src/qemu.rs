@@ -1,5 +1,5 @@
-//! Pinned system-mode QEMU. The guest is the ruler: one vCPU, TCG, icount,
-//! no NIC, no virtio-rng, a fixed CPU model, and a fresh disk overlay.
+//! Pinned QEMU guests with one vCPU and a fixed CPU model.
+//! Current bundles boot from a RAM archive with fixed clocks and seed.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -9,45 +9,68 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use crate::lockfile::qemu_dir;
 use crate::ports::{MeasureRequest, Measurement, Measurer};
 use crate::process::{self, signal_group};
 use crate::profile::{self, ProfileDump};
 use crate::target::GuestTarget;
 
+mod ram;
+pub const MEASUREMENT_VERSION: &str = "ram-insn-v2";
+
 pub struct QemuRunner {
-    pub data_dir: PathBuf,
     pub memory_mb: u32,
-    bundle_override: Option<PathBuf>,
-    snapshot_override: Option<PathBuf>,
+    bundle: PathBuf,
+    snapshots: PathBuf,
     target: GuestTarget,
 }
 
 impl QemuRunner {
-    pub fn new(data_dir: impl Into<PathBuf>, memory_mb: u32) -> Self {
-        Self {
-            data_dir: data_dir.into(),
-            memory_mb,
-            bundle_override: None,
-            snapshot_override: None,
-            target: GuestTarget::X86_64,
-        }
-    }
-
     pub fn at_bundle(bundle: PathBuf, snapshots: PathBuf, memory_mb: u32) -> Self {
         Self {
-            data_dir: PathBuf::new(),
             memory_mb,
-            bundle_override: Some(bundle),
-            snapshot_override: Some(snapshots),
+            bundle,
+            snapshots,
             target: GuestTarget::native(),
         }
     }
 
     fn bundle(&self) -> PathBuf {
-        self.bundle_override
-            .clone()
-            .unwrap_or_else(|| qemu_dir(&self.data_dir))
+        self.bundle.clone()
+    }
+
+    async fn measure_ram(&self, req: &MeasureRequest, bundle: &Path) -> Result<Measurement> {
+        std::fs::create_dir_all(&req.scratch)?;
+        let input = ram::build(bundle, req).await?;
+        let args = ram_args(bundle, self.target, req.memory_mb, &input, &req.scratch);
+        let started = Instant::now();
+        let mut child = spawn_qemu(bundle, &args, &req.scratch, self.target)?;
+        let pid = child.id().unwrap_or(0);
+        let result =
+            tokio::time::timeout(Duration::from_secs(req.timeout_secs), child.wait()).await;
+        match result {
+            Ok(Ok(status)) if status.success() => {}
+            _ => {
+                signal_group(pid, "-KILL");
+                let _ = child.kill().await;
+                bail!(
+                    "guest failed or timed out after {} seconds\n{}",
+                    req.timeout_secs,
+                    qemu_logs(&req.scratch)
+                );
+            }
+        }
+        let serial = std::fs::read(req.scratch.join("serial.log"))?;
+        ram::unpack(&serial, &req.scratch).with_context(|| qemu_logs(&req.scratch))?;
+        let log = crate::hashutil::tail_str(&String::from_utf8_lossy(&serial), crate::LOG_LIMIT);
+        let mut measurement = read_measurement(
+            &req.scratch,
+            &req.scratch.join("dump.txt"),
+            started.elapsed(),
+            &log,
+        )?;
+        measurement.load_bias =
+            profile::elf_load_bias(&std::fs::read(&req.harness)?, measurement.load_bias)?;
+        Ok(measurement)
     }
 }
 
@@ -55,8 +78,16 @@ impl Measurer for QemuRunner {
     async fn measure(&self, req: &MeasureRequest) -> Result<Measurement> {
         let bundle = self.bundle();
         ensure_tools(&bundle, self.target)?;
+        if std::fs::read_to_string(bundle.join("MEASUREMENT_VERSION"))
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            == Some(MEASUREMENT_VERSION)
+        {
+            return self.measure_ram(req, &bundle).await;
+        }
         std::fs::create_dir_all(&req.scratch)?;
-        let snapshots = self.snapshot_override.as_deref().unwrap_or(&bundle);
+        let snapshots = self.snapshots.as_path();
         std::fs::create_dir_all(snapshots)?;
         ensure_snapshot(&bundle, snapshots, self.memory_mb, self.target).await?;
         let overlay = req.scratch.join("overlay.qcow2");
@@ -125,6 +156,59 @@ impl Measurer for QemuRunner {
             }
         }
     }
+}
+
+fn ram_args(
+    bundle: &Path,
+    target: GuestTarget,
+    memory_mb: u32,
+    input: &Path,
+    scratch: &Path,
+) -> Vec<String> {
+    vec![
+        "-accel".into(),
+        "tcg".into(),
+        "-machine".into(),
+        target.machine().into(),
+        "-cpu".into(),
+        target.cpu().into(),
+        "-smp".into(),
+        "1".into(),
+        "-m".into(),
+        memory_mb.to_string(),
+        "-display".into(),
+        "none".into(),
+        "-L".into(),
+        bundle.join("pc-bios").display().to_string(),
+        "-nic".into(),
+        "none".into(),
+        "-seed".into(),
+        "1".into(),
+        "-rtc".into(),
+        "base=2000-01-01T00:00:00,clock=vm".into(),
+        "-icount".into(),
+        "shift=0,sleep=off".into(),
+        "-no-reboot".into(),
+        "-kernel".into(),
+        bundle.join("vmlinuz").display().to_string(),
+        "-initrd".into(),
+        input.display().to_string(),
+        "-append".into(),
+        target.console().into(),
+        "-chardev".into(),
+        format!(
+            "file,id=ser,path={}",
+            qemu_option(&scratch.join("serial.log"))
+        ),
+        "-serial".into(),
+        "chardev:ser".into(),
+        "-plugin".into(),
+        format!(
+            "{},output={}",
+            qemu_option(&bundle.join("noctum_profile.so")),
+            qemu_option(&scratch.join("dump.txt"))
+        ),
+    ]
 }
 
 pub(crate) struct QemuLaunch {
@@ -304,13 +388,7 @@ async fn ensure_snapshot(
             bail!("{err}\n{}", qemu_logs(&scratch));
         }
     };
-    let saved = tokio::time::timeout(
-        Duration::from_secs(180),
-        qmp.execute(
-            &json!({"execute":"human-monitor-command","arguments":{"command-line":"savevm ready"}}),
-        ),
-    )
-    .await;
+    let saved = tokio::time::timeout(Duration::from_secs(180), qmp.save_snapshot("ready")).await;
     if let Err(err) = match saved {
         Ok(result) => result,
         Err(_) => Err(anyhow!("savevm timed out")),
@@ -323,54 +401,6 @@ async fn ensure_snapshot(
     let _ = tokio::time::timeout(Duration::from_secs(30), child.wait()).await;
     drop(held);
     std::fs::write(stamp, current)?;
-    Ok(())
-}
-
-pub async fn fetch(data_dir: &Path) -> Result<()> {
-    let lock = crate::lockfile::QemuLock::load()?;
-    if !lock.published() {
-        if lock.sha256.is_empty() {
-            bail!(
-                "QEMU bundle {} has no published url and sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
-                lock.id
-            );
-        }
-        bail!(
-            "QEMU bundle {} is pinned but has no download URL. Build it with qemu/build-bundle.sh and run `noctum qemu install` on the tarball.",
-            lock.id
-        );
-    }
-    let dest = crate::lockfile::bundle_archive(data_dir);
-    crate::model::download_verified(&lock.url, &dest, &lock.sha256).await?;
-    extract_bundle(&dest, &crate::lockfile::qemu_dir(data_dir))?;
-    crate::lockfile::verify_qemu(data_dir)?;
-    Ok(())
-}
-
-fn extract_bundle(archive: &Path, dest: &Path) -> Result<()> {
-    std::fs::create_dir_all(dest)?;
-    let file = std::fs::File::open(archive)?;
-    let decoder = flate2::read::GzDecoder::new(file);
-    let mut tar = tar::Archive::new(decoder);
-    for entry in tar.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?.into_owned();
-        if path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            continue;
-        }
-        let out = dest.join(&path);
-        if entry.header().entry_type().is_dir() {
-            std::fs::create_dir_all(&out)?;
-            continue;
-        }
-        if let Some(parent) = out.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        entry.unpack(&out)?;
-    }
     Ok(())
 }
 
@@ -400,7 +430,7 @@ fn spawn_qemu(
     {
         command.process_group(0);
     }
-    command.spawn().context("spawn qemu-system-x86_64")
+    command.spawn().context("start the ARM64 measurement guest")
 }
 
 fn write_job(path: &Path, exe: &str, args: &[String]) -> Result<()> {
@@ -557,6 +587,20 @@ struct Qmp {
 }
 
 impl Qmp {
+    async fn save_snapshot(&mut self, name: &str) -> Result<Value> {
+        let response = self
+            .execute(&json!({
+                "execute": "human-monitor-command",
+                "arguments": {"command-line": format!("savevm {name}")}
+            }))
+            .await?;
+        match response.get("return").and_then(Value::as_str) {
+            Some("") => Ok(response),
+            Some(message) => bail!("{message}"),
+            None => bail!("QEMU returned an invalid snapshot response: {response}"),
+        }
+    }
+
     async fn connect(path: &Path) -> Result<Self> {
         let stream = connect_unix(path).await?;
         let (read, write) = stream.into_split();
@@ -593,42 +637,68 @@ impl Qmp {
     }
 }
 
-pub fn install(data_dir: &Path, archive: &Path) -> Result<()> {
-    let lock = crate::lockfile::QemuLock::load()?;
-    if lock.sha256.is_empty() {
-        bail!(
-            "QEMU bundle {} has no sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
-            lock.id
-        );
-    }
-    if !archive.is_file() {
-        bail!("bundle archive {} is missing", archive.display());
-    }
-    let got = crate::hashutil::sha256_file(archive)?;
-    if got != lock.sha256 {
-        bail!("tarball sha256 is {got}, lockfile says {}", lock.sha256);
-    }
-    let dest = crate::lockfile::bundle_archive(data_dir);
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if archive.canonicalize().ok() != dest.canonicalize().ok() {
-        std::fs::copy(archive, &dest)?;
-    }
-    extract_bundle(&dest, &crate::lockfile::qemu_dir(data_dir))?;
-    crate::lockfile::verify_qemu(data_dir)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn ram_guest_has_no_host_input_devices_or_clock() {
+        {
+            let target = GuestTarget::Aarch64;
+            let args = ram_args(
+                Path::new("/bundle"),
+                target,
+                512,
+                Path::new("/input.cpio.gz"),
+                Path::new("/scratch"),
+            );
+            let text = args.join(" ");
+            assert!(text.contains("-seed 1"));
+            assert!(text.contains("clock=vm"));
+            assert!(text.contains("shift=0,sleep=off"));
+            assert!(text.contains("-initrd /input.cpio.gz"));
+            assert!(!args
+                .iter()
+                .any(|a| ["-fsdev", "-drive", "-qmp", "-loadvm"].contains(&a.as_str())));
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_errors_in_monitor_output_are_rejected() {
+        for (output, success) in [
+            (json!(""), true),
+            (json!("Error: Migration is disabled by VirtFS"), false),
+            (Value::Null, false),
+        ] {
+            let (client, server) = UnixStream::pair().unwrap();
+            let (read, write) = client.into_split();
+            let mut qmp = Qmp {
+                reader: BufReader::new(read),
+                writer: write,
+            };
+            let task = tokio::spawn(async move {
+                let mut server = BufReader::new(server);
+                let mut command = String::new();
+                server.read_line(&mut command).await.unwrap();
+                let command: Value = serde_json::from_str(&command).unwrap();
+                assert_eq!(command["arguments"]["command-line"], "savevm ready");
+                let response = format!("{}\n", json!({"return": output}));
+                server
+                    .get_mut()
+                    .write_all(response.as_bytes())
+                    .await
+                    .unwrap();
+            });
+            assert_eq!(qmp.save_snapshot("ready").await.is_ok(), success);
+            task.await.unwrap();
+        }
+    }
+
+    #[test]
     fn measurement_command_is_the_pinned_guest() {
         let mut launch = QemuLaunch {
             bundle: PathBuf::from("/bundle"),
-            target: GuestTarget::X86_64,
+            target: GuestTarget::Aarch64,
             memory_mb: 1024,
             disk: PathBuf::from("/tmp/overlay.qcow2"),
             loadvm: true,
@@ -641,9 +711,9 @@ mod tests {
         let args = measurement_args(&launch);
         let text = args.join(" ");
         assert!(text.contains("-accel tcg"));
-        assert!(text.contains("-cpu qemu64"));
+        assert!(text.contains("-cpu cortex-a72"));
         assert!(text.contains("-smp 1"));
-        assert!(text.contains("-icount shift=0,sleep=off"));
+        assert!(text.contains("-icount shift=0,sleep=on"));
         assert!(text.contains("-nic none"));
         assert!(text.contains("-loadvm ready"));
         assert!(text.contains("readonly=on"));

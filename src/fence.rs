@@ -131,10 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn installed_crate_contains_the_out_instruction() {
+    fn installed_crate_contains_the_arm64_marker() {
         let dir = tempfile::tempdir().unwrap();
         let path = install_fence_crate(dir.path()).unwrap();
         let lib = std::fs::read_to_string(path.join("src/lib.rs")).unwrap();
-        assert!(lib.contains("outb %al, $0xe9"));
+        assert!(lib.contains(".inst 0xd289c63f"));
     }
 }

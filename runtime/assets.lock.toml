@@ -1,0 +1,7 @@
+# Use these assets for the macOS ARM64 host and its Linux guest.
+image = "docker.io/library/rust@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea"
+init = "ghcr.io/apple/containerization/vminit@sha256:c30d5a14c9c25762005363c1736831608806ee8c2a9d8de70dd5439d4812e656"
+kernel_url = "https://github.com/kata-containers/kata-containers/releases/download/4.3.1/kata-static-4.3.1-arm64.tar.zst"
+kernel_archive_sha256 = "2c5bf7cde334ad5307d482f45cceda496f91c9b6b96f5278c47f4f4eac1bbae6"
+kernel_member = "opt/kata/share/kata-containers/vmlinux-6.18.56-208-debug"
+kernel_sha256 = "98a1005f8cc395e99b85775b9dce2b239190520b102bf549f4225104dcd7f511"

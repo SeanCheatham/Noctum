@@ -30,6 +30,13 @@ const DENY: &[&str] = &[
     "mysql",
     "redis",
     "mongodb",
+    "thread_rng",
+    "rand::rng(",
+    "rand::random(",
+    "OsRng",
+    "from_entropy",
+    "from_os_rng",
+    "getrandom(",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +44,8 @@ pub struct DiscoveredTest {
     pub name: String,
     pub file: PathBuf,
     pub fn_path: String,
+    pub file_fn_path: String,
+    pub harness: Option<String>,
     pub body: String,
     pub body_bytes: usize,
     pub source: String,
@@ -89,7 +98,7 @@ pub fn logical_harness(package_root: &Path, src_path: &Path, kind: &str) -> Stri
 pub fn discover_harness(root: &Path) -> Vec<DiscoveredTest> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    walk_file(root, "", &mut out, &mut seen);
+    walk_file(root, "", true, &mut out, &mut seen);
     out
 }
 
@@ -139,6 +148,7 @@ pub fn order_for_scan(mut tests: Vec<DiscoveredTest>, max_scan: usize) -> Vec<Di
     }
     keep.sort_by(|a, b| b.body_bytes.cmp(&a.body_bytes).then(a.name.cmp(&b.name)));
     keep.truncate(max_scan);
+    skipped.truncate(max_scan);
     keep.extend(skipped);
     keep
 }
@@ -146,13 +156,14 @@ pub fn order_for_scan(mut tests: Vec<DiscoveredTest>, max_scan: usize) -> Vec<Di
 fn walk_file(
     path: &Path,
     prefix: &str,
+    root: bool,
     out: &mut Vec<DiscoveredTest>,
     seen: &mut HashSet<PathBuf>,
 ) {
     let Ok(canon) = path.canonicalize() else {
         return;
     };
-    if !seen.insert(canon) {
+    if !seen.insert(canon.clone()) {
         return;
     }
     let Ok(src) = fs::read_to_string(path) else {
@@ -161,14 +172,26 @@ fn walk_file(
     let Ok(file) = syn::parse_file(&src) else {
         return;
     };
-    walk_items_follow(&file.items, prefix, path, &src, out, seen);
+    let context = SourceFile {
+        path,
+        directory: module_dir(path, root),
+        source: &src,
+    };
+    walk_items_follow(&file.items, prefix, "", &context, out, seen);
+    seen.remove(&canon);
+}
+
+struct SourceFile<'a> {
+    path: &'a Path,
+    directory: PathBuf,
+    source: &'a str,
 }
 
 fn walk_items_follow(
     items: &[Item],
     prefix: &str,
-    file: &Path,
-    src: &str,
+    file_prefix: &str,
+    file: &SourceFile<'_>,
     out: &mut Vec<DiscoveredTest>,
     seen: &mut HashSet<PathBuf>,
 ) {
@@ -176,16 +199,40 @@ fn walk_items_follow(
         match item {
             Item::Mod(module) => {
                 let next = join(prefix, &module.ident.to_string());
+                let path_base = if file_prefix.is_empty() {
+                    file.path.parent().unwrap_or_else(|| Path::new("."))
+                } else {
+                    &file.directory
+                };
                 if let Some((_, nested)) = &module.content {
-                    walk_items_follow(nested, &next, file, src, out, seen);
-                } else if let Some(child) =
-                    resolve_mod(file, &module.ident.to_string(), &module.attrs)
-                {
-                    walk_file(&child, &next, out, seen);
+                    let directory = path_attribute(&module.attrs)
+                        .map(|p| path_base.join(p))
+                        .unwrap_or_else(|| file.directory.join(module.ident.to_string()));
+                    let context = SourceFile {
+                        path: file.path,
+                        directory,
+                        source: file.source,
+                    };
+                    walk_items_follow(
+                        nested,
+                        &next,
+                        &join(file_prefix, &module.ident.to_string()),
+                        &context,
+                        out,
+                        seen,
+                    );
+                } else {
+                    let child = path_attribute(&module.attrs)
+                        .map(|p| path_base.join(p))
+                        .or_else(|| resolve_mod(&file.directory, &module.ident.to_string()));
+                    if let Some(child) = child {
+                        walk_file(&child, &next, false, out, seen);
+                    }
                 }
             }
             Item::Fn(func) => {
-                if let Some(test) = test_from_fn(func, prefix, file, src) {
+                if let Some(mut test) = test_from_fn(func, prefix, file.path, file.source) {
+                    test.file_fn_path = join(file_prefix, &func.sig.ident.to_string());
                     out.push(test);
                 }
             }
@@ -229,6 +276,8 @@ fn test_from_fn(func: &ItemFn, prefix: &str, file: &Path, src: &str) -> Option<D
     Some(DiscoveredTest {
         name: fn_path.clone(),
         file: file.to_path_buf(),
+        file_fn_path: fn_path.clone(),
+        harness: None,
         fn_path,
         body_bytes: body.len(),
         body,
@@ -288,9 +337,16 @@ fn span_items(items: &[Item], prefix: &str, src: &str, out: &mut Vec<FnSpan>) {
                 }
             }
             Item::Impl(item) => {
+                let owner = slice_span(src, item.self_ty.span().byte_range());
+                let owner = if let Some((_, name, _)) = &item.trait_ {
+                    format!("<{owner} as {}>", slice_span(src, name.span().byte_range()))
+                } else {
+                    owner
+                };
+                let owner = join(prefix, &owner);
                 for impl_item in &item.items {
                     if let syn::ImplItem::Fn(func) = impl_item {
-                        let path = join(prefix, &func.sig.ident.to_string());
+                        let path = join(&owner, &func.sig.ident.to_string());
                         out.push(FnSpan {
                             path,
                             line_start: func.span().start().line,
@@ -351,9 +407,20 @@ fn is_assert_name(name: &str) -> bool {
     )
 }
 
-fn resolve_mod(file: &Path, name: &str, attrs: &[Attribute]) -> Option<PathBuf> {
-    let parent = file.parent()?;
-    if let Some(path_attr) = attrs.iter().find_map(|attr| {
+fn module_dir(file: &Path, root: bool) -> PathBuf {
+    let parent = file.parent().unwrap_or_else(|| Path::new("."));
+    if root {
+        return parent.to_path_buf();
+    }
+    match file.file_stem().and_then(|s| s.to_str()) {
+        Some("mod") => parent.to_path_buf(),
+        Some(stem) => parent.join(stem),
+        None => parent.to_path_buf(),
+    }
+}
+
+fn path_attribute(attrs: &[Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
         let Meta::NameValue(name) = &attr.meta else {
             return None;
         };
@@ -366,21 +433,14 @@ fn resolve_mod(file: &Path, name: &str, attrs: &[Attribute]) -> Option<PathBuf> 
             }
         }
         None
-    }) {
-        return Some(parent.join(path_attr));
-    }
-    let stem = file.file_stem()?.to_str()?;
-    let candidates = if stem == "lib" || stem == "main" || stem == "mod" {
-        vec![
-            parent.join(format!("{name}.rs")),
-            parent.join(name).join("mod.rs"),
-        ]
-    } else {
-        vec![
-            parent.join(stem).join(format!("{name}.rs")),
-            parent.join(stem).join(name).join("mod.rs"),
-        ]
-    };
+    })
+}
+
+fn resolve_mod(directory: &Path, name: &str) -> Option<PathBuf> {
+    let candidates = [
+        directory.join(format!("{name}.rs")),
+        directory.join(name).join("mod.rs"),
+    ];
     candidates.into_iter().find(|path| path.is_file())
 }
 
@@ -440,6 +500,88 @@ fn opens_socket() {
     let _ = std::net::TcpStream::connect("127.0.0.1:9");
 }
 "#;
+
+    #[test]
+    fn external_modules_keep_a_file_relative_test_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("suite.rs");
+        fs::write(&root, "mod outer { mod nested; }").unwrap();
+        fs::create_dir_all(dir.path().join("outer/nested")).unwrap();
+        fs::write(dir.path().join("outer/nested.rs"), "mod deeper;").unwrap();
+        fs::write(
+            dir.path().join("outer/nested/deeper.rs"),
+            "mod tests { #[test] fn works() { assert_eq!(2, 2); } }",
+        )
+        .unwrap();
+        let tests = discover_harness(&root);
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].fn_path, "outer::nested::deeper::tests::works");
+        assert_eq!(tests[0].file_fn_path, "tests::works");
+        let src = fs::read_to_string(&tests[0].file).unwrap();
+        let fenced = crate::fence::inject_guards(&src, &[tests[0].file_fn_path.clone()]).unwrap();
+        assert!(fenced.contains(crate::fence::GUARD));
+    }
+
+    #[test]
+    fn entropy_sources_are_skipped_but_fixed_seeds_are_kept() {
+        let tests = classify_source("#[test] fn random() { let _rng = rand::thread_rng(); } #[test] fn fixed() { let _rng = rand::rngs::StdRng::seed_from_u64(7); }");
+        assert!(tests[0].skip.as_deref().unwrap().contains("thread_rng"));
+        assert!(tests[1].skip.is_none());
+    }
+
+    #[test]
+    fn module_path_attributes_use_the_source_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("lib.rs");
+        fs::write(
+            &root,
+            "mod plain; #[path = \"custom\"] mod inline { #[path = \"unit.rs\"] mod sub; }",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("plain.rs"),
+            "#[path = \"special.rs\"] mod renamed;",
+        )
+        .unwrap();
+        fs::write(dir.path().join("special.rs"), "#[test] fn first() {}").unwrap();
+        fs::create_dir(dir.path().join("custom")).unwrap();
+        fs::write(dir.path().join("custom/unit.rs"), "#[test] fn second() {}").unwrap();
+        let tests = discover_harness(&root);
+        assert_eq!(
+            tests.iter().map(|t| t.fn_path.as_str()).collect::<Vec<_>>(),
+            ["plain::renamed::first", "inline::sub::second"]
+        );
+        assert_eq!(tests[0].file_fn_path, "first");
+        assert_eq!(tests[1].file_fn_path, "second");
+    }
+
+    #[test]
+    fn nonroot_lib_and_main_modules_use_their_own_directory() {
+        for name in ["lib", "main"] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("suite.rs");
+            fs::write(&root, format!("mod {name};")).unwrap();
+            fs::write(dir.path().join(format!("{name}.rs")), "mod nested;").unwrap();
+            fs::create_dir(dir.path().join(name)).unwrap();
+            fs::write(
+                dir.path().join(name).join("nested.rs"),
+                "#[test] fn works() {}",
+            )
+            .unwrap();
+            let tests = discover_harness(&root);
+            assert_eq!(tests.len(), 1);
+            assert_eq!(tests[0].fn_path, format!("{name}::nested::works"));
+        }
+    }
+
+    #[test]
+    fn method_spans_keep_type_and_trait_names() {
+        let spans = function_spans("impl First { fn new() {} } impl Second { fn new() {} } impl Trait for First { fn new() {} }");
+        assert_eq!(
+            spans.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(),
+            ["First::new", "Second::new", "<First as Trait>::new"]
+        );
+    }
 
     #[test]
     fn classifies_plain_custom_ignore_and_denylist() {

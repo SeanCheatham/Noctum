@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The host requires macOS 26 or later on Apple silicon.
+- A signed Swift helper uses Apple Containerization to control the worker VM.
+- The worker VM stops before local model inference. Cargo caches remain on disk.
+- Docker, the container command adapter, and Linux host support are removed.
+- `noctum runtime prepare` downloads fixed assets and builds the ARM64 guest tools.
+
 ### Fixed
 
 - A diff that lowers a fixed `for` bound rejects that candidate and is not sampled again. A host-suite failure still gets its one repair.
@@ -18,9 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A listed bench with `harness = false` and `fn main` is measured and can be kept. Criterion, `#[bench]`, and the default harness stay skipped
 - The repository page lists each candidate's hot function, the fenced counts before and after the change, and whether the night kept it
-- Pinned QEMU guest bundle (`qemu-9.2.0-linux-6.12.10`) with a TCG instruction-count plugin, a musl initramfs, and `qemu/smoke.sh` to boot one fenced harness
-- `noctum qemu install` for a local tarball when the lockfile has a checksum and no download URL
-- `qemu/real-pass.sh`, an ignored test that asks llama.cpp for one unified diff, rebuilds the musl harness, and keeps the commit only when the fenced count clears the gate
 - The real-pass fixture counts equal byte pairs with a nested scan. The tests assert that count, so deleting the scan fails the host suite. A linear count of the same pairs still passes. The script keeps a commit only when the measured edit clears the gate
 - Libtest's `finished in` duration is left out of the stdout comparison, so the timer cannot reject a cheaper run
 - `git apply --recount` accepts a model diff whose hunk counts are wrong when the changed lines still match

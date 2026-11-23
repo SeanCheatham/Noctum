@@ -4,21 +4,9 @@
 [runtime]
 tag = "b12588-mix-c0c3de8"
 
-[runtime.linux_x86_64]
-url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/app-b12588-mix-c0c3de8-linux-x64-cpu.tar.gz"
-sha256 = "511b22366fa879213eb7f91016d629cdfe0054537f1c3cf46346017d968e7947"
-
-[runtime.linux_aarch64]
-url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/app-b12588-mix-c0c3de8-linux-arm64-cpu.tar.gz"
-sha256 = "c391aab748c9969ad1638bbaf5106325b07e8fd1fb3d0d75d5ec0e43d1386ac4"
-
 [runtime.macos_aarch64]
 url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/llama-b12588-mix-c0c3de8-bin-macos-arm64.tar.gz"
 sha256 = "229def18e27ed740ec4f3a6508f084b25630e08d8a87ada40b00622fc496ceb8"
-
-[runtime.macos_x86_64]
-url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3de8/llama-b12588-mix-c0c3de8-bin-macos-x64.tar.gz"
-sha256 = "142c45991da6361f49855e31fc379a71a04f2d6426ad55753914a0defa6f94ec"
 
 [models.q2]
 url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/Inkling-2-Mini-UD-Q2_K_XL.gguf"

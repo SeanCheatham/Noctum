@@ -1,0 +1,114 @@
+{
+  "host": "Linux x86_64 in Docker on an ARM64 Mac",
+  "image": "noctum-native-v2-proof",
+  "bundle_sha256": "ae5a3febd916e0785380b82e578f692e769bf13339830454cc587119be1fe032",
+  "linker": "rust-lld",
+  "rust_tests": {
+    "passed": 123,
+    "failed": 0,
+    "ignored": 2
+  },
+  "guest_smoke": {
+    "passed": true,
+    "runs_per_test": 2,
+    "counts": {
+      "small_loop": 6013,
+      "encode_batch": 60013,
+      "fence_immediate": 6015
+    }
+  },
+  "projects": [
+    {
+      "project": {
+        "name": "base64",
+        "url": "https://github.com/marshallpierce/rust-base64.git",
+        "revision": "e14400697453bcc85997119b874bc03d9601d0af",
+        "package": "base64",
+        "test": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "require_optimization_eligible": true
+      },
+      "measurements": [
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "72c067c8fdf745479035721a92ff227d41e41fcb",
+            "package": "base64",
+            "started_at": "2026-11-22 20:16:54",
+            "finished_at": "2026-11-22 20:19:40",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "72c067c8fdf745479035721a92ff227d41e41fcb",
+            "target": "x86_64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=qemu64;memory=512;bundle=45033f201d8ce649c4870411326cf79675b52871eaacb41074fd59452fc9ff20"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+              "status": "measured",
+              "insn_count": 2617798,
+              "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+              "binary_sha256": "aca60d51b2d22264a72418061f2d8a31e61acc3f039466281cb31b060d3f31bd",
+              "wall_ms": 8887,
+              "reason": null
+            }
+          ],
+          "database": "/proof/data/measurements/run-1795378613280684179-37/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "8fbd089c287c264dcf5b13ca83ab7208bba9483c4a401fd79af5170bd1af41e3"
+        },
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "a8782dc0128f80373f3a811741673f1ef03c5d30",
+            "package": "base64",
+            "started_at": "2026-11-22 20:19:41",
+            "finished_at": "2026-11-22 20:22:22",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "a8782dc0128f80373f3a811741673f1ef03c5d30",
+            "target": "x86_64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=qemu64;memory=512;bundle=45033f201d8ce649c4870411326cf79675b52871eaacb41074fd59452fc9ff20"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+              "status": "measured",
+              "insn_count": 2617798,
+              "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+              "binary_sha256": "aca60d51b2d22264a72418061f2d8a31e61acc3f039466281cb31b060d3f31bd",
+              "wall_ms": 8640,
+              "reason": null
+            }
+          ],
+          "database": "/proof/data/measurements/run-1795378780826317965-1865/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "8fbd089c287c264dcf5b13ca83ab7208bba9483c4a401fd79af5170bd1af41e3"
+        }
+      ],
+      "passed": true,
+      "supported": true,
+      "source_state": {
+        "head": "e14400697453bcc85997119b874bc03d9601d0af",
+        "index": "ca1be104ec33b426ac3d39b6dce8d0b05fe9e6778c9e63914482c1966d8e086a",
+        "branches": "",
+        "source_sha256": "de8a35b500cf85ba61d76f761b138a9df8dcd7f98540b01194c38324badfc19e"
+      }
+    }
+  ],
+  "rust_tests_after_source_mapping_and_retry_fixes": {
+    "image": "noctum-native-v2-final-tests",
+    "passed": 124,
+    "failed": 0,
+    "ignored": 2
+  }
+}

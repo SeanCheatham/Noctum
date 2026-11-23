@@ -1,0 +1,42 @@
+[
+  {
+    "name": "hex",
+    "url": "https://github.com/KokaKiwi/rust-hex.git",
+    "revision": "b2b4370b5bf021b98ee7adc92233e8de3f2de792",
+    "package": "hex",
+    "test": "error::tests::test_display"
+  },
+  {
+    "name": "base64",
+    "url": "https://github.com/marshallpierce/rust-base64.git",
+    "revision": "e14400697453bcc85997119b874bc03d9601d0af",
+    "package": "base64",
+    "test": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+    "require_optimization_eligible": true
+  },
+  {
+    "name": "memchr",
+    "url": "https://github.com/BurntSushi/memchr.git",
+    "revision": "9ba486e4ba7e865c0510305c5dacba73988d9f31",
+    "package": "memchr",
+    "test": "memchr::tests::forward1_oneshot",
+    "require_optimization_eligible": true
+  },
+  {
+    "name": "hex-no-default",
+    "url": "https://github.com/KokaKiwi/rust-hex.git",
+    "revision": "b2b4370b5bf021b98ee7adc92233e8de3f2de792",
+    "package": "hex",
+    "test": "test::test_from_hex_array",
+    "no_default_features": true,
+    "features": ["alloc"],
+    "expect_error": "cannot find macro `vec`"
+  },
+  {
+    "name": "crossbeam-utils",
+    "url": "https://github.com/crossbeam-rs/crossbeam.git",
+    "revision": "ccd83ac4108a2a1b41e9c6e79c87267167d18dfa",
+    "package": "crossbeam-utils",
+    "test": "crossbeam-utils/tests/atomic_cell.rs::drops_unit"
+  }
+]

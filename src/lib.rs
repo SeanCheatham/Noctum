@@ -1,6 +1,6 @@
 //! Noctum runs overnight on one machine. It measures a Rust test inside a
 //! pinned QEMU guest, asks a local model for a change at a hot function, and
-//! keeps the change only when that same test retires fewer instructions.
+//! keeps the change only when that same test uses fewer guest instruction callbacks.
 
 pub mod builder;
 pub mod config;
@@ -20,6 +20,7 @@ pub mod qemu;
 pub mod repo_config;
 pub mod runtime;
 pub mod selector;
+pub mod skip;
 pub mod target;
 pub mod web;
 #[cfg(feature = "worker")]
@@ -43,14 +44,9 @@ pub struct AppState {
     pub daemon: DaemonHandle,
 }
 
-pub const MUSL_TARGET: &str = "x86_64-unknown-linux-musl";
+pub const MUSL_TARGET: &str = "aarch64-unknown-linux-musl";
 pub const PERF_BRANCH: &str = "noctum/perf";
 pub const LOG_LIMIT: usize = 16 * 1024;
-
-#[cfg(test)]
-mod guest_smoke;
-#[cfg(test)]
-mod real_pass;
 
 #[cfg(test)]
 mod source_tests {

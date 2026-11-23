@@ -71,6 +71,20 @@ pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>)
         None => 0,
     };
     let page = RepositoryTemplate {
+        measurement_profile: run
+            .as_ref()
+            .map(|r| {
+                if r.measurement_profile.is_empty() {
+                    "legacy-tb-v1".into()
+                } else {
+                    r.measurement_profile
+                        .split(';')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string()
+                }
+            })
+            .unwrap_or_default(),
         target: run
             .as_ref()
             .map(|run| run.target.clone())
@@ -184,7 +198,6 @@ pub async fn save_settings(
 
 fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
     let model = lockfile::ModelLock::load_quant(config.model.quant).ok();
-    let qemu = lockfile::QemuLock::load().ok();
     SettingsTemplate {
         start_hour: config.schedule.start_hour,
         end_hour: config.schedule.end_hour,
@@ -199,19 +212,10 @@ fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
         model_lock: model
             .map(|lock| format!("{} {}", lock.llama_cpp_tag, lock.gguf_filename))
             .unwrap_or_default(),
-        qemu_lock: qemu
-            .map(|lock| {
-                if cfg!(target_os = "macos") {
-                    format!("{} (Docker worker)", lock.id)
-                } else if lock.published() {
-                    lock.id
-                } else if !lock.sha256.is_empty() {
-                    format!("{} (pinned, no download URL)", lock.id)
-                } else {
-                    format!("{} (not published; run qemu/build-bundle.sh)", lock.id)
-                }
-            })
-            .unwrap_or_default(),
+        qemu_lock: format!(
+            "{} (Apple Containerization)",
+            crate::qemu::MEASUREMENT_VERSION
+        ),
         saved,
     }
 }

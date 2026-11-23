@@ -16,6 +16,15 @@ pub struct Database {
 }
 
 impl Database {
+    pub async fn open_read_only(path: &Path) -> Result<Self> {
+        let options = SqliteConnectOptions::new().filename(path).read_only(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        Ok(Self { pool })
+    }
+
     pub async fn new(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -82,6 +91,15 @@ impl Database {
                 .await?;
         if target_column.is_none() {
             sqlx::query("ALTER TABLE runs ADD COLUMN target TEXT NOT NULL DEFAULT 'x86_64-unknown-linux-musl'")
+                .execute(&self.pool).await?;
+        }
+        let profile_column: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM pragma_table_info('runs') WHERE name = 'measurement_profile'",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        if profile_column.is_none() {
+            sqlx::query("ALTER TABLE runs ADD COLUMN measurement_profile TEXT NOT NULL DEFAULT 'legacy-tb-v1'")
                 .execute(&self.pool).await?;
         }
         sqlx::query(
@@ -256,6 +274,15 @@ impl Database {
         Ok(())
     }
 
+    pub async fn set_run_profile(&self, id: i64, profile: &str) -> Result<()> {
+        sqlx::query("UPDATE runs SET measurement_profile = ? WHERE id = ?")
+            .bind(profile)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn finish_run(
         &self,
         id: i64,
@@ -280,13 +307,15 @@ impl Database {
         repository_id: i64,
         window_key: &str,
         target: &str,
+        profile: &str,
     ) -> Result<bool> {
         let row: Option<(i64,)> = sqlx::query_as(
-            "SELECT id FROM runs WHERE repository_id = ? AND window_key = ? AND target = ? AND status = 'ok' LIMIT 1",
+            "SELECT id FROM runs WHERE repository_id = ? AND window_key = ? AND target = ? AND measurement_profile = ? AND status = 'ok' LIMIT 1",
         )
         .bind(repository_id)
         .bind(window_key)
         .bind(target)
+        .bind(profile)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some())
@@ -430,6 +459,15 @@ impl Database {
         Ok(())
     }
 
+    pub async fn commit_for_trial(&self, trial_id: i64) -> Result<Option<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT git_sha FROM accepted_commits WHERE trial_id = ?")
+                .bind(trial_id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
+    }
+
     pub async fn trial_exists(
         &self,
         repository_id: i64,
@@ -437,12 +475,13 @@ impl Database {
         symbol: &str,
         file_blob: &str,
         target: &str,
+        profile: &str,
     ) -> Result<bool> {
         let row: Option<(i64,)> = sqlx::query_as(
             "SELECT t.id FROM trials t
              JOIN candidates c ON c.id = t.candidate_id
              JOIN runs r ON r.id = c.run_id
-             WHERE r.repository_id = ? AND c.test_name = ? AND c.symbol = ? AND c.file_blob = ? AND r.target = ?
+             WHERE r.repository_id = ? AND c.test_name = ? AND c.symbol = ? AND c.file_blob = ? AND r.target = ? AND r.measurement_profile = ? AND t.status != 'error'
              LIMIT 1",
         )
         .bind(repository_id)
@@ -450,6 +489,7 @@ impl Database {
         .bind(symbol)
         .bind(file_blob)
         .bind(target)
+        .bind(profile)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some())
@@ -550,12 +590,30 @@ mod tests {
             .execute(&db.pool)
             .await
             .unwrap();
+        sqlx::query("ALTER TABLE runs DROP COLUMN measurement_profile")
+            .execute(&db.pool)
+            .await
+            .unwrap();
         db.run_migrations().await.unwrap();
-        let x86 = GuestTarget::X86_64.triple();
+        let x86 = "x86_64-unknown-linux-musl";
         let arm = GuestTarget::Aarch64.triple();
         assert_eq!(db.latest_run(repo).await.unwrap().unwrap().target, x86);
-        assert!(db.repo_finished_window(repo, "night", x86).await.unwrap());
-        assert!(!db.repo_finished_window(repo, "night", arm).await.unwrap());
+        assert_eq!(
+            db.latest_run(repo)
+                .await
+                .unwrap()
+                .unwrap()
+                .measurement_profile,
+            "legacy-tb-v1"
+        );
+        assert!(db
+            .repo_finished_window(repo, "night", x86, "legacy-tb-v1")
+            .await
+            .unwrap());
+        assert!(!db
+            .repo_finished_window(repo, "night", arm, "legacy-tb-v1")
+            .await
+            .unwrap());
         let candidate = db
             .insert_candidate(
                 run,
@@ -589,15 +647,46 @@ mod tests {
             .await
             .unwrap();
         assert!(db
-            .trial_exists(repo, "test", "hot", "blob", x86)
+            .trial_exists(repo, "test", "hot", "blob", x86, "legacy-tb-v1")
             .await
             .unwrap());
         assert!(!db
-            .trial_exists(repo, "test", "hot", "blob", arm)
+            .trial_exists(repo, "test", "hot", "blob", arm, "legacy-tb-v1")
             .await
             .unwrap());
         assert_eq!(db.trial(trial).await.unwrap().unwrap().target, x86);
         assert_eq!(db.pending_commits(repo).await.unwrap()[0].target, x86);
+        sqlx::query("UPDATE trials SET status = 'error' WHERE id = ?")
+            .bind(trial)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(!db
+            .trial_exists(repo, "test", "hot", "blob", x86, "legacy-tb-v1")
+            .await
+            .unwrap());
+        sqlx::query("UPDATE trials SET status = 'accepted' WHERE id = ?")
+            .bind(trial)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        db.set_run_profile(run, "ram-insn-v2").await.unwrap();
+        assert!(!db
+            .repo_finished_window(repo, "night", x86, "legacy-tb-v1")
+            .await
+            .unwrap());
+        assert!(db
+            .repo_finished_window(repo, "night", x86, "ram-insn-v2")
+            .await
+            .unwrap());
+        assert!(!db
+            .trial_exists(repo, "test", "hot", "blob", x86, "legacy-tb-v1")
+            .await
+            .unwrap());
+        assert!(db
+            .trial_exists(repo, "test", "hot", "blob", x86, "ram-insn-v2")
+            .await
+            .unwrap());
         db.set_run_target(run, arm).await.unwrap();
         assert_eq!(db.trials_for_run(run).await.unwrap()[0].target, arm);
     }

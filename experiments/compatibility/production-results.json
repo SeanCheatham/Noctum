@@ -1,0 +1,399 @@
+{
+  "date": "2026-11-22",
+  "platform": "macOS ARM64 with Linux ARM64 worker",
+  "worker_image": "noctum-worker:9742935ba979d9332915510c-aarch64",
+  "projects": [
+    {
+      "project": {
+        "name": "hex",
+        "url": "https://github.com/KokaKiwi/rust-hex.git",
+        "revision": "b2b4370b5bf021b98ee7adc92233e8de3f2de792",
+        "package": "hex",
+        "test": "error::tests::test_display"
+      },
+      "measurements": [
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "3767b96d8e1999ec30e2ddcdc1a271b38ed1fb76",
+            "package": "hex",
+            "started_at": "2026-11-22 19:02:08",
+            "finished_at": "2026-11-22 19:03:12",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "3767b96d8e1999ec30e2ddcdc1a271b38ed1fb76",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "error::tests::test_display",
+              "status": "skipped_small",
+              "insn_count": 4123,
+              "stdout_sha256": "d2b6e6024aeb163d1a6adc887e70c3cb8898214318324797cb6d6c24d6e850c7",
+              "binary_sha256": "41484ec5cb679e154a989af56d3281031bfe2e4d4e3adb07a946820cb6a0a324",
+              "wall_ms": 739,
+              "reason": "instruction count is below the optimization floor. The count is repeatable. Use a larger fixed workload if optimization is necessary."
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374126040465000-67202/results.db",
+          "optimization_eligible": false,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        },
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "44048d37ea6fc170164cf8fabdbb92067d83fa3e",
+            "package": "hex",
+            "started_at": "2026-11-22 19:03:14",
+            "finished_at": "2026-11-22 19:04:06",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "44048d37ea6fc170164cf8fabdbb92067d83fa3e",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "error::tests::test_display",
+              "status": "skipped_small",
+              "insn_count": 4123,
+              "stdout_sha256": "d2b6e6024aeb163d1a6adc887e70c3cb8898214318324797cb6d6c24d6e850c7",
+              "binary_sha256": "41484ec5cb679e154a989af56d3281031bfe2e4d4e3adb07a946820cb6a0a324",
+              "wall_ms": 716,
+              "reason": "instruction count is below the optimization floor. The count is repeatable. Use a larger fixed workload if optimization is necessary."
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374192750598000-72520/results.db",
+          "optimization_eligible": false,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        }
+      ],
+      "passed": true,
+      "supported": true,
+      "source_state": {
+        "head": "b2b4370b5bf021b98ee7adc92233e8de3f2de792",
+        "index": "2a921d6b601c479562e9930efe1538ce1703d4253a9143b6f412fb12ca5e4752",
+        "branches": "",
+        "source_sha256": "8bafaadd5d641bf6375a6748804e48746e963845f6aa09609d92527e04367832"
+      }
+    },
+    {
+      "project": {
+        "name": "base64",
+        "url": "https://github.com/marshallpierce/rust-base64.git",
+        "revision": "e14400697453bcc85997119b874bc03d9601d0af",
+        "package": "base64",
+        "test": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "require_optimization_eligible": true
+      },
+      "measurements": [
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "8526c0853d43d83c6307bb84ad1227e73464a9cc",
+            "package": "base64",
+            "started_at": "2026-11-22 19:04:09",
+            "finished_at": "2026-11-22 19:05:16",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "8526c0853d43d83c6307bb84ad1227e73464a9cc",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+              "status": "measured",
+              "insn_count": 7211176,
+              "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+              "binary_sha256": "ed2e87d72f5fd5407444ce0b06e064130fe538fb9756b8b47589d2d9b70bbeaa",
+              "wall_ms": 1104,
+              "reason": null
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374247090202000-73616/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        },
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "17e7edb55d53cb2f7b126f5c28a8840993cfe6c4",
+            "package": "base64",
+            "started_at": "2026-11-22 19:05:19",
+            "finished_at": "2026-11-22 19:06:25",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "17e7edb55d53cb2f7b126f5c28a8840993cfe6c4",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+              "status": "measured",
+              "insn_count": 7211176,
+              "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+              "binary_sha256": "ed2e87d72f5fd5407444ce0b06e064130fe538fb9756b8b47589d2d9b70bbeaa",
+              "wall_ms": 729,
+              "reason": null
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374316841519000-75565/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        }
+      ],
+      "passed": true,
+      "supported": true,
+      "source_state": {
+        "head": "e14400697453bcc85997119b874bc03d9601d0af",
+        "index": "f036ec59ded67e99d9686b8f3e7dedab634016705d0e22eabd2bf776f933b57b",
+        "branches": "",
+        "source_sha256": "de8a35b500cf85ba61d76f761b138a9df8dcd7f98540b01194c38324badfc19e"
+      }
+    },
+    {
+      "project": {
+        "name": "memchr",
+        "url": "https://github.com/BurntSushi/memchr.git",
+        "revision": "9ba486e4ba7e865c0510305c5dacba73988d9f31",
+        "package": "memchr",
+        "test": "memchr::tests::forward1_oneshot",
+        "require_optimization_eligible": true
+      },
+      "measurements": [
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "db4681a09562a360bd04fc418caec8b1bce16a5f",
+            "package": "memchr",
+            "started_at": "2026-11-22 19:06:28",
+            "finished_at": "2026-11-22 19:06:44",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "db4681a09562a360bd04fc418caec8b1bce16a5f",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "memchr::tests::forward1_oneshot",
+              "status": "measured",
+              "insn_count": 216424109,
+              "stdout_sha256": "f71a81c9ceac9474a08d997c0fe888803dfb7a29a95b89fa7e1bc9f9ffb6ac64",
+              "binary_sha256": "400308341a7a7005d26799c404d3ca0b758393e385ccd34399a30067595e7c85",
+              "wall_ms": 2135,
+              "reason": null
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374386557201000-77767/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        },
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "e22a58a83ca0b36897307f43f804724387bc2fa2",
+            "package": "memchr",
+            "started_at": "2026-11-22 19:06:47",
+            "finished_at": "2026-11-22 19:07:02",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "e22a58a83ca0b36897307f43f804724387bc2fa2",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "memchr::tests::forward1_oneshot",
+              "status": "measured",
+              "insn_count": 216424109,
+              "stdout_sha256": "f71a81c9ceac9474a08d997c0fe888803dfb7a29a95b89fa7e1bc9f9ffb6ac64",
+              "binary_sha256": "400308341a7a7005d26799c404d3ca0b758393e385ccd34399a30067595e7c85",
+              "wall_ms": 2139,
+              "reason": null
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374404999790000-78778/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        }
+      ],
+      "passed": true,
+      "supported": true,
+      "source_state": {
+        "head": "9ba486e4ba7e865c0510305c5dacba73988d9f31",
+        "index": "4d7229470a745b0e1a65fa22ea7cb72e0abaefa235a8e5f377d4254e89529d3e",
+        "branches": "",
+        "source_sha256": "1499711c52206197b7ac8ab55748e02c2907e381d3fd135cab3a82335b3bdac8"
+      }
+    },
+    {
+      "project": {
+        "name": "hex-no-default",
+        "url": "https://github.com/KokaKiwi/rust-hex.git",
+        "revision": "b2b4370b5bf021b98ee7adc92233e8de3f2de792",
+        "package": "hex",
+        "test": "test::test_from_hex_array",
+        "no_default_features": true,
+        "features": [
+          "alloc"
+        ],
+        "expect_error": "cannot find macro `vec`"
+      },
+      "measurements": [],
+      "passed": true,
+      "supported": false,
+      "expected_failures": [
+        {
+          "message": "cannot find macro `vec`",
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        },
+        {
+          "message": "cannot find macro `vec`",
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        }
+      ],
+      "source_state": {
+        "head": "b2b4370b5bf021b98ee7adc92233e8de3f2de792",
+        "index": "2f5fdbddf3720aef7431ac802cc57b26fa4e971fb61318573cde9d49ac8a118f",
+        "branches": "",
+        "source_sha256": "4de0e265a0693e59bdadb3304d613cb313d3438aebd0bdc33b5f7d984ab8a508"
+      }
+    },
+    {
+      "project": {
+        "name": "crossbeam-utils",
+        "url": "https://github.com/crossbeam-rs/crossbeam.git",
+        "revision": "ccd83ac4108a2a1b41e9c6e79c87267167d18dfa",
+        "package": "crossbeam-utils",
+        "test": "crossbeam-utils/tests/atomic_cell.rs::drops_unit"
+      },
+      "measurements": [
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "08b748d0373bf729a59eb1ac191bea3f83a9fc06",
+            "package": "crossbeam-utils",
+            "started_at": "2026-11-22 19:08:19",
+            "finished_at": "2026-11-22 19:08:28",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "08b748d0373bf729a59eb1ac191bea3f83a9fc06",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "crossbeam-utils/tests/atomic_cell.rs",
+              "test_name": "drops_unit",
+              "status": "skipped_small",
+              "insn_count": 166,
+              "stdout_sha256": "a3671d1451943cb82001a9e30c0c39f23604bba837c0f34c8fd8f4021c69a019",
+              "binary_sha256": "ce66f1b202b22a14ebc4e680932f55eb82fccc51ff52546a1cbe563a814771a9",
+              "wall_ms": 874,
+              "reason": "instruction count is below the optimization floor. The count is repeatable. Use a larger fixed workload if optimization is necessary."
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374496814322000-81720/results.db",
+          "optimization_eligible": false,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        },
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "e91f09560a666d177428ed1e68be9af3d6137d8a",
+            "package": "crossbeam-utils",
+            "started_at": "2026-11-22 19:08:31",
+            "finished_at": "2026-11-22 19:08:39",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "e91f09560a666d177428ed1e68be9af3d6137d8a",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=8b336c7f79fcefc81b8bd3936783cf060d0f9ee2d3d811bc9abbc7b0ea8bc96e"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "crossbeam-utils/tests/atomic_cell.rs",
+              "test_name": "drops_unit",
+              "status": "skipped_small",
+              "insn_count": 166,
+              "stdout_sha256": "a3671d1451943cb82001a9e30c0c39f23604bba837c0f34c8fd8f4021c69a019",
+              "binary_sha256": "ce66f1b202b22a14ebc4e680932f55eb82fccc51ff52546a1cbe563a814771a9",
+              "wall_ms": 848,
+              "reason": "instruction count is below the optimization floor. The count is repeatable. Use a larger fixed workload if optimization is necessary."
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795374508412228000-82744/results.db",
+          "optimization_eligible": false,
+          "noctum_sha256": "9df45c873e5df26e4f3bd34a1992e6156927766294c32b6dd6df3a04ce3978a5"
+        }
+      ],
+      "passed": true,
+      "supported": true,
+      "source_state": {
+        "head": "ccd83ac4108a2a1b41e9c6e79c87267167d18dfa",
+        "index": "5fea649e23fb936491dd9601c938e9366699dd655ca8887299fd03163f257080",
+        "branches": "",
+        "source_sha256": "e320d49e8be8795aec61e870bd0d31a71547cebd1381dadb9f1cc41ee934d464"
+      }
+    }
+  ],
+  "worker_fixture": {
+    "workspace_package_directory": true,
+    "absolute_manifest_paths": true,
+    "binary_stdout_and_stderr": [
+      0,
+      255,
+      13,
+      10,
+      128
+    ],
+    "loop_counts": [
+      6011,
+      6011,
+      12011,
+      12011
+    ]
+  }
+}

@@ -9,6 +9,7 @@ pub struct GateInput {
     pub guest_ok: bool,
     pub host_ok: bool,
     pub stdout_matches: bool,
+    pub stderr_matches: bool,
     pub diff_ok: bool,
     pub min_improvement_ratio: f64,
     pub min_insn_delta: u64,
@@ -44,6 +45,11 @@ pub fn decide(input: &GateInput) -> GateDecision {
     if !input.stdout_matches {
         return GateDecision::Reject {
             reason: "stdout mismatch",
+        };
+    }
+    if !input.stderr_matches {
+        return GateDecision::Reject {
+            reason: "stderr mismatch",
         };
     }
     if input.baseline < input.min_insn_delta {
@@ -86,6 +92,7 @@ mod tests {
             guest_ok: true,
             host_ok: true,
             stdout_matches: true,
+            stderr_matches: true,
             diff_ok: true,
             min_improvement_ratio: 0.01,
             min_insn_delta: 10_000,
@@ -112,6 +119,7 @@ mod tests {
             ("guest_ok", "guest failed"),
             ("host_ok", "host check failed"),
             ("stdout_matches", "stdout mismatch"),
+            ("stderr_matches", "stderr mismatch"),
         ];
         for (field, reason) in cases {
             let mut input = ok_input();
@@ -121,6 +129,7 @@ mod tests {
                 "guest_ok" => input.guest_ok = false,
                 "host_ok" => input.host_ok = false,
                 "stdout_matches" => input.stdout_matches = false,
+                "stderr_matches" => input.stderr_matches = false,
                 _ => unreachable!(),
             }
             assert_eq!(decide(&input), GateDecision::Reject { reason }, "{field}");

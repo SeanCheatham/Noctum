@@ -1,4 +1,4 @@
-//! Linux operations for the local Docker worker.
+//! Linux operations for the local container worker.
 use crate::ports::{MeasureRequest, Measurer};
 use crate::runtime::protocol::{ExecRequest, Reply};
 use anyhow::{bail, Context, Result};
@@ -57,6 +57,14 @@ pub async fn serve() -> Result<()> {
             .await;
             reply(result)
         }
+        Some("profile") => reply((|| {
+            Ok((
+                std::fs::read_to_string("/opt/noctum/guest/MEASUREMENT_VERSION")?
+                    .trim()
+                    .to_string(),
+                crate::hashutil::sha256_file(Path::new("/opt/noctum/guest/MANIFEST"))?,
+            ))
+        })()),
         Some("measure") => {
             let result = async {
                 let mut r: MeasureRequest = request()?;
@@ -107,7 +115,6 @@ async fn checked(cwd: &Path, program: &str, args: &[String]) -> Result<()> {
 async fn supervise() -> Result<()> {
     let uid: u32 = std::env::var("NOCTUM_WORKER_UID")?.parse()?;
     let gid: u32 = std::env::var("NOCTUM_WORKER_GID")?.parse()?;
-    let heartbeat = PathBuf::from(std::env::var("NOCTUM_WORKER_HEARTBEAT")?);
     let session = std::env::var("NOCTUM_WORKER_SESSION")?;
     let _ = std::fs::remove_file("/runtime/ready");
     for directory in [
@@ -155,15 +162,6 @@ async fn supervise() -> Result<()> {
     )
     .await?;
     std::fs::write("/runtime/ready", session)?;
-    loop {
-        let age = std::fs::metadata(&heartbeat)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok());
-        if age.is_none_or(|age| age > Duration::from_secs(20)) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
+    std::future::pending::<()>().await;
     Ok(())
 }

@@ -1,11 +1,13 @@
 //! Native control with Linux build and measurement operations on macOS.
-mod docker;
+mod assets;
+mod container;
+mod host;
 pub mod protocol;
 mod source;
 use crate::ports::{CheckOutput, HostCheck, MeasureRequest, Measurement, Measurer};
 use crate::process::{self, CmdOutput};
 use anyhow::Result;
-pub use docker::{image_ready, image_tag, prepare_image, DockerSession};
+pub use container::{engine_ready, image_ready, prepare_image, ContainerSession};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,15 +16,38 @@ use std::time::Duration;
 #[derive(Clone, Debug, Default)]
 pub enum Execution {
     #[default]
-    Native,
-    Docker(DockerSession),
+    Unavailable,
+    #[cfg(test)]
+    Local,
+    Container(ContainerSession),
 }
 impl Execution {
-    pub fn target(&self) -> crate::target::GuestTarget {
+    pub async fn suspend_for_inference(&self) -> Result<()> {
         match self {
-            Self::Native => crate::target::GuestTarget::X86_64,
-            Self::Docker(_) => crate::target::GuestTarget::native(),
+            Self::Unavailable => anyhow::bail!("worker is not connected"),
+            #[cfg(test)]
+            Self::Local => Ok(()),
+            Self::Container(session) => session.suspend().await,
         }
+    }
+
+    pub async fn measurement_profile(&self, _data: &Path, memory_mb: u32) -> Result<String> {
+        let (version, bundle): (String, String) = match self {
+            Self::Unavailable => anyhow::bail!("worker is not connected"),
+            #[cfg(test)]
+            Self::Local => return Ok("test".into()),
+            Self::Container(session) => {
+                session.rpc("profile", &(), Duration::from_secs(10)).await?
+            }
+        };
+        Ok(format!(
+            "{version};cpu={};memory={memory_mb};bundle={bundle}",
+            self.target().cpu()
+        ))
+    }
+
+    pub fn target(&self) -> crate::target::GuestTarget {
+        crate::target::GuestTarget::Aarch64
     }
 
     pub async fn run(
@@ -34,8 +59,16 @@ impl Execution {
         timeout: Duration,
     ) -> CmdOutput {
         match self {
-            Self::Native => process::run(cwd, program, args, env, timeout).await,
-            Self::Docker(session) => {
+            Self::Unavailable => operation_error(anyhow::anyhow!("worker is not connected")),
+            #[cfg(test)]
+            Self::Local => process::watch_disk(
+                async { Ok(process::run(cwd, program, args, env, timeout).await) },
+                Duration::from_secs(2),
+                || process::require_free_space(cwd, 2 * 1024 * 1024 * 1024),
+            )
+            .await
+            .unwrap_or_else(operation_error),
+            Self::Container(session) => {
                 let request = protocol::ExecRequest {
                     cwd: cwd.into(),
                     program: program.as_ref().to_string_lossy().into_owned(),
@@ -49,24 +82,14 @@ impl Execution {
                         .collect(),
                     timeout_secs: timeout.as_secs(),
                 };
-                match session.rpc("exec", &request, timeout).await {
-                    Ok(output) => output,
-                    Err(error) => CmdOutput {
-                        success: false,
-                        timed_out: false,
-                        code: None,
-                        stdout: String::new(),
-                        stderr: format!("{error:#}"),
-                        duration_ms: 0,
-                    },
-                }
+                session
+                    .rpc("exec", &request, timeout)
+                    .await
+                    .unwrap_or_else(operation_error)
             }
         }
     }
-    pub async fn ensure_target(&self, cwd: &Path) -> Result<bool> {
-        if matches!(self, Self::Native) {
-            return crate::builder::musl_target_installed();
-        }
+    pub async fn ensure_target(&self, cwd: &Path) -> Result<()> {
         let args = ["target", "add", self.target().triple()];
         let result = self
             .run(cwd, "rustup", &args, &[], Duration::from_secs(300))
@@ -77,7 +100,18 @@ impl Execution {
                 result.combined()
             );
         }
-        Ok(true)
+        Ok(())
+    }
+}
+
+fn operation_error(error: anyhow::Error) -> CmdOutput {
+    CmdOutput {
+        success: false,
+        timed_out: false,
+        code: None,
+        stdout: String::new(),
+        stderr: format!("{error:#}"),
+        duration_ms: 0,
     }
 }
 
@@ -93,14 +127,12 @@ impl HostCheck for RuntimeHost {
     }
 }
 pub enum RuntimeMeasurer {
-    Native(crate::qemu::QemuRunner),
-    Docker(DockerSession),
+    Container(ContainerSession),
 }
 impl Measurer for RuntimeMeasurer {
     async fn measure(&self, req: &MeasureRequest) -> Result<Measurement> {
         match self {
-            Self::Native(runner) => runner.measure(req).await,
-            Self::Docker(session) => {
+            Self::Container(session) => {
                 session
                     .rpc("measure", req, Duration::from_secs(req.timeout_secs + 150))
                     .await
@@ -164,24 +196,26 @@ async fn run_inner(
     db.set_daemon(
         "running",
         "preparing",
-        Some("Prepare the model and measurement worker"),
+        Some(if opts.measurement_only {
+            "Prepare measurement tools"
+        } else {
+            "Prepare the model and measurement worker"
+        }),
     )
     .await?;
     let prepare = async {
-        if cfg!(target_os = "macos") {
-            if crate::lockfile::verify_model(&data, config.model.quant).is_err() {
-                crate::model::pull(&data, config.model.quant).await?;
-            }
-            prepare_image(&data).await
-        } else {
-            crate::orchestrator::prepare_assets(&data, config.model.quant).await
+        if !opts.measurement_only
+            && crate::lockfile::verify_model(&data, config.model.quant).is_err()
+        {
+            crate::model::pull(&data, config.model.quant).await?;
         }
+        prepare_image(&data).await
     };
     tokio::select! {
         result = prepare => result?,
         _ = wait_cancel(&opts.stop) => { db.set_daemon("idle", "idle", None).await?; return Ok(()); },
     }
-    let session = if cfg!(target_os = "macos") {
+    let session = {
         let mut paths = Vec::new();
         for repo in db.enabled_repositories().await? {
             if opts
@@ -209,21 +243,14 @@ async fn run_inner(
             }
             paths.push(path);
         }
-        let future = DockerSession::start(&data, &paths);
-        Some(tokio::select! {
+        let future = ContainerSession::start(&data, &paths);
+        tokio::select! {
             result = future => result?,
             _ = wait_cancel(&opts.stop) => { db.set_daemon("idle", "idle", None).await?; return Ok(()); },
-        })
-    } else {
-        None
-    };
-    let execution = session.clone().map(Execution::Docker).unwrap_or_default();
-    let measurer = match &session {
-        Some(s) => RuntimeMeasurer::Docker(s.clone()),
-        None => {
-            RuntimeMeasurer::Native(crate::qemu::QemuRunner::new(&data, config.guest.memory_mb))
         }
     };
+    let execution = Execution::Container(session.clone());
+    let measurer = RuntimeMeasurer::Container(session.clone());
     let night = crate::orchestrator::Night::new(
         db.clone(),
         config.clone(),
@@ -237,13 +264,11 @@ async fn run_inner(
     let result = tokio::select! {
         result = &mut future => result,
         _ = wait_cancel(&opts.stop) => {
-            if let Some(session) = &session { let _ = session.stop().await; }
+            let _ = session.stop().await;
             future.await
         }
     };
-    if let Some(session) = &session {
-        session.stop().await?;
-    }
+    session.stop().await?;
     if opts.stop.load(Ordering::SeqCst) {
         db.set_daemon("idle", "idle", None).await?;
         return Ok(());
@@ -252,13 +277,9 @@ async fn run_inner(
 }
 
 pub async fn measurement_state(data: &Path) -> crate::lockfile::AssetState {
-    if cfg!(target_os = "macos") {
-        if image_ready().await {
-            crate::lockfile::AssetState::Present
-        } else {
-            crate::lockfile::AssetState::Missing
-        }
+    if image_ready(data).await {
+        crate::lockfile::AssetState::Present
     } else {
-        crate::lockfile::qemu_stamp(data)
+        crate::lockfile::AssetState::Missing
     }
 }

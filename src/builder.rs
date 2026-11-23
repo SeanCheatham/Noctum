@@ -8,11 +8,10 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
-use crate::ports::{CheckOutput, HostCheck};
+use crate::ports::CheckOutput;
 use crate::process::bench_env;
 use crate::repo_config::RepoConfig;
 use crate::runtime::Execution;
-use crate::MUSL_TARGET;
 
 #[derive(Debug, Clone)]
 pub struct CargoTarget {
@@ -20,6 +19,7 @@ pub struct CargoTarget {
     pub kind: String,
     pub src_path: PathBuf,
     pub harness: bool,
+    pub test_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -47,29 +47,9 @@ pub struct ListedTest {
     pub kind: String,
 }
 
-pub fn musl_target_installed() -> Result<bool> {
-    let output = std::process::Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output();
-    if let Ok(output) = output {
-        if output.status.success() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            return Ok(text.lines().any(|line| line.trim() == MUSL_TARGET));
-        }
-    }
-    let sysroot = std::process::Command::new("rustc")
-        .args(["--print", "sysroot"])
-        .output()
-        .context("rustc --print sysroot")?;
-    let sysroot = String::from_utf8_lossy(&sysroot.stdout).trim().to_string();
-    Ok(Path::new(&sysroot)
-        .join("lib/rustlib")
-        .join(MUSL_TARGET)
-        .is_dir())
-}
-
+#[cfg(test)]
 pub async fn resolve_package(worktree: &Path, requested: Option<&str>) -> Result<ResolvedPackage> {
-    resolve_package_with(&Execution::Native, worktree, requested).await
+    resolve_package_with(&Execution::Local, worktree, requested).await
 }
 
 pub async fn resolve_package_with(
@@ -130,10 +110,25 @@ pub async fn resolve_package_with(
     } else if selected.len() == 1 {
         selected[0]
     } else {
-        bail!(
-            "workspace has {} packages; set package in noctum.toml",
-            selected.len()
-        );
+        let default =
+            meta["workspace_default_members"]
+                .as_array()
+                .and_then(|members| match members.as_slice() {
+                    [member] => Some(member),
+                    _ => None,
+                });
+        if let Some(default) = default {
+            selected
+                .iter()
+                .copied()
+                .find(|pkg| pkg["id"] == *default)
+                .context("default package is not in the workspace")?
+        } else {
+            bail!(
+                "workspace has {} packages; set package in noctum.toml",
+                selected.len()
+            );
+        }
     };
     let manifest = PathBuf::from(package["manifest_path"].as_str().context("manifest path")?);
     let manifest_text = std::fs::read_to_string(&manifest)
@@ -150,8 +145,8 @@ pub async fn resolve_package_with(
             .iter()
             .filter_map(|kind| kind.as_str())
             .find(|kind| matches!(*kind, "lib" | "bin" | "test" | "bench"))
-            .unwrap_or("lib")
-            .to_string();
+            .map(str::to_string);
+        let Some(kind) = kind else { continue };
         let name = target["name"].as_str().unwrap_or("").to_string();
         // Current cargo metadata omits `harness`. The manifest is what says
         // `harness = false`, which is the only bench shape that is scored.
@@ -159,7 +154,7 @@ pub async fn resolve_package_with(
             if kind == "bench" {
                 bench_harness.get(&name).copied().unwrap_or(true)
             } else {
-                true
+                test_harness_flag(&manifest_text, &kind, &name)
             }
         });
         targets.push(CargoTarget {
@@ -167,6 +162,7 @@ pub async fn resolve_package_with(
             kind,
             src_path: PathBuf::from(target["src_path"].as_str().unwrap_or("")),
             harness,
+            test_enabled: target["test"].as_bool().unwrap_or(true),
         });
     }
     Ok(ResolvedPackage {
@@ -230,37 +226,119 @@ pub fn bench_harness_flags(manifest: &str) -> HashMap<String, bool> {
 }
 
 pub fn feature_args(repo: &RepoConfig) -> Vec<String> {
+    let mut args = Vec::new();
+    if repo.no_default_features {
+        args.push("--no-default-features".into());
+    }
     if repo.all_features {
-        vec!["--all-features".into()]
-    } else if repo.features.is_empty() {
-        Vec::new()
+        args.push("--all-features".into());
+    } else if !repo.features.is_empty() {
+        args.extend(["--features".into(), repo.features.join(",")]);
+    }
+    args
+}
+
+fn test_harness_flag(manifest: &str, kind: &str, name: &str) -> bool {
+    let Ok(value) = toml::from_str::<toml::Value>(manifest) else {
+        return true;
+    };
+    let target = if kind == "lib" {
+        value.get("lib")
     } else {
-        vec!["--features".into(), repo.features.join(",")]
-    }
+        value
+            .get(kind)
+            .and_then(|v| v.as_array())
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(name))
+            })
+    };
+    target
+        .and_then(|t| t.get("harness"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
 }
 
-pub fn clean_paths(worktree: &Path, paths: &[String]) -> Result<()> {
-    for rel in paths {
-        let path = worktree.join(rel);
-        if path.exists() {
-            if path.is_dir() {
-                std::fs::remove_dir_all(&path)
-                    .with_context(|| format!("remove {}", path.display()))?;
-            } else {
-                std::fs::remove_file(&path)
-                    .with_context(|| format!("remove {}", path.display()))?;
-            }
-        }
-    }
-    Ok(())
-}
-
-pub async fn build_tests(
+pub async fn build_test_targets_with(
+    execution: &Execution,
     worktree: &Path,
     package: &str,
     repo: &RepoConfig,
+    targets: &[CargoTarget],
 ) -> Result<Vec<BuiltHarness>> {
-    build_tests_with(&Execution::Native, worktree, package, repo).await
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec![
+        "test".into(),
+        "--no-run".into(),
+        "--release".into(),
+        "--message-format=json".into(),
+        "--target".into(),
+        execution.target().triple().into(),
+        "-p".into(),
+        package.into(),
+    ];
+    for target in targets {
+        match target.kind.as_str() {
+            "lib" => args.push("--lib".into()),
+            "bin" | "test" => args.extend([format!("--{}", target.kind), target.name.clone()]),
+            other => bail!("{other} is not a test harness target"),
+        }
+    }
+    args.extend(feature_args(repo));
+    build_harnesses(execution, worktree, &args, repo.timeout_seconds, "test").await
+}
+
+pub fn clean_paths(worktree: &Path, paths: &[String]) -> Result<()> {
+    use std::path::Component;
+
+    let mut checked = Vec::new();
+    for rel in paths {
+        let parts: Vec<_> = Path::new(rel).components().collect();
+        if parts.is_empty()
+            || parts
+                .iter()
+                .any(|part| !matches!(part, Component::Normal(_)))
+            || parts.first().is_some_and(|part| {
+                part.as_os_str()
+                    .as_encoded_bytes()
+                    .eq_ignore_ascii_case(b".git")
+            })
+        {
+            bail!("clean_paths must name a path inside the worktree: {rel}");
+        }
+        let mut parent = worktree.to_path_buf();
+        for part in &parts[..parts.len() - 1] {
+            parent.push(part.as_os_str());
+            match std::fs::symlink_metadata(&parent) {
+                Ok(metadata) if metadata.is_symlink() => {
+                    bail!("clean_paths cannot pass through a symbolic link: {rel}");
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => return Err(error).with_context(|| parent.display().to_string()),
+            }
+        }
+        checked.push(worktree.join(rel));
+    }
+    for path in checked {
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                if metadata.is_dir() && !metadata.is_symlink() {
+                    std::fs::remove_dir_all(&path)
+                        .with_context(|| format!("remove {}", path.display()))?;
+                } else {
+                    std::fs::remove_file(&path)
+                        .with_context(|| format!("remove {}", path.display()))?;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).with_context(|| path.display().to_string()),
+        }
+    }
+    Ok(())
 }
 
 pub async fn build_tests_with(
@@ -281,15 +359,6 @@ pub async fn build_tests_with(
     ];
     args.extend(feature_args(repo));
     build_harnesses(execution, worktree, &args, repo.timeout_seconds, "test").await
-}
-
-pub async fn build_bench(
-    worktree: &Path,
-    package: &str,
-    bench: &str,
-    repo: &RepoConfig,
-) -> Result<Vec<BuiltHarness>> {
-    build_bench_with(&Execution::Native, worktree, package, bench, repo).await
 }
 
 pub async fn build_bench_with(
@@ -342,11 +411,37 @@ async fn build_harnesses(
         .await;
     if !output.success {
         bail!(
-            "cargo failed: {}",
-            crate::hashutil::tail_str(&output.combined(), crate::LOG_LIMIT)
+            "cargo {} failed:\n{}",
+            args.join(" "),
+            cargo_diagnostics(&output)
         );
     }
     parse_artifacts(worktree, &output.stdout, fallback_kind)
+}
+
+fn cargo_diagnostics(output: &crate::process::CmdOutput) -> String {
+    let mut other = Vec::new();
+    let mut errors = Vec::new();
+    for line in output.stdout.lines() {
+        match serde_json::from_str::<Value>(line) {
+            Ok(message) if message["reason"] == "compiler-message" => {
+                let diagnostic = &message["message"];
+                let text = diagnostic["rendered"]
+                    .as_str()
+                    .or_else(|| diagnostic["message"].as_str())
+                    .unwrap_or("");
+                if diagnostic["level"] == "error" || diagnostic["level"] == "fatal" {
+                    errors.push(text.to_string());
+                } else {
+                    other.push(text.to_string());
+                }
+            }
+            Err(_) => other.push(line.to_string()),
+            _ => {}
+        }
+    }
+    let text = [output.stderr.clone(), other.join("\n"), errors.join("\n")].join("\n");
+    crate::hashutil::tail_str(&text, crate::LOG_LIMIT).to_string()
 }
 
 fn parse_artifacts(
@@ -373,6 +468,12 @@ fn parse_artifacts(
         if kinds.contains(&"custom-build") {
             continue;
         }
+        if fallback_kind == "test"
+            && (value["profile"]["test"].as_bool() != Some(true)
+                || !kinds.iter().any(|k| matches!(*k, "lib" | "bin" | "test")))
+        {
+            continue;
+        }
         let src = PathBuf::from(target["src_path"].as_str().unwrap_or(""));
         let kind = kinds
             .iter()
@@ -392,10 +493,6 @@ fn parse_artifacts(
         bail!("cargo produced no test harness");
     }
     Ok(harnesses)
-}
-
-pub async fn list_tests(executable: &Path, timeout_secs: u64) -> Result<Vec<ListedTest>> {
-    list_tests_with(&Execution::Native, executable, timeout_secs).await
 }
 
 pub async fn list_tests_with(
@@ -441,14 +538,6 @@ pub fn parse_test_list(stdout: &str) -> Vec<ListedTest> {
         .collect()
 }
 
-pub struct CargoHost;
-
-impl HostCheck for CargoHost {
-    async fn run(&self, worktree: &Path, repo: &RepoConfig, package: &str) -> Result<CheckOutput> {
-        host_check_with(&Execution::Native, worktree, repo, package).await
-    }
-}
-
 pub async fn host_check_with(
     execution: &Execution,
     worktree: &Path,
@@ -486,6 +575,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clean_paths_checks_all_paths_before_removal() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("target")).unwrap();
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "/tmp/outside",
+            ".git",
+            ".git/index",
+            ".GIT",
+        ] {
+            assert!(clean_paths(root.path(), &["target".into(), invalid.into()]).is_err());
+            assert!(root.path().join("target").is_dir());
+        }
+        clean_paths(root.path(), &["target".into(), "missing/cache".into()]).unwrap();
+        assert!(!root.path().join("target").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clean_paths_keeps_symbolic_link_targets() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let file = outside.path().join("keep");
+        std::fs::write(&file, "keep").unwrap();
+        symlink(outside.path(), root.path().join("link")).unwrap();
+        assert!(clean_paths(root.path(), &["link/keep".into()]).is_err());
+        clean_paths(root.path(), &["link".into()]).unwrap();
+        assert!(file.is_file());
+        assert!(!root.path().join("link").exists());
+        symlink(outside.path().join("missing"), root.path().join("broken")).unwrap();
+        clean_paths(root.path(), &["broken".into()]).unwrap();
+        assert!(std::fs::symlink_metadata(root.path().join("broken")).is_err());
+    }
+
+    #[tokio::test]
+    async fn package_selection_uses_cargo_workspace_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        for path in [root.join("src"), root.join("helper/src")] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        std::fs::write(root.join("src/lib.rs"), "pub fn root() {}\n").unwrap();
+        std::fs::write(root.join("helper/src/lib.rs"), "pub fn helper() {}\n").unwrap();
+        std::fs::write(
+            root.join("helper/Cargo.toml"),
+            "[package]\nname='helper'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        for (default, expected) in [("", "root"), ("default-members=['helper']\n", "helper")] {
+            std::fs::write(root.join("Cargo.toml"), format!("[package]\nname='root'\nversion='0.1.0'\n[dependencies]\nhelper={{path='helper'}}\n[workspace]\n{default}")).unwrap();
+            assert_eq!(resolve_package(root, None).await.unwrap().name, expected);
+            assert!(!root.join("Cargo.lock").exists());
+        }
+    }
+
+    #[test]
     fn parses_libtest_list() {
         let listed =
             parse_test_list("tests::encode_batch: test\nparked: ignore\n0 tests, 0 benchmarks\n");
@@ -514,18 +663,48 @@ name = \"legacy\"
     }
 
     #[test]
+    fn build_errors_show_compiler_text_instead_of_artifact_records() {
+        let output = crate::process::CmdOutput { success: false, timed_out: false, code: Some(101),
+            stdout: [serde_json::json!({"reason":"compiler-artifact", "target":{"name":"dependency"}}).to_string(), serde_json::json!({"reason":"compiler-message", "message":{"level":"error", "rendered":"error: cannot find macro `vec` in this scope\n --> src/lib.rs:4:1\n"}}).to_string()].join("\n"),
+            stderr: "Compiling dependency".into(), duration_ms: 1 };
+        let text = cargo_diagnostics(&output);
+        assert!(text.contains("cannot find macro `vec`"));
+        assert!(text.contains("src/lib.rs:4:1"));
+        assert!(!text.contains("compiler-artifact"));
+    }
+
+    #[test]
+    fn executable_artifacts_must_be_test_harnesses() {
+        let line = |kind: &str, test: bool, name: &str| {
+            serde_json::json!({
+                "reason": "compiler-artifact", "executable": format!("/repo/target/{name}"),
+                "profile": { "test": test },
+                "target": { "kind": [kind], "name": name, "src_path": format!("/repo/{name}.rs") }
+            })
+            .to_string()
+        };
+        let output = [
+            line("bin", false, "app"),
+            line("example", false, "example"),
+            line("lib", true, "library"),
+            line("test", true, "integration"),
+        ]
+        .join("\n");
+        let harnesses = parse_artifacts(Path::new("/repo"), &output, "test").unwrap();
+        assert_eq!(
+            harnesses
+                .iter()
+                .map(|h| h.target_name.as_str())
+                .collect::<Vec<_>>(),
+            ["library", "integration"]
+        );
+    }
+
+    #[test]
     fn abort_profile_is_detected() {
         assert!(text_forces_abort("[profile.release]\npanic = \"abort\"\n"));
         assert!(!text_forces_abort(
             "# panic = \"abort\"\npanic = \"unwind\"\n"
         ));
-    }
-
-    #[test]
-    fn musl_target_is_visible_here_or_the_error_names_the_command() {
-        let installed = musl_target_installed().unwrap();
-        let _ = installed;
-        let message = format!("rustup target add {MUSL_TARGET}");
-        assert!(message.contains("x86_64-unknown-linux-musl"));
     }
 }

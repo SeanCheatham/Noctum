@@ -1,3 +1,3 @@
 # This repository. Noctum reads it from a worktree and never from a flag.
 package = "noctum"
-protected_paths = ["qemu/**", "grammar/**", "model.lock.toml", "qemu.lock.toml"]
+protected_paths = ["qemu/**", "grammar/**", "model.lock.toml", "runtime/**"]

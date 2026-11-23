@@ -43,6 +43,68 @@ pub async fn sync_perf(repo: &Path, head: &str, dest: &Path) -> Result<PerfSync>
     Ok(PerfSync::Conflict(detail))
 }
 
+/// Copy working source into a detached worktree with a separate Git index.
+pub async fn snapshot(repo: &Path, dest: &Path) -> Result<()> {
+    if dest.exists() {
+        remove_worktree(repo, dest).await?;
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let head = head_sha(repo).await?;
+    add_detached(repo, dest, &head).await?;
+    let result = async {
+        let index_dir = tempfile::tempdir()?;
+        let index = index_dir.path().join("index");
+        let index = index.to_str().context("index path must be UTF-8")?;
+        let source = repo.to_str().context("repository path must be UTF-8")?;
+        let env = [
+            ("GIT_INDEX_FILE", index),
+            ("GIT_AUTHOR_NAME", "Noctum"),
+            ("GIT_AUTHOR_EMAIL", "noctum@localhost"),
+            ("GIT_COMMITTER_NAME", "Noctum"),
+            ("GIT_COMMITTER_EMAIL", "noctum@localhost"),
+        ];
+        for args in [
+            vec!["read-tree", &head],
+            vec!["--work-tree", source, "add", "--all"],
+        ] {
+            let output = process::run(dest, "git", &args, &env, Duration::from_secs(120)).await;
+            if !output.success {
+                bail!("cannot copy working source: {}", output.combined());
+            }
+        }
+        let tree = process::run(dest, "git", &["write-tree"], &env, Duration::from_secs(30)).await;
+        if !tree.success {
+            bail!("cannot save source tree: {}", tree.combined());
+        }
+        let commit = process::run(
+            dest,
+            "git",
+            &[
+                "commit-tree",
+                tree.stdout.trim(),
+                "-p",
+                &head,
+                "-m",
+                "Measurement source",
+            ],
+            &env,
+            Duration::from_secs(30),
+        )
+        .await;
+        if !commit.success {
+            bail!("cannot save source snapshot: {}", commit.combined());
+        }
+        reset_hard(dest, commit.stdout.trim()).await
+    }
+    .await;
+    if result.is_err() {
+        remove_worktree(repo, dest).await?;
+    }
+    result
+}
+
 pub async fn head_sha(repo: &Path) -> Result<String> {
     let output = git(repo, &["rev-parse", "HEAD"]).await?;
     if !output.success {
@@ -292,6 +354,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn snapshot_keeps_the_source_index_and_branches() {
+        let repo = init_repo().await;
+        let head = head_sha(repo.path()).await.unwrap();
+        std::fs::write(repo.path().join("src.txt"), "staged\n").unwrap();
+        git(repo.path(), &["add", "src.txt"]).await.unwrap();
+        std::fs::write(repo.path().join("src.txt"), "working\n").unwrap();
+        std::fs::write(repo.path().join("new.txt"), "new source\n").unwrap();
+        std::fs::write(repo.path().join(".gitignore"), "ignored.txt\n").unwrap();
+        std::fs::write(repo.path().join("ignored.txt"), "cache\n").unwrap();
+        let index = std::fs::read(repo.path().join(".git/index")).unwrap();
+        let branches = git(repo.path(), &["show-ref", "--heads"])
+            .await
+            .unwrap()
+            .stdout;
+        let dest = tempfile::tempdir().unwrap();
+        let wt = dest.path().join("source");
+        snapshot(repo.path(), &wt).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(wt.join("src.txt")).unwrap(),
+            "working\n"
+        );
+        assert!(wt.join("new.txt").is_file());
+        assert!(!wt.join("ignored.txt").exists());
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).unwrap(),
+            index
+        );
+        assert_eq!(
+            git(repo.path(), &["show-ref", "--heads"])
+                .await
+                .unwrap()
+                .stdout,
+            branches
+        );
+        assert_eq!(head_sha(repo.path()).await.unwrap(), head);
+        let staged = git(repo.path(), &["show", ":src.txt"]).await.unwrap();
+        assert_eq!(staged.stdout, "staged\n");
+        remove(repo.path(), &wt).await.unwrap();
+        assert!(!wt.exists());
+    }
+
+    #[tokio::test]
     async fn apply_and_commit_stay_out_of_the_original_checkout() {
         let repo = init_repo().await;
         let head = head_sha(repo.path()).await.unwrap();
@@ -325,5 +429,52 @@ mod tests {
         apply(repo.path(), diff, false).await.unwrap();
         let text = std::fs::read_to_string(repo.path().join("src.txt")).unwrap();
         assert_eq!(text, "two\n");
+    }
+
+    #[tokio::test]
+    async fn missing_file_headers_are_added_without_changing_the_hunk() {
+        let repo = init_repo().await;
+        let raw = "diff --git a/src.txt b/src.txt\n@@ -1 +1 @@\n-one\n+two\n";
+        let diff = crate::diffcheck::add_missing_file_headers(raw);
+        assert!(diff.ends_with("@@ -1 +1 @@\n-one\n+two\n"));
+        apply_check(repo.path(), &diff).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("src.txt")).unwrap(),
+            "one\n"
+        );
+        apply(repo.path(), &diff, false).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("src.txt")).unwrap(),
+            "two\n"
+        );
+        assert_eq!(crate::diffcheck::add_missing_file_headers(&diff), diff);
+        let ambiguous =
+            "diff --git a/old b/new\nrename from old\nrename to new\n@@ -1 +1 @@\n-one\n+two\n";
+        assert_eq!(
+            crate::diffcheck::add_missing_file_headers(ambiguous),
+            ambiguous
+        );
+        let added = "diff --git a/new b/new\nnew file mode 100644\n@@ -0,0 +1 @@\n+new\n";
+        assert_eq!(crate::diffcheck::add_missing_file_headers(added), added);
+    }
+
+    #[tokio::test]
+    async fn quoted_paths_apply_to_the_checked_file() {
+        let repo = init_repo().await;
+        let file = repo.path().join("é file.txt");
+        std::fs::write(&file, "one\n").unwrap();
+        git(repo.path(), &["add", "."]).await.unwrap();
+        git(repo.path(), &["commit", "-m", "Add quoted path"])
+            .await
+            .unwrap();
+        let raw = "diff --git \"a/\\303\\251 file.txt\" \"b/\\303\\251 file.txt\"\n@@ -1 +1 @@\n-one\n+two\n";
+        let diff = crate::diffcheck::add_missing_file_headers(raw);
+        assert_eq!(
+            crate::diffcheck::parse_diff(&diff).unwrap()[0].path,
+            "é file.txt"
+        );
+        apply_check(repo.path(), &diff).await.unwrap();
+        apply(repo.path(), &diff, false).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "two\n");
     }
 }
