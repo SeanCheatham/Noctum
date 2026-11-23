@@ -27,4 +27,14 @@ mod tests {
         let _guard = noctum_fence::guard();
         assert_ne!(burn(10_000), 0);
     }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn fence_bytes_in_an_immediate_are_not_a_marker() {
+        let _guard = noctum_fence::guard();
+        unsafe {
+            std::arch::asm!("mov eax, 1", "mov ecx, 0xe9e6", out("eax") _, out("ecx") _);
+        }
+        assert_ne!(burn(1_000), 0);
+    }
 }

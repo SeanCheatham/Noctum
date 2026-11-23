@@ -1,9 +1,9 @@
 #!/bin/sh
-# Noctum installer for macOS and Linux x86_64.
+# Install Noctum on an Apple silicon Mac.
 # Usage: curl -fsSL https://raw.githubusercontent.com/SeanCheatham/Noctum/main/install.sh | sh
 #
 # Options:
-#   --uninstall  Remove the noctum binary. Config and data are left in place.
+#   --uninstall  Remove both host tools. Keep configuration and data.
 
 set -eu
 
@@ -47,39 +47,29 @@ detect_platform() {
     OS_NAME="$(uname -s)"
     ARCH="$(uname -m)"
     case "$OS_NAME:$ARCH" in
-        Linux:x86_64) TARGET_NAME=x86_64-unknown-linux-gnu ;;
         Darwin:arm64) TARGET_NAME=aarch64-apple-darwin ;;
-        Darwin:x86_64) TARGET_NAME=x86_64-apple-darwin ;;
         *) error "Noctum does not support ${OS_NAME} ${ARCH}." ;;
     esac
+    MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+    if [ "$MACOS_MAJOR" -lt 26 ]; then
+        error "Noctum requires macOS 26 or later."
+    fi
 }
 
 uninstall_noctum() {
     info "Uninstalling Noctum..."
     INSTALL_DIR="/usr/local/bin"
-    BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
 
-    if [ -f "$BINARY_PATH" ]; then
-        if rm -f "$BINARY_PATH" 2>/dev/null; then
-            info "Binary removed."
+    for name in noctum noctum-host; do
+        if [ -w "$INSTALL_DIR" ]; then
+            rm -f "$INSTALL_DIR/$name"
         else
-            warn "Requesting sudo permission to remove $BINARY_PATH"
-            sudo rm -f "$BINARY_PATH"
-            info "Binary removed."
+            sudo rm -f "$INSTALL_DIR/$name"
         fi
-    else
-        warn "Binary not found at $BINARY_PATH"
-    fi
+    done
+    info "Noctum was removed. Configuration and data remain in place."
+    echo "  ~/Library/Application Support/com.noctum.noctum/"
 
-    echo ""
-    info "Noctum uninstalled."
-    echo "Config and data were left in place:"
-    if [ "$(uname -s)" = Darwin ]; then
-        echo "  ~/Library/Application Support/com.noctum.noctum/"
-    else
-        echo "  Config: ~/.config/noctum/"
-        echo "  Data:   ~/.local/share/noctum/"
-    fi
 }
 
 install_noctum() {
@@ -120,35 +110,23 @@ install_noctum() {
     tar -xzf "$TMP_DIR/$TARBALL" -C "$TMP_DIR"
 
     INSTALL_DIR="/usr/local/bin"
-    if [ -w "$INSTALL_DIR" ]; then
-        mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
-        chmod +x "$INSTALL_DIR/$BINARY_NAME"
-    else
-        warn "Requesting sudo permission to install to $INSTALL_DIR"
-        sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
-        sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
-    fi
-
-    info "Noctum $VERSION installed."
-    echo ""
-    echo "Before the first night:"
-    if [ "$OS_NAME" = Darwin ]; then
-        echo "  1. Start Docker Desktop or another Docker Linux engine."
-        echo "  2. noctum model pull"
-        echo "  3. noctum runtime prepare"
-    else
-        echo "  1. rustup target add x86_64-unknown-linux-musl"
-        echo "  2. noctum model pull"
-        echo "  3. noctum qemu fetch"
-    fi
-    echo "  4. noctum"
-    echo "  5. Open http://127.0.0.1:8420"
-    echo ""
-    if [ "$OS_NAME" = Darwin ]; then
-        echo "The first runtime setup builds a cached Linux worker. It can take several minutes."
-    else
-        echo "qemu fetch needs a published bundle URL. Until then, build qemu/build-bundle.sh and run noctum qemu install on the tarball."
-    fi
+    codesign --verify --strict "$TMP_DIR/noctum-host" || error "The host helper signature is invalid."
+    for name in noctum noctum-host; do
+        if [ -w "$INSTALL_DIR" ]; then
+            mv "$TMP_DIR/$name" "$INSTALL_DIR/$name"
+            chmod +x "$INSTALL_DIR/$name"
+        else
+            sudo mv "$TMP_DIR/$name" "$INSTALL_DIR/$name"
+            sudo chmod +x "$INSTALL_DIR/$name"
+        fi
+    done
+    info "Noctum $VERSION is installed."
+    echo "Before the first run:"
+    echo "  noctum model pull"
+    echo "  noctum runtime prepare"
+    echo "  noctum"
+    echo "Open http://127.0.0.1:8420"
+    echo "The first worker build can take several minutes."
     echo "Configuration: https://github.com/${REPO}/blob/main/config.example.toml"
 }
 

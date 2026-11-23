@@ -1,22 +1,6 @@
 #!/bin/sh
-# Build the Noctum measurement bundle: a pinned qemu-system-x86_64, the TCG
-# plugin, a pinned vmlinuz, busybox, the runner, and an initramfs.
-#
-# The daemon never measures with a distro QEMU. It only runs the directory
-# this script stages, after the tarball sha256 in qemu.lock.toml has been
-# checked. Running the script prints that sha256. Paste it into the lockfile.
-# `noctum qemu fetch` also needs the release URL. Until that URL exists,
-# `noctum qemu install` loads a local tarball whose hash matches the lockfile.
-#
-# Host packages (Debian/Ubuntu):
-#   build-essential pkg-config python3 ninja-build flex bison bc cpio
-#   libglib2.0-dev libpixman-1-dev libattr1-dev
-# Set GUEST_CROSS_COMPILE=x86_64-linux-gnu- on a Linux ARM host.
-#
-# Pinned sources (sha256 of the upstream archives):
-#   qemu 9.2.0          f859f0bc65e1f533d040bbe8c92bcfecee5af2c921a6687c652fb44d089bd894
-#   linux 6.12.10       4a516e5ed748537a73cb42ec47fbbeb6df8b1298e8892c29c0e91de79095b297
-#   busybox 1.36.1      b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314
+# Build the ARM64 measurement tools inside the Noctum worker VM.
+# Each source archive has a fixed SHA-256 below.
 
 set -eu
 
@@ -24,14 +8,14 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 SRC="$ROOT/qemu/src"
 OUT="$ROOT/qemu/out"
 STAGE="$OUT/stage"
-BUNDLE_ID="qemu-9.2.0-linux-6.12.10"
+BUNDLE_ID="qemu-9.2.0-timer1-linux-6.12.10-ram-insn-v2"
 GUEST_CROSS_COMPILE="${GUEST_CROSS_COMPILE:-}"
-GUEST_ARCH="${NOCTUM_GUEST_ARCH:-x86_64}"
-case "$GUEST_ARCH" in
-    x86_64) KERNEL_ARCH=x86; BUSYBOX_ARCH=x86_64; KERNEL_IMAGE=arch/x86/boot/bzImage; FRAGMENT=kernel.fragment ;;
-    aarch64) KERNEL_ARCH=arm64; BUSYBOX_ARCH=arm64; KERNEL_IMAGE=arch/arm64/boot/Image; FRAGMENT=kernel-arm64.fragment; BUNDLE_ID="$BUNDLE_ID-aarch64" ;;
-    *) echo "unsupported guest architecture: $GUEST_ARCH" >&2; exit 1 ;;
-esac
+GUEST_ARCH=aarch64
+KERNEL_ARCH=arm64
+BUSYBOX_ARCH=arm64
+KERNEL_IMAGE=arch/arm64/boot/Image
+FRAGMENT=kernel-arm64.fragment
+BUNDLE_ID="$BUNDLE_ID-aarch64"
 QEMU_BINARY="qemu-system-$GUEST_ARCH"
 
 
@@ -108,6 +92,22 @@ fetch "$BUSYBOX_URL" "$SRC/$BUSYBOX_TAR" "$BUSYBOX_SHA"
 if [ ! -d "$SRC/qemu-9.2.0" ]; then
     tar -C "$SRC" -xf "$SRC/$QEMU_TAR"
 fi
+python3 - "$SRC/qemu-9.2.0/util/qemu-timer.c" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+old = '''    /* Interrupt execution to force deadline recalculation.  */
+    if (icount_enabled() && timer_list->clock->type == QEMU_CLOCK_VIRTUAL) {
+        icount_start_warp_timer();
+    }
+'''
+if old in source:
+    assert source.count(old) == 1
+    path.write_text(source.replace(old, ''))
+elif 'icount_start_warp_timer();' in source:
+    raise SystemExit('QEMU timer source does not match the pinned change')
+PY
 if [ ! -d "$SRC/linux-6.12.10" ]; then
     tar -C "$SRC" -xf "$SRC/$KERNEL_TAR"
 fi
@@ -147,9 +147,9 @@ if [ ! -x "$SRC/qemu-9.2.0/build/$QEMU_BINARY" ]; then
             --disable-virglrenderer \
             --disable-capstone \
             --disable-kvm
-        make -j"$jobs"
     )
 fi
+(cd "$SRC/qemu-9.2.0" && make -j"$jobs")
 
 cp "$SRC/qemu-9.2.0/build/$QEMU_BINARY" "$STAGE/$QEMU_BINARY"
 cp "$SRC/qemu-9.2.0/build/qemu-img" "$STAGE/qemu-img"
@@ -278,12 +278,12 @@ fi
 (
     cd "$STAGE"
     printf '%s\n' "$GUEST_ARCH" > ARCH
-    sha256sum ARCH "$QEMU_BINARY" qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz > MANIFEST
+    printf '%s\n' 'ram-insn-v2' > MEASUREMENT_VERSION
+    sha256sum ARCH MEASUREMENT_VERSION "$QEMU_BINARY" qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz > MANIFEST
     find pc-bios -type f | sort | xargs sha256sum >> MANIFEST
     tar -czf "$OUT/noctum-qemu-$BUNDLE_ID.tar.gz" \
-        ARCH "$QEMU_BINARY" qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz pc-bios MANIFEST
+        ARCH MEASUREMENT_VERSION "$QEMU_BINARY" qemu-img noctum_profile.so vmlinuz initramfs.cpio.gz pc-bios MANIFEST
 )
 
 echo "bundle $OUT/noctum-qemu-$BUNDLE_ID.tar.gz"
 sha256sum "$OUT/noctum-qemu-$BUNDLE_ID.tar.gz"
-echo "Set qemu.lock.toml id=$BUNDLE_ID sha256=<hash above>. Leave url empty until a release hosts the tarball, and install it with noctum qemu install."

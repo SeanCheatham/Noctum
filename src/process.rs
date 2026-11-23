@@ -101,6 +101,47 @@ pub async fn run_logged(
     Ok(spawn(command, timeout, None).await)
 }
 
+pub async fn run_logged_with_disk_limit(
+    cwd: &Path,
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    log: &Path,
+    disk: &Path,
+) -> anyhow::Result<CmdOutput> {
+    require_free_space(disk, 12 * 1024 * 1024 * 1024)?;
+    watch_disk(
+        run_logged(cwd, program, args, timeout, log),
+        Duration::from_secs(2),
+        || require_free_space(disk, 2 * 1024 * 1024 * 1024),
+    )
+    .await
+}
+
+pub(crate) fn require_free_space(path: &Path, reserve: u64) -> anyhow::Result<()> {
+    let free = crate::model::free_bytes(path)?;
+    if free < reserve {
+        anyhow::bail!("operation needs {reserve} free bytes under {}, have {free}; free disk space before trying again", path.display());
+    }
+    Ok(())
+}
+
+pub(crate) async fn watch_disk<T>(
+    future: impl std::future::Future<Output = anyhow::Result<T>>,
+    period: Duration,
+    mut check: impl FnMut() -> anyhow::Result<()>,
+) -> anyhow::Result<T> {
+    check()?;
+    tokio::pin!(future);
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    loop {
+        tokio::select! {
+            result = &mut future => return result,
+            _ = interval.tick() => check()?,
+        }
+    }
+}
+
 struct SpawnedGroup(u32);
 impl Drop for SpawnedGroup {
     fn drop(&mut self) {
@@ -330,6 +371,66 @@ mod tests {
         let pid = std::fs::read_to_string(directory.path().join("child.pid")).unwrap();
         task.abort();
         let _ = task.await;
+        for _ in 0..100 {
+            let output = std::process::Command::new("ps")
+                .args(["-o", "stat=", "-p", pid.trim()])
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&output.stdout);
+            if state.trim().is_empty() || state.trim().starts_with('Z') {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("child process {pid} is still running");
+    }
+
+    #[tokio::test]
+    async fn disk_limit_prevents_a_command_from_starting() {
+        let directory = tempfile::tempdir().unwrap();
+        let result = watch_disk(
+            run_logged(
+                directory.path(),
+                "touch",
+                &["started".into()],
+                Duration::from_secs(10),
+                &directory.path().join("log"),
+            ),
+            Duration::from_secs(2),
+            || anyhow::bail!("disk reserve reached"),
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("disk reserve reached"));
+        assert!(!directory.path().join("started").exists());
+        assert!(!directory.path().join("log").exists());
+    }
+
+    #[tokio::test]
+    async fn disk_limit_stops_the_process_group() {
+        let directory = tempfile::tempdir().unwrap();
+        let args = vec!["-c".into(), "sleep 30 & echo $! > child.pid; wait".into()];
+        let result = watch_disk(
+            run_logged(
+                directory.path(),
+                "sh",
+                &args,
+                Duration::from_secs(60),
+                &directory.path().join("log"),
+            ),
+            Duration::from_millis(10),
+            || {
+                if directory.path().join("child.pid").is_file() {
+                    anyhow::bail!("disk reserve reached");
+                }
+                Ok(())
+            },
+        )
+        .await;
+        assert!(result.unwrap_err().to_string().contains("disk reserve"));
+        let pid = std::fs::read_to_string(directory.path().join("child.pid")).unwrap();
         for _ in 0..100 {
             let output = std::process::Command::new("ps")
                 .args(["-o", "stat=", "-p", pid.trim()])

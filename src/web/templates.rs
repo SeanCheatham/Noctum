@@ -17,6 +17,7 @@ pub struct HomeTemplate {
 #[template(path = "repository.html")]
 pub struct RepositoryTemplate {
     pub target: String,
+    pub measurement_profile: String,
     pub name: String,
     pub path: String,
     pub git_sha: String,

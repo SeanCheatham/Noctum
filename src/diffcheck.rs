@@ -69,6 +69,9 @@ fn check_path(path: &str, protected: &[String]) -> Result<(), String> {
     if path.is_empty() || path == "/dev/null" {
         return Err("diff has no path".into());
     }
+    if path.contains('\0') {
+        return Err("diff path contains a null byte".into());
+    }
     if path.starts_with('/') {
         return Err(format!("{path} is absolute"));
     }
@@ -88,7 +91,7 @@ fn check_path(path: &str, protected: &[String]) -> Result<(), String> {
         .unwrap_or("");
     if matches!(
         name,
-        "Cargo.toml" | "Cargo.lock" | "noctum.toml" | "model.lock.toml" | "qemu.lock.toml"
+        "Cargo.toml" | "Cargo.lock" | "noctum.toml" | "model.lock.toml"
     ) {
         return Err(format!("{path} is protected"));
     }
@@ -137,25 +140,73 @@ fn bounds_hold(before: &[u128], after: &[u128]) -> bool {
     true
 }
 
+pub fn add_missing_file_headers(diff: &str) -> String {
+    let mut output = String::with_capacity(diff.len());
+    let mut paths = None;
+    let mut headers = false;
+    let mut extended = false;
+    let mut hunk = false;
+    for line in diff.split_inclusive('\n') {
+        let raw = line.trim_end_matches(['\n', '\r']);
+        if let Some(rest) = raw.strip_prefix("diff --git ") {
+            paths = git_header_paths(rest).ok().map(|(_, old, new)| (old, new));
+            headers = false;
+            extended = false;
+            hunk = false;
+        } else if !hunk {
+            headers |= raw.starts_with("--- ") || raw.starts_with("+++ ");
+            extended |= raw.starts_with("new file")
+                || raw.starts_with("deleted file")
+                || raw.starts_with("rename ")
+                || raw.starts_with("copy ");
+            if raw.starts_with("@@ ") {
+                if !headers && !extended {
+                    if let Some((old, new)) = paths {
+                        output.push_str(&format!("--- {old}\n+++ {new}\n"));
+                    }
+                }
+                hunk = true;
+            }
+        }
+        output.push_str(line);
+    }
+    output
+}
+
 pub fn parse_diff(diff: &str) -> Result<Vec<FileDiff>, String> {
     let mut files = Vec::new();
     let mut current: Option<FileDiff> = None;
     let mut hunk: Option<Hunk> = None;
+    let mut old_path: Option<String> = None;
     for line in diff.split_inclusive('\n') {
         let raw = line.trim_end_matches(['\n', '\r']);
         if let Some(rest) = raw.strip_prefix("diff --git ") {
             push_hunk(&mut current, &mut hunk);
             push_file(&mut files, &mut current);
             let path = git_path(rest)?;
+            old_path = None;
             current = Some(FileDiff {
                 path,
                 hunks: Vec::new(),
             });
             continue;
         }
-        if let Some(rest) = raw.strip_prefix("+++ ") {
-            let path = strip_ab(rest);
+        if let Some(rest) = raw.strip_prefix("--- ").filter(|_| hunk.is_none()) {
+            let path = file_header_path(rest, "a/")?;
             if path != "/dev/null" {
+                if current.as_ref().is_some_and(|file| file.path != path) {
+                    return Err("diff header paths do not match".into());
+                }
+                old_path = Some(path);
+            }
+            continue;
+        }
+        if let Some(rest) = raw.strip_prefix("+++ ").filter(|_| hunk.is_none()) {
+            let path = file_header_path(rest, "b/")?;
+            if path != "/dev/null" {
+                if old_path.as_ref().is_some_and(|old| old != &path) {
+                    return Err("diff renames are not supported".into());
+                }
                 if current.is_none() {
                     current = Some(FileDiff {
                         path: path.to_string(),
@@ -164,13 +215,14 @@ pub fn parse_diff(diff: &str) -> Result<Vec<FileDiff>, String> {
                 } else if let Some(file) = current.as_mut() {
                     if file.path.is_empty() || file.path == "/dev/null" {
                         file.path = path.to_string();
+                    } else if file.path != path {
+                        return Err("diff header paths do not match".into());
                     }
                 }
             }
             continue;
         }
-        if raw.starts_with("--- ")
-            || raw.starts_with("index ")
+        if raw.starts_with("index ")
             || raw.starts_with("new file")
             || raw.starts_with("deleted file")
             || raw.starts_with("similarity ")
@@ -231,21 +283,119 @@ fn push_file(files: &mut Vec<FileDiff>, current: &mut Option<FileDiff>) {
 }
 
 fn git_path(header: &str) -> Result<String, String> {
-    let mut parts = header.split_whitespace();
-    let _old = parts.next();
-    let new = parts.next().ok_or("diff --git is missing a path")?;
-    let path = strip_ab(new);
-    if path == "/dev/null" {
-        return Err("diff deletes a file without a destination".into());
-    }
-    Ok(path.to_string())
+    git_header_paths(header).map(|(path, _, _)| path)
 }
 
-fn strip_ab(path: &str) -> &str {
-    let path = path.trim_matches('"');
-    path.strip_prefix("b/")
-        .or_else(|| path.strip_prefix("a/"))
-        .unwrap_or(path)
+fn git_header_paths(header: &str) -> Result<(String, &str, &str), String> {
+    if header.starts_with("a/") {
+        for (index, _) in header.match_indices(" b/") {
+            let path = &header[2..index];
+            if path.contains(' ')
+                && path == &header[index + 3..]
+                && !path
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, '"' | '\\'))
+            {
+                return Ok((path.to_string(), &header[..index], &header[index + 1..]));
+            }
+        }
+    }
+    let (old, old_raw, rest) = read_git_path(header)?;
+    let (new, new_raw, rest) = read_git_path(rest)?;
+    if !rest.trim().is_empty() {
+        return Err("diff --git has extra paths".into());
+    }
+    let old = old
+        .strip_prefix("a/")
+        .ok_or("old diff path must start with a/")?;
+    let new = new
+        .strip_prefix("b/")
+        .ok_or("new diff path must start with b/")?;
+    if old != new {
+        return Err("diff renames are not supported".into());
+    }
+    Ok((new.to_string(), old_raw, new_raw))
+}
+
+fn file_header_path(header: &str, prefix: &str) -> Result<String, String> {
+    let value = if header.starts_with('"') {
+        let (value, _, rest) = read_git_path(header)?;
+        if !rest.is_empty() && !rest.starts_with('\t') {
+            return Err("file header has extra paths".into());
+        }
+        value
+    } else {
+        header.split('\t').next().unwrap_or("").to_string()
+    };
+    if value == "/dev/null" {
+        return Ok(value);
+    }
+    value
+        .strip_prefix(prefix)
+        .map(str::to_string)
+        .ok_or_else(|| format!("file header must start with {prefix}"))
+}
+
+fn read_git_path(input: &str) -> Result<(String, &str, &str), String> {
+    let input = input.trim_start_matches([' ', '\t']);
+    if !input.starts_with('"') {
+        let end = input
+            .as_bytes()
+            .iter()
+            .position(u8::is_ascii_whitespace)
+            .unwrap_or(input.len());
+        if end == 0 {
+            return Err("diff path is missing".into());
+        }
+        return Ok((input[..end].to_string(), &input[..end], &input[end..]));
+    }
+    let bytes = input.as_bytes();
+    let mut value = Vec::new();
+    let mut cursor = 1;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        cursor += 1;
+        match byte {
+            b'"' => {
+                return Ok((
+                    String::from_utf8(value).map_err(|_| "diff path must be UTF-8")?,
+                    &input[..cursor],
+                    &input[cursor..],
+                ))
+            }
+            b'\\' => {
+                let escaped = *bytes.get(cursor).ok_or("diff path escape is incomplete")?;
+                cursor += 1;
+                let decoded = match escaped {
+                    b'a' => 7,
+                    b'b' => 8,
+                    b't' => 9,
+                    b'n' => 10,
+                    b'v' => 11,
+                    b'f' => 12,
+                    b'r' => 13,
+                    b'\\' | b'"' => escaped,
+                    b'0'..=b'7' => {
+                        let mut number = u16::from(escaped - b'0');
+                        for _ in 0..2 {
+                            match bytes.get(cursor) {
+                                Some(next @ b'0'..=b'7') => {
+                                    number = number * 8 + u16::from(next - b'0');
+                                    cursor += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+                        u8::try_from(number).map_err(|_| "diff path escape is out of range")?
+                    }
+                    _ => return Err("diff path escape is invalid".into()),
+                };
+                value.push(decoded);
+            }
+            _ => value.push(byte),
+        }
+    }
+    Err("quoted diff path is incomplete".into())
 }
 
 fn parse_hunk_start(header: &str) -> Result<usize, String> {
@@ -535,6 +685,34 @@ fn int_lit(expr: &Expr) -> Option<u128> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quoted_test_path_keeps_assertion_checks() {
+        let path = "tests/my test.rs";
+        let source = "#[test]\nfn chosen() { assert_eq!(1, 1); }\n";
+        let diff = "diff --git \"a/tests/my test.rs\" \"b/tests/my test.rs\"\n--- \"a/tests/my test.rs\"\n+++ \"b/tests/my test.rs\"\n@@ -1,2 +1,2 @@\n #[test]\n-fn chosen() { assert_eq!(1, 1); }\n+fn chosen() {}\n";
+        let files = HashMap::from([(path.to_string(), source.to_string())]);
+        let error = check_diff(diff, &files, Some(path), "chosen", &[]).unwrap_err();
+        assert!(error.contains("assertion"), "{error}");
+        let allowed = "diff --git \"a/tests/my test.rs\" \"b/tests/my test.rs\"\n--- \"a/tests/my test.rs\"\n+++ \"b/tests/my test.rs\"\n@@ -1,2 +1,3 @@\n #[test]\n fn chosen() { assert_eq!(1, 1); }\n+// keep the result check\n";
+        check_diff(allowed, &files, Some(path), "chosen", &[]).unwrap();
+    }
+
+    #[test]
+    fn git_path_escapes_and_headers_are_checked() {
+        let escaped =
+            "diff --git \"a/src/\\303\\251.rs\" \"b/src/\\303\\251.rs\"\n@@ -1 +1 @@\n-one\n+two\n";
+        assert_eq!(
+            parse_diff(&add_missing_file_headers(escaped)).unwrap()[0].path,
+            "src/é.rs"
+        );
+        let inconsistent = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/Cargo.toml\n@@ -1 +1 @@\n-one\n+two\n";
+        assert!(parse_diff(inconsistent).is_err());
+        let rename = "diff --git a/Cargo.toml b/src/safe.rs\n@@ -1 +1 @@\n-one\n+two\n";
+        assert!(parse_diff(rename).is_err());
+        let null = "diff --git \"a/src/x\\000.rs\" \"b/src/x\\000.rs\"\n@@ -1 +1 @@\n-one\n+two\n";
+        assert!(check_diff(null, &HashMap::new(), None, "", &[]).is_err());
+    }
 
     const SOURCE: &str = r#"
 fn encode(input: &[u8]) -> usize { input.len() }

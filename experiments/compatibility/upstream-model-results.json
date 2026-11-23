@@ -1,0 +1,71 @@
+{
+  "status": "model_resource_check_failed",
+  "inference_completed": false,
+  "source_kept": true,
+  "source_state": {
+    "head": "e14400697453bcc85997119b874bc03d9601d0af",
+    "index": "f036ec59ded67e99d9686b8f3e7dedab634016705d0e22eabd2bf776f933b57b",
+    "branches": "",
+    "source_sha256": "49b621c4141ad4bc7533cc383f2c9e5cc807eaa25b1f5a010c295288c003ba7e"
+  },
+  "run": {
+    "id": 3,
+    "repository_id": 5,
+    "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+    "package": "base64",
+    "started_at": "2026-11-22 20:26:26",
+    "finished_at": "2026-11-22 20:28:05",
+    "status": "ok",
+    "error": null,
+    "window_key": null,
+    "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+    "target": "aarch64-unknown-linux-musl",
+    "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=79612b1e80e348e25fb866b9610acf9a2344b52e5634780623b9f40f82490482"
+  },
+  "tests": [
+    {
+      "id": 3,
+      "run_id": 3,
+      "harness": "unittests src/lib.rs",
+      "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+      "status": "measured",
+      "insn_count": 2484943,
+      "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+      "binary_sha256": "162045e56649134373bd294cef18bf8738f906fa3105a9bc1d744582cf258b17",
+      "wall_ms": 816,
+      "reason": null
+    }
+  ],
+  "candidates": [
+    {
+      "id": 1,
+      "run_id": 3,
+      "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+      "harness": "unittests src/lib.rs",
+      "rank": 0,
+      "symbol": "decode_chunk_8",
+      "file": "src/engine/general_purpose/decode.rs",
+      "line_start": 165,
+      "line_end": 252,
+      "exclusive_count": 276480,
+      "share": 0.11126210943269121,
+      "file_blob": "b55d3fc5c8f7e5c371a21b75e1b51f692b896e29"
+    }
+  ],
+  "trials": [
+    {
+      "id": 1,
+      "candidate_id": 1,
+      "status": "error",
+      "reason": "need 10212457152 bytes of available RAM for /private/tmp/noctum-compat.qtBzNE/data/models/Inkling-2-Mini-UD-Q2_K_XL.gguf, have 9620726696",
+      "model_summary": null,
+      "unified_diff": null,
+      "baseline_count": null,
+      "insn_count": null,
+      "improvement_ratio": null,
+      "host_check_passed": 0,
+      "stdout_matched": 0,
+      "tool_output": null
+    }
+  ]
+}

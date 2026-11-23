@@ -1,0 +1,185 @@
+{
+  "date": "2026-11-22",
+  "project": "memchr",
+  "revision": "9ba486e4ba7e865c0510305c5dacba73988d9f31",
+  "test": "memchr::tests::forward1_oneshot",
+  "qemu_base": "9.2.0",
+  "cpu": "cortex-a72",
+  "kernel": "6.12.10",
+  "cases": {
+    "timer_unseeded_1": {
+      "transport": "initramfs",
+      "instruction_callbacks": true,
+      "sleep_off": true,
+      "qemu_sha256": "2a53b2231d29a441934624cba6147007387870a89b4529242358b9bcc60ee20c",
+      "harness_sha256": "8e0e9d7e278d61e0f803830c1e784fb1d180387ea7276588740d5b710c63f376",
+      "counts": [
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        }
+      ],
+      "repeatable": true
+    },
+    "timer_unseeded_2": {
+      "transport": "initramfs",
+      "instruction_callbacks": true,
+      "sleep_off": true,
+      "qemu_sha256": "2a53b2231d29a441934624cba6147007387870a89b4529242358b9bcc60ee20c",
+      "harness_sha256": "8e0e9d7e278d61e0f803830c1e784fb1d180387ea7276588740d5b710c63f376",
+      "counts": [
+        {
+          "guest": 211481841,
+          "application": 104635300,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211481841,
+          "application": 104635300,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211481841,
+          "application": 104635300,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        }
+      ],
+      "repeatable": true
+    },
+    "timer_seeded_1": {
+      "transport": "initramfs",
+      "instruction_callbacks": true,
+      "sleep_off": true,
+      "seed": "1",
+      "qemu_sha256": "2a53b2231d29a441934624cba6147007387870a89b4529242358b9bcc60ee20c",
+      "harness_sha256": "8e0e9d7e278d61e0f803830c1e784fb1d180387ea7276588740d5b710c63f376",
+      "counts": [
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        }
+      ],
+      "repeatable": true
+    },
+    "timer_seeded_2": {
+      "transport": "initramfs",
+      "instruction_callbacks": true,
+      "sleep_off": true,
+      "seed": "1",
+      "qemu_sha256": "2a53b2231d29a441934624cba6147007387870a89b4529242358b9bcc60ee20c",
+      "harness_sha256": "8e0e9d7e278d61e0f803830c1e784fb1d180387ea7276588740d5b710c63f376",
+      "counts": [
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211483035,
+          "application": 104635093,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        }
+      ],
+      "repeatable": true
+    },
+    "timer_seeded_cold_boot": {
+      "transport": "initramfs",
+      "instruction_callbacks": true,
+      "sleep_off": true,
+      "seed": "1",
+      "mode": "cold-boot",
+      "qemu_sha256": "2a53b2231d29a441934624cba6147007387870a89b4529242358b9bcc60ee20c",
+      "harness_sha256": "8e0e9d7e278d61e0f803830c1e784fb1d180387ea7276588740d5b710c63f376",
+      "counts": [
+        {
+          "guest": 211959857,
+          "application": 104634553,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211959857,
+          "application": 104634553,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211959857,
+          "application": 104634553,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        }
+      ],
+      "repeatable": true
+    },
+    "timer_seeded_cold_boot_2": {
+      "transport": "initramfs",
+      "instruction_callbacks": true,
+      "sleep_off": true,
+      "seed": "1",
+      "mode": "cold-boot",
+      "qemu_sha256": "2a53b2231d29a441934624cba6147007387870a89b4529242358b9bcc60ee20c",
+      "harness_sha256": "8e0e9d7e278d61e0f803830c1e784fb1d180387ea7276588740d5b710c63f376",
+      "counts": [
+        {
+          "guest": 211959857,
+          "application": 104634553,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211959857,
+          "application": 104634553,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        },
+        {
+          "guest": 211959857,
+          "application": 104634553,
+          "stdout": "\nrunning 1 test\ntest memchr::tests::forward1_oneshot ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; \n",
+          "exit": 0
+        }
+      ],
+      "repeatable": true
+    }
+  }
+}

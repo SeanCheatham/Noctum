@@ -24,6 +24,8 @@ const SCHEMA: &str = include_str!("../grammar/patch_schema.json");
 const DOWNLOAD_ATTEMPTS: u32 = 3;
 const HEALTH_WAIT: Duration = Duration::from_secs(300);
 const COMPLETE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const COMPLETION_TOKENS: u32 = 8192;
+const REASONING_TOKENS: u32 = 2048;
 
 #[derive(Debug, Clone)]
 pub struct PromptInput<'a> {
@@ -41,13 +43,14 @@ pub fn build_messages(input: &PromptInput<'_>) -> Vec<ChatMessage> {
 
 pub fn build_messages_for_target(input: &PromptInput<'_>, target: &str) -> Vec<ChatMessage> {
     let system = "\
-You reduce the number of guest instructions retired inside one single-threaded Rust test body. \
+You reduce the number of guest instruction callbacks inside one single-threaded Rust test body. \
 Preserve assertions, fixed loop bounds, and libtest success. Do not add dependencies. \
 Do not edit noctum.toml, Cargo.toml, or Cargo.lock. Return a unified diff and a short summary. \
 The fence that measures the body is not in the source. Do not delete the work of a fixed loop. \
 Replace the hot function with a cheaper algorithm that returns the same value for every input. \
 Do not delete a computation the assertions observe, and do not replace it with a constant. \
-Begin the diff with a diff --git line. Copy unchanged and removed lines exactly from the source, \
+Each file needs diff --git, --- a/path, and +++ b/path lines before its first hunk. \
+Copy unchanged and removed lines exactly from the source, \
 including indentation. Put every changed line inside a hunk.";
     let mut user = format!(
         "Target: {target}\nTest: {}\nHot function: {}\nFile: {}\nLines: {}-{}\nExclusive instructions: {}\nShare of fenced total: {:.4}\n\nHot function source:\n```rust\n{}\n```\n\nTest source:\n```rust\n{}\n```\n",
@@ -69,7 +72,7 @@ including indentation. Put every changed line inside a hunk.";
         }
     }
     if let Some(diff) = input.repair_diff {
-        user.push_str("\nThe previous diff failed to build or failed the host test suite. Replace it. Do not repeat it.\n");
+        user.push_str("\nThe previous diff failed the build or the test suite. Use the original source above as the base for a replacement diff.\n");
         user.push_str(diff);
         user.push('\n');
     }
@@ -152,17 +155,10 @@ async fn complete_with(
     messages: &[ChatMessage],
     cancel: &AtomicBool,
 ) -> Result<Completion> {
-    let mut last_error = None;
-    for _ in 0..2 {
-        if cancel.load(Ordering::SeqCst) {
-            bail!("inference cancelled");
-        }
-        match oneshot(server, gguf, messages, cancel).await {
-            Ok(completion) => return Ok(completion),
-            Err(err) => last_error = Some(err),
-        }
+    if cancel.load(Ordering::SeqCst) {
+        bail!("inference cancelled");
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("llama-server failed")))
+    oneshot(server, gguf, messages, cancel).await
 }
 
 fn ensure_gguf_fits(gguf: &Path) -> Result<()> {
@@ -219,7 +215,7 @@ async fn oneshot(
     }
     let result = chat(&base, messages, cancel).await;
     stop_server(pid, &mut child).await;
-    let result = result.with_context(|| log_tail(&log_path));
+    let result = result.map_err(|error| anyhow::anyhow!("{error:#}\n{}", log_tail(&log_path)));
     let _ = std::fs::remove_file(&log_path);
     result
 }
@@ -258,7 +254,7 @@ pub async fn chat(base: &str, messages: &[ChatMessage], cancel: &AtomicBool) -> 
         })).collect::<Vec<_>>(),
         "temperature": 0.2,
         "reasoning_effort": "low",
-        "max_tokens": 3072,
+        "max_tokens": COMPLETION_TOKENS,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -286,6 +282,9 @@ pub async fn chat(base: &str, messages: &[ChatMessage], cancel: &AtomicBool) -> 
         body = response.json() => body.context("parse llama-server response")?,
         _ = wait_cancel(cancel) => bail!("inference cancelled"),
     };
+    if body["choices"][0]["finish_reason"] == "length" {
+        bail!("model response reached the output token limit; no patch was applied");
+    }
     let content = body["choices"][0]["message"]["content"]
         .as_str()
         .context("completion has no content")?;
@@ -340,12 +339,7 @@ pub fn server_args(gguf: &Path, port: u16, threads: usize) -> Vec<String> {
         "-t".into(),
         threads.to_string(),
         "-ngl".into(),
-        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            "99"
-        } else {
-            "0"
-        }
-        .into(),
+        "99".into(),
         "-np".into(),
         "1".into(),
         "-b".into(),
@@ -354,6 +348,8 @@ pub fn server_args(gguf: &Path, port: u16, threads: usize) -> Vec<String> {
         "128".into(),
         "--reasoning-effort".into(),
         "low".into(),
+        "--reasoning-budget".into(),
+        REASONING_TOKENS.to_string(),
         "--jinja".into(),
     ]
 }
@@ -544,18 +540,7 @@ fn sysctl_number(name: &str) -> Result<u64> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn mem_available() -> Result<u64> {
-    let text = std::fs::read_to_string("/proc/meminfo").context("read meminfo")?;
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("MemAvailable:") {
-            let kb: u64 = rest
-                .split_whitespace()
-                .next()
-                .context("MemAvailable")?
-                .parse()?;
-            return Ok(kb * 1024);
-        }
-    }
-    bail!("MemAvailable is missing")
+    bail!("Local model inference requires macOS on Apple silicon.")
 }
 
 pub fn free_bytes(path: &Path) -> Result<u64> {
@@ -585,31 +570,7 @@ pub fn physical_cores() -> usize {
     if let Ok(cores) = sysctl_number("hw.physicalcpu") {
         return (cores as usize).max(1);
     }
-    let Ok(text) = std::fs::read_to_string("/proc/cpuinfo") else {
-        return fallback_cores();
-    };
-    let mut pairs = std::collections::HashSet::new();
-    let mut physical = None;
-    let mut core = None;
-    for line in text.lines() {
-        if line.is_empty() {
-            if let (Some(physical), Some(core)) = (physical.take(), core.take()) {
-                pairs.insert((physical, core));
-            }
-        } else if let Some(rest) = line.strip_prefix("physical id") {
-            physical = rest.split(':').nth(1).map(|value| value.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("core id") {
-            core = rest.split(':').nth(1).map(|value| value.trim().to_string());
-        }
-    }
-    if let (Some(physical), Some(core)) = (physical, core) {
-        pairs.insert((physical, core));
-    }
-    if pairs.is_empty() {
-        fallback_cores()
-    } else {
-        pairs.len()
-    }
+    fallback_cores()
 }
 
 fn fallback_cores() -> usize {
@@ -666,17 +627,13 @@ mod tests {
     }
 
     #[test]
-    fn server_uses_one_slot_and_low_reasoning() {
+    fn server_uses_one_slot_and_bounded_reasoning() {
         let args = server_args(Path::new("model.gguf"), 9, 3);
         let joined = args.join(" ");
-        let layers = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            99
-        } else {
-            0
-        };
-        assert!(joined.contains(&format!("-ngl {layers}")));
+        assert!(joined.contains("-ngl 99"));
         assert!(joined.contains("-np 1"));
         assert!(joined.contains("--reasoning-effort low"));
+        assert!(joined.contains("--reasoning-budget 2048"));
         assert!(joined.contains("-c 16384"));
         assert!(joined.contains("--host 127.0.0.1"));
     }
@@ -747,7 +704,7 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
-            .and(wiremock::matchers::body_partial_json(json!({"reasoning_effort": "low", "max_tokens": 3072})))
+            .and(wiremock::matchers::body_partial_json(json!({"reasoning_effort": "low", "max_tokens": 8192})))
             .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
                 "choices": [{"message": {"content": "{\"summary\":\"shorter\",\"diff\":\"diff --git a/a b/a\\n\"}"}}],
             })))
@@ -755,6 +712,25 @@ mod tests {
         chat(&server.uri(), &[], &AtomicBool::new(false))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn truncated_response_is_not_parsed_as_a_patch() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"finish_reason": "length", "message": {"content": "{\"summary\":"}}],
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let error = chat(&server.uri(), &[], &AtomicBool::new(false))
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("output token limit"),
+            "{error:#}"
+        );
     }
 
     #[tokio::test]

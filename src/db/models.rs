@@ -24,6 +24,8 @@ pub struct DaemonState {
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Run {
     pub target: String,
+    #[sqlx(default)]
+    pub measurement_profile: String,
     pub id: i64,
     pub repository_id: i64,
     pub git_sha: String,

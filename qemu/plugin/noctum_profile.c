@@ -1,10 +1,8 @@
 /*
  * TCG plugin for one Noctum measurement.
  *
- * Counts retired guest instructions while armed. An `out 0xe9, al` (bytes
- * E6 E9) with AL=1 zeroes the counters and arms. AL=2 disarms and flushes.
- * The fence instructions themselves are not counted. A second fence pair in
- * the same process is a hard error.
+ * Counts guest instruction callbacks between two ARM64 markers.
+ * The markers are excluded. A second marker pair is an error.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
@@ -32,26 +30,17 @@ static int state = ST_IDLE;
 static uint64_t total;
 static GHashTable *hist;
 static char *output_path;
-static struct qemu_plugin_register *rax_handle;
 static int flushed;
-static int arm64;
 
-static void add_count(uint64_t pc, uint64_t n)
+static uint64_t *counter_for(uint64_t pc)
 {
+    uint64_t *existing = g_hash_table_lookup(hist, &pc);
+    if (existing) return existing;
     uint64_t *key = g_new(uint64_t, 1);
-    uint64_t *existing;
-
+    uint64_t *value = g_new0(uint64_t, 1);
     *key = pc;
-    existing = g_hash_table_lookup(hist, key);
-    if (existing) {
-        *existing += n;
-        g_free(key);
-    } else {
-        uint64_t *val = g_new(uint64_t, 1);
-        *val = n;
-        g_hash_table_insert(hist, key, val);
-    }
-    total += n;
+    g_hash_table_insert(hist, key, value);
+    return value;
 }
 
 static void flush_dump(void)
@@ -73,7 +62,7 @@ static void flush_dump(void)
     while (g_hash_table_iter_next(&iter, &k, &v)) {
         uint64_t pc = *(uint64_t *)k;
         uint64_t n = *(uint64_t *)v;
-        fprintf(f, "bb 0x%" PRIx64 " %" PRIu64 "\n", pc, n);
+        if (n) fprintf(f, "bb 0x%" PRIx64 " %" PRIu64 "\n", pc, n);
     }
     if (state == ST_ERROR) {
         fprintf(f, "error second_fence\n");
@@ -90,45 +79,15 @@ static int insn_is_fence(struct qemu_plugin_insn *insn)
 {
     uint8_t buf[16];
     size_t n = qemu_plugin_insn_data(insn, buf, sizeof buf);
-    size_t i;
 
-    if (arm64) {
-        if (n == 4 && buf[0] == 0x3f && buf[1] == 0xc6 && buf[2] == 0x89 && buf[3] == 0xd2) return 1;
-        if (n == 4 && buf[0] == 0x5f && buf[1] == 0xc6 && buf[2] == 0x89 && buf[3] == 0xd2) return 2;
-        return 0;
-    }
-    for (i = 0; i + 1 < n; i++) {
-        if (buf[i] == 0xE6 && buf[i + 1] == 0xE9) {
-            return 3;
-        }
-    }
+    if (n == 4 && buf[0] == 0x3f && buf[1] == 0xc6 && buf[2] == 0x89 && buf[3] == 0xd2) return 1;
+    if (n == 4 && buf[0] == 0x5f && buf[1] == 0xc6 && buf[2] == 0x89 && buf[3] == 0xd2) return 2;
     return 0;
-}
-
-static int read_al(void)
-{
-    GByteArray *buf;
-    int n;
-    int al;
-
-    if (!rax_handle) {
-        return -1;
-    }
-    buf = g_byte_array_new();
-    n = qemu_plugin_read_register(rax_handle, buf);
-    if (n < 1 || buf->len < 1) {
-        g_byte_array_free(buf, TRUE);
-        return -1;
-    }
-    /* Target byte order is little-endian on x86. AL is the low byte of RAX. */
-    al = buf->data[0];
-    g_byte_array_free(buf, TRUE);
-    return al;
 }
 
 static void on_fence(unsigned int vcpu_index, void *userdata)
 {
-    int al = arm64 ? (int)(uintptr_t)userdata : read_al();
+    int al = (int)(uintptr_t)userdata;
 
     (void)vcpu_index;
     (void)userdata;
@@ -138,7 +97,12 @@ static void on_fence(unsigned int vcpu_index, void *userdata)
             flush_dump();
             return;
         }
-        g_hash_table_remove_all(hist);
+        GHashTableIter iter;
+        gpointer key, value;
+        g_hash_table_iter_init(&iter, hist);
+        while (g_hash_table_iter_next(&iter, &key, &value)) {
+            *(uint64_t *)value = 0;
+        }
         total = 0;
         state = ST_ARMED;
         return;
@@ -156,44 +120,10 @@ static void on_fence(unsigned int vcpu_index, void *userdata)
 
 static void on_insn(unsigned int vcpu_index, void *userdata)
 {
-    uint64_t pc = *(uint64_t *)userdata;
-
     (void)vcpu_index;
     if (state == ST_ARMED) {
-        add_count(pc, 1);
-    }
-}
-
-static void on_block(unsigned int vcpu_index, void *userdata)
-{
-    uint64_t *info = userdata;
-
-    (void)vcpu_index;
-    if (state == ST_ARMED) {
-        add_count(info[0], info[1]);
-    }
-}
-
-static void vcpu_init(qemu_plugin_id_t id, unsigned int vcpu_index)
-{
-    GArray *regs;
-    guint i;
-
-    (void)id;
-    (void)vcpu_index;
-    if (arm64) return;
-    regs = qemu_plugin_get_registers();
-    for (i = 0; i < regs->len; i++) {
-        qemu_plugin_reg_descriptor *reg =
-            &g_array_index(regs, qemu_plugin_reg_descriptor, i);
-        if (reg->name && strcmp(reg->name, "rax") == 0) {
-            rax_handle = reg->handle;
-            break;
-        }
-    }
-    g_array_free(regs, TRUE);
-    if (!rax_handle) {
-        qemu_plugin_outs("noctum_profile: rax register not found\n");
+        ++*(uint64_t *)userdata;
+        ++total;
     }
 }
 
@@ -201,36 +131,17 @@ static void tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 {
     size_t n = qemu_plugin_tb_n_insns(tb);
     size_t i;
-    int has_fence = 0;
 
     (void)id;
     for (i = 0; i < n; i++) {
-        if (insn_is_fence(qemu_plugin_tb_get_insn(tb, i))) {
-            has_fence = 1;
-            break;
-        }
-    }
-
-    if (!has_fence) {
-        struct qemu_plugin_insn *first = qemu_plugin_tb_get_insn(tb, 0);
-        uint64_t *info = g_new(uint64_t, 2);
-        info[0] = qemu_plugin_insn_vaddr(first);
-        info[1] = (uint64_t)n;
-        qemu_plugin_register_vcpu_tb_exec_cb(tb, on_block, QEMU_PLUGIN_CB_NO_REGS,
-                                             info);
-        return;
-    }
-
-    for (i = 0; i < n; i++) {
         struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
         if (insn_is_fence(insn)) {
-            qemu_plugin_register_vcpu_insn_exec_cb(insn, on_fence, QEMU_PLUGIN_CB_R_REGS,
+            qemu_plugin_register_vcpu_insn_exec_cb(insn, on_fence, QEMU_PLUGIN_CB_NO_REGS,
                                                    (void *)(uintptr_t)insn_is_fence(insn));
         } else {
-            uint64_t *pc = g_new(uint64_t, 1);
-            *pc = qemu_plugin_insn_vaddr(insn);
+            uint64_t *counter = counter_for(qemu_plugin_insn_vaddr(insn));
             qemu_plugin_register_vcpu_insn_exec_cb(insn, on_insn, QEMU_PLUGIN_CB_NO_REGS,
-                                                   pc);
+                                                   counter);
         }
     }
 }
@@ -247,8 +158,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
 {
     int i;
 
-    arm64 = strcmp(info->target_name, "aarch64") == 0;
-    if (!arm64 && strcmp(info->target_name, "x86_64") != 0) return -1;
+    if (strcmp(info->target_name, "aarch64") != 0) return -1;
     hist = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, g_free);
     for (i = 0; i < argc; i++) {
         if (g_str_has_prefix(argv[i], "output=")) {
@@ -259,7 +169,6 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
         qemu_plugin_outs("noctum_profile: missing output= argument\n");
         return -1;
     }
-    qemu_plugin_register_vcpu_init_cb(id, vcpu_init);
     qemu_plugin_register_vcpu_tb_trans_cb(id, tb_trans);
     qemu_plugin_register_atexit_cb(id, on_plugin_exit, NULL);
     return 0;

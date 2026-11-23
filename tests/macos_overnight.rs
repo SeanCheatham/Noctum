@@ -19,16 +19,8 @@ fn git(path: &Path, args: &[&str]) -> String {
 }
 
 #[test]
-fn missing_docker_engine_has_an_actionable_error() {
-    use std::os::unix::fs::PermissionsExt;
+fn missing_host_helper_has_an_actionable_error() {
     let temp = tempfile::tempdir().unwrap();
-    let docker = temp.path().join("docker");
-    std::fs::write(
-        &docker,
-        "#!/bin/sh\necho 'daemon is not running' >&2\nexit 1\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
     let config = temp.path().join("config.toml");
     Config {
         data_dir: Some(temp.path().join("data")),
@@ -38,23 +30,16 @@ fn missing_docker_engine_has_an_actionable_error() {
     .unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_noctum"))
         .args(["--config", config.to_str().unwrap(), "runtime", "prepare"])
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                temp.path().display(),
-                std::env::var("PATH").unwrap()
-            ),
-        )
+        .env("NOCTUM_HOST_HELPER", temp.path().join("missing-helper"))
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr)
-        .contains("Docker with a Linux engine must be running"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Noctum host helper is missing"));
+    assert!(!temp.path().join("data/runtime/kernel.tar.partial").exists());
 }
 
 #[tokio::test]
-#[ignore = "requires Docker and cached Inkling weights; run with --release"]
+#[ignore = "requires the worker and cached Inkling weights; run with --release"]
 async fn mac_cli_runs_a_full_overnight_pass() {
     let cache =
         PathBuf::from(std::env::var_os("NOCTUM_TEST_MODEL_DATA").expect("NOCTUM_TEST_MODEL_DATA"));
@@ -151,19 +136,11 @@ async fn mac_cli_runs_a_full_overnight_pass() {
     assert!(!git(&repo, &["show", "noctum/perf:Cargo.toml"]).contains("noctum-fence"));
     assert!(git(&repo, &["log", "-1", "--format=%B", "noctum/perf"])
         .contains(&format!("Target: {}", run.target)));
-    let data_key = noctum::hashutil::sha256_bytes(data.as_os_str().as_encoded_bytes());
-    let containers = Command::new("docker")
-        .args([
-            "ps",
-            "--all",
-            "--quiet",
-            "--filter",
-            &format!("label=org.noctum.data={}", &data_key[..12]),
-        ])
+    let helpers = Command::new("pgrep")
+        .args(["-f", "/noctum-host$"])
         .output()
         .unwrap();
-    assert!(containers.status.success());
-    assert!(containers.stdout.is_empty(), "worker was not removed");
+    assert!(helpers.stdout.is_empty(), "worker helper did not stop");
     std::fs::write(
         data.join("result.json"),
         serde_json::to_vec_pretty(&serde_json::json!({

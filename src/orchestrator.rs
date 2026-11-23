@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use chrono::Local;
 
-use crate::builder::{self, BuiltHarness, CargoHost, CargoTarget, ResolvedPackage};
+use crate::builder::{self, BuiltHarness, CargoTarget, ResolvedPackage};
 use crate::config::Config;
 use crate::db::{Database, Repository};
 use crate::diffcheck::{self, parse_diff};
@@ -24,13 +24,17 @@ use crate::profile::{self, HotFunction, LineHit};
 use crate::repo_config::RepoConfig;
 use crate::selector::{self, DiscoveredTest, FnSpan};
 use crate::worktree::{self, PerfSync};
-use crate::{fence, lockfile, qemu, LOG_LIMIT};
+use crate::{fence, LOG_LIMIT};
 
 pub struct RunOptions {
     pub ignore_window: bool,
     pub stop: Arc<AtomicBool>,
     pub asset_error: Option<String>,
     pub only_repo: Option<PathBuf>,
+    pub test: Option<String>,
+    pub max_attempts: Option<u32>,
+    pub measurement_only: bool,
+    pub retry: bool,
 }
 
 impl RunOptions {
@@ -40,6 +44,10 @@ impl RunOptions {
             stop,
             asset_error: None,
             only_repo: None,
+            test: None,
+            max_attempts: None,
+            measurement_only: false,
+            retry: false,
         }
     }
 }
@@ -51,20 +59,7 @@ pub struct Night<M, I, H> {
     pub inferencer: I,
     pub host: H,
     execution: crate::runtime::Execution,
-}
-
-pub async fn prepare_assets(data_dir: &Path, quant: crate::config::ModelQuant) -> Result<()> {
-    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        bail!("overnight measurement requires Linux x86_64; model commands can run on this host");
-    }
-    if lockfile::verify_model(data_dir, quant).is_err() {
-        model::pull(data_dir, quant).await?;
-        lockfile::verify_model(data_dir, quant)?;
-    }
-    if lockfile::verify_qemu(data_dir).is_err() {
-        qemu::fetch(data_dir).await?;
-    }
-    Ok(())
+    attempts: AtomicU32,
 }
 
 impl<M, I, H> Night<M, I, H>
@@ -80,7 +75,8 @@ where
             measurer,
             inferencer,
             host,
-            execution: crate::runtime::Execution::Native,
+            execution: crate::runtime::Execution::default(),
+            attempts: AtomicU32::new(0),
         }
     }
 
@@ -140,7 +136,7 @@ where
                     .await
             }
         };
-        let repo_config = match RepoConfig::load(&user_repo) {
+        let mut repo_config = match RepoConfig::load(&user_repo) {
             Ok(config) => config,
             Err(err) => {
                 return self
@@ -148,34 +144,41 @@ where
                     .await
             }
         };
-        if !self.execution.ensure_target(&user_repo).await? {
-            return self
-                .finish_early(
-                    repo,
-                    &head,
-                    "skipped",
-                    "musl target is not installed; run rustup target add x86_64-unknown-linux-musl",
-                    None,
-                )
-                .await;
+        if let Some(test) = &opts.test {
+            repo_config.tests = vec![test.clone()];
+            repo_config.benches.clear();
         }
+        self.execution.ensure_target(&user_repo).await?;
         self.phase("building", &repo.name).await;
-        let dest = self
-            .config
-            .data_dir()
-            .join("worktrees")
-            .join(repo.id.to_string());
-        let sync = worktree::sync_perf(&user_repo, &head, &dest).await?;
+        let dest = if opts.measurement_only {
+            self.config.data_dir().join("measurements/source")
+        } else {
+            self.config
+                .data_dir()
+                .join("worktrees")
+                .join(repo.id.to_string())
+        };
+        let sync = if opts.measurement_only {
+            worktree::snapshot(&user_repo, &dest).await?;
+            PerfSync::Fresh
+        } else {
+            worktree::sync_perf(&user_repo, &head, &dest).await?
+        };
         if let PerfSync::Conflict(detail) = sync {
             return self
                 .finish_early(repo, &head, "skipped", &detail, None)
                 .await;
         }
+        let source_sha = if opts.measurement_only {
+            worktree::head_sha(&dest).await?
+        } else {
+            head
+        };
         let run_id = self
             .db
             .insert_run(
                 repo.id,
-                &head,
+                &source_sha,
                 repo_config.package.as_deref(),
                 "ok",
                 self.window_key(opts).as_deref(),
@@ -183,6 +186,9 @@ where
             .await?;
         self.db
             .set_run_target(run_id, self.execution.target().triple())
+            .await?;
+        self.db
+            .set_run_profile(run_id, &self.measurement_profile().await?)
             .await?;
         let result = self
             .after_sync(repo, opts, run_id, &user_repo, &dest, &repo_config)
@@ -194,6 +200,10 @@ where
                 .db
                 .finish_run(run_id, "error", Some(&err.to_string()), None)
                 .await;
+        }
+        if opts.measurement_only {
+            let removal = worktree::remove(&user_repo, &dest).await;
+            return result.and(removal);
         }
         result
     }
@@ -207,7 +217,9 @@ where
         dest: &Path,
         repo_config: &RepoConfig,
     ) -> Result<()> {
-        self.retry_pending(repo.id, dest, repo_config).await?;
+        if !opts.measurement_only {
+            self.retry_pending(repo.id, dest, repo_config).await?;
+        }
         if !self.proceed(opts) {
             return self.close(run_id, dest, "ok", None).await;
         }
@@ -226,6 +238,9 @@ where
         let mut measured = self
             .baseline(run_id, dest, repo_config, &built, opts)
             .await?;
+        if opts.measurement_only {
+            return self.close(run_id, dest, "ok", None).await;
+        }
         let eligible: Vec<&ScoredTest> = measured.iter().filter(|test| test.eligible).collect();
         if eligible.is_empty() {
             return self.close(run_id, dest, "ok", None).await;
@@ -233,7 +248,9 @@ where
         if !self.proceed(opts) {
             return self.close(run_id, dest, "ok", None).await;
         }
-        let (mut picks, mapped) = self.rank(repo.id, dest, repo_config, &measured).await?;
+        let (mut picks, mapped) = self
+            .rank(repo.id, dest, repo_config, &measured, opts.retry)
+            .await?;
         if !mapped {
             return self
                 .close(
@@ -262,22 +279,59 @@ where
             bail!("panic = \"abort\" is set; the fence would not close");
         }
         let found = gather_tests(&package, repo_config);
-        let selected = select_tests(&found, repo_config, self.config.gate.max_scan as usize)?;
         let benches = split_benches(repo_config, &package)?;
         builder::clean_paths(dest, &repo_config.clean_paths)?;
         let fence_dir = fence::install_fence_crate(&self.config.data_dir())?;
-        // An empty test list with no bench would still try `cargo test` and
-        // record that failure. A named bench is enough on its own.
-        let build_tests = !selected.is_empty() || benches.score.is_empty();
+        let mut selected = Vec::new();
+        let build_tests =
+            !found.is_empty() || !repo_config.tests.is_empty() || benches.score.is_empty();
         let mut linked = Vec::new();
         if build_tests {
-            inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
-            let harnesses =
-                builder::build_tests_with(&self.execution, dest, &package.name, repo_config)
-                    .await?;
+            let targets = requested_test_targets(&package, &found, repo_config);
+            let mut harnesses = if let Some(targets) = targets {
+                builder::build_test_targets_with(
+                    &self.execution,
+                    dest,
+                    &package.name,
+                    repo_config,
+                    &targets,
+                )
+                .await?
+            } else {
+                builder::build_tests_with(&self.execution, dest, &package.name, repo_config).await?
+            };
+            harnesses.retain(|h| {
+                package
+                    .targets
+                    .iter()
+                    .any(|t| t.harness && t.test_enabled && same_file(&t.src_path, &h.src_path))
+            });
+            let active = active_tests(
+                &self.execution,
+                &found,
+                &harnesses,
+                repo_config.timeout_seconds,
+            )
+            .await?;
+            selected = select_tests(&active, repo_config, self.config.gate.max_scan as usize)?;
+            if selected.iter().any(|test| test.skip.is_none()) {
+                inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
+                let targets = selected_test_targets(&package, &selected);
+                let rebuilt = builder::build_test_targets_with(
+                    &self.execution,
+                    dest,
+                    &package.name,
+                    repo_config,
+                    &targets,
+                )
+                .await?;
+                harnesses.retain(|h| !rebuilt.iter().any(|r| r.logical_name == h.logical_name));
+                harnesses.extend(rebuilt);
+            }
             linked = link_harnesses(
                 &self.execution,
                 dest,
+                &package,
                 &selected,
                 &harnesses,
                 repo_config.timeout_seconds,
@@ -304,7 +358,9 @@ where
             }
         }
         for harness in &linked {
-            check_elf(dest, &harness.executable)?;
+            if harness.discovered.skip.is_none() {
+                check_elf(dest, &harness.executable)?;
+            }
         }
         let mut sources = source_files(&selected);
         sources.extend(benches.score.iter().map(|target| target.src_path.clone()));
@@ -326,6 +382,7 @@ where
         let mut scored = Vec::new();
         let mut eligible = 0u32;
         for (name, reason) in &built.bench_skips {
+            let reason = crate::skip::explain("skipped_env", Some(reason));
             self.db
                 .insert_baseline(
                     run_id,
@@ -336,7 +393,7 @@ where
                     None,
                     None,
                     None,
-                    Some(reason),
+                    reason.as_deref(),
                 )
                 .await?;
         }
@@ -353,6 +410,11 @@ where
             if scan_capped || (test.bench.is_some() && !self.proceed(opts)) {
                 continue;
             }
+            self.phase(
+                "measuring",
+                &format!("{} :: {}", test.logical, test.score_name),
+            )
+            .await;
             let pair = self.measure_pair(dest, repo_config, test).await?;
             match pair {
                 Pair::Fail(reason) => {
@@ -421,8 +483,9 @@ where
         dest: &Path,
         repo_config: &RepoConfig,
         measured: &[ScoredTest],
+        retry: bool,
     ) -> Result<(Vec<Pick>, bool)> {
-        let spans = collect_spans(dest);
+        let spans = collect_spans(dest).await?;
         let mut best: HashMap<(String, String), Pick> = HashMap::new();
         let mut mapped_function = false;
         let trace = std::env::var_os("NOCTUM_PROFILE_TRACE").is_some();
@@ -467,16 +530,18 @@ where
             mapped_function |= ranked.mapped_function;
             for hot in ranked.functions {
                 let blob = worktree::file_blob(dest, &hot.file).await?;
-                if self
-                    .db
-                    .trial_exists(
-                        repository_id,
-                        &test.identity.discovered.fn_path,
-                        &hot.name,
-                        &blob,
-                        self.execution.target().triple(),
-                    )
-                    .await?
+                if !retry
+                    && self
+                        .db
+                        .trial_exists(
+                            repository_id,
+                            &test.identity.discovered.fn_path,
+                            &hot.name,
+                            &blob,
+                            self.execution.target().triple(),
+                            &self.measurement_profile().await?,
+                        )
+                        .await?
                 {
                     continue;
                 }
@@ -559,7 +624,11 @@ where
         picks: &[Pick],
     ) -> Result<()> {
         for (index, pick) in picks.iter().enumerate() {
-            if !self.proceed(opts) {
+            if !self.proceed(opts)
+                || opts
+                    .max_attempts
+                    .is_some_and(|max| self.attempts.load(Ordering::SeqCst) >= max)
+            {
                 break;
             }
             let still_eligible = measured
@@ -576,16 +645,18 @@ where
                 if !function_remains(dest, &pick.hot.file, &pick.hot.name) {
                     continue;
                 }
-                if self
-                    .db
-                    .trial_exists(
-                        repo.id,
-                        &pick.test_name,
-                        &pick.hot.name,
-                        &blob_now,
-                        self.execution.target().triple(),
-                    )
-                    .await?
+                if !opts.retry
+                    && self
+                        .db
+                        .trial_exists(
+                            repo.id,
+                            &pick.test_name,
+                            &pick.hot.name,
+                            &blob_now,
+                            self.execution.target().triple(),
+                            &self.measurement_profile().await?,
+                        )
+                        .await?
                 {
                     continue;
                 }
@@ -729,6 +800,7 @@ where
             host_ok: true,
             stdout_matches: comparable_stdout(&measurement.stdout)
                 == comparable_stdout(&test.baseline.stdout),
+            stderr_matches: measurement.stderr == test.baseline.stderr,
             diff_ok: true,
             min_improvement_ratio: self.config.gate.min_improvement_ratio,
             min_insn_delta: self.config.gate.min_insn_delta,
@@ -781,6 +853,25 @@ where
         if !self.proceed(opts) {
             return Ok(Proposal::Stop);
         }
+        if self
+            .attempts
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
+                if opts.max_attempts.is_some_and(|max| used >= max) {
+                    None
+                } else {
+                    used.checked_add(1)
+                }
+            })
+            .is_err()
+        {
+            tracing::info!("model request limit reached");
+            return Ok(Proposal::Stop);
+        }
+        tracing::info!(
+            attempt = self.attempts.load(Ordering::SeqCst),
+            repair = repair_diff.is_some(),
+            "request model change"
+        );
         let hot = refreshed_hot(dest, &pick.hot);
         let test_source = function_source(dest, &test.identity.discovered);
         let callees = callee_sources(dest, &hot);
@@ -796,6 +887,7 @@ where
             self.execution.target().triple(),
         );
         let cancel = Arc::new(AtomicBool::new(false));
+        self.execution.suspend_for_inference().await?;
         let watcher = spawn_cancel(
             cancel.clone(),
             opts.stop.clone(),
@@ -805,7 +897,10 @@ where
         let result = self.inferencer.complete(&messages, &cancel).await;
         watcher.abort();
         match result {
-            Ok(completion) => Ok(Proposal::Ready(completion)),
+            Ok(mut completion) => {
+                completion.diff = diffcheck::add_missing_file_headers(&completion.diff);
+                Ok(Proposal::Ready(completion))
+            }
             Err(err) if cancel.load(Ordering::SeqCst) => {
                 tracing::info!("inference cancelled: {err}");
                 Ok(Proposal::Stop)
@@ -840,7 +935,7 @@ where
             &completion.diff,
             &files,
             test_file.as_deref(),
-            &test.identity.discovered.fn_path,
+            &test.identity.discovered.file_fn_path,
             &repo_config.protected_paths,
         )?;
         worktree::apply_check(dest, &completion.diff)
@@ -870,6 +965,8 @@ where
             return Ok(HostRound::Stop);
         }
         let tail = hashutil::last_lines(&first.output, 80);
+        tracing::warn!(output = %tail, "test suite check failed");
+        self.reset(dest, base, repo_config).await?;
         self.phase("inferring", "repair").await;
         let repair = match self
             .propose(dest, test, pick, Some(&completion.diff), Some(&tail), opts)
@@ -878,6 +975,22 @@ where
             Proposal::Ready(repair) => repair,
             Proposal::Stop => {
                 self.reset(dest, base, repo_config).await?;
+                if opts
+                    .max_attempts
+                    .is_some_and(|max| self.attempts.load(Ordering::SeqCst) >= max)
+                    && self.proceed(opts)
+                {
+                    self.reject(
+                        pick,
+                        "host check failed; model request limit reached",
+                        Some(completion),
+                        false,
+                        false,
+                        None,
+                        test,
+                    )
+                    .await?;
+                }
                 return Ok(HostRound::Stop);
             }
             Proposal::Failed => {
@@ -925,6 +1038,7 @@ where
         repo_config: &RepoConfig,
         test: &ScoredTest,
     ) -> Result<CheckOutput> {
+        self.phase("checking", &test.identity.score_name).await;
         let package = pick_package(&self.execution, dest, repo_config).await?;
         let check = self.host.run(dest, repo_config, &package).await?;
         if !check.success {
@@ -975,11 +1089,18 @@ where
         }
         let selected = vec![test.identity.discovered.clone()];
         inject_selected(dest, &package.manifest, &fence_dir, &selected)?;
-        let harnesses =
-            builder::build_tests_with(&self.execution, dest, &package.name, repo_config).await?;
+        let harnesses = builder::build_test_targets_with(
+            &self.execution,
+            dest,
+            &package.name,
+            repo_config,
+            &selected_test_targets(&package, &selected),
+        )
+        .await?;
         let mut linked = link_harnesses(
             &self.execution,
             dest,
+            &package,
             &selected,
             &harnesses,
             repo_config.timeout_seconds,
@@ -1016,12 +1137,18 @@ where
             Vec::new()
         } else {
             inject_selected(dest, &package.manifest, &fence_dir, &tests)?;
-            let harnesses =
-                builder::build_tests_with(&self.execution, dest, &package.name, repo_config)
-                    .await?;
+            let harnesses = builder::build_test_targets_with(
+                &self.execution,
+                dest,
+                &package.name,
+                repo_config,
+                &selected_test_targets(&package, &tests),
+            )
+            .await?;
             link_harnesses(
                 &self.execution,
                 dest,
+                &package,
                 &tests,
                 &harnesses,
                 repo_config.timeout_seconds,
@@ -1229,6 +1356,15 @@ where
         if first.matches(&second) {
             Ok(Pair::Match(first))
         } else {
+            let application_count = |m: &Measurement| {
+                m.dump
+                    .blocks
+                    .iter()
+                    .filter(|(pc, _)| *pc >= m.map_start && *pc < m.map_end)
+                    .map(|(_, count)| count)
+                    .sum::<u64>()
+            };
+            tracing::warn!(test = %test.score_name, first_count = first.total, second_count = second.total, first_application_count = application_count(&first), second_application_count = application_count(&second), output_matched = comparable_stdout(&first.stdout) == comparable_stdout(&second.stdout), "measurement runs disagreed");
             Ok(Pair::Mismatch)
         }
     }
@@ -1250,6 +1386,7 @@ where
             .measurer
             .measure(&MeasureRequest {
                 worktree: dest.to_path_buf(),
+                working_directory: Some(test.working_directory.clone()),
                 harness: test.executable.clone(),
                 guest_exe: guest_exe(dest, &test.executable),
                 args: test.guest_args.clone(),
@@ -1257,8 +1394,18 @@ where
                 scratch: scratch.clone(),
                 memory_mb: self.config.guest.memory_mb,
             })
-            .await?;
+            .await;
         let _ = std::fs::remove_dir_all(&scratch);
+        let measurement = measurement?;
+        if !scored_ok(&measurement) {
+            let output = format!(
+                "{}\n{}\n{}",
+                String::from_utf8_lossy(&measurement.stdout),
+                String::from_utf8_lossy(&measurement.stderr),
+                measurement.serial_log
+            );
+            tracing::warn!(test = %test.score_name, output = %hashutil::tail_str(&output, LOG_LIMIT), "guest measurement failed");
+        }
         Ok(measurement)
     }
 
@@ -1317,6 +1464,7 @@ where
         wall_ms: Option<i64>,
     ) -> Result<()> {
         let binary = sha256_file(&test.executable).ok();
+        let reason = crate::skip::explain(status, reason);
         self.db
             .insert_baseline(
                 run_id,
@@ -1327,7 +1475,7 @@ where
                 stdout_sha256,
                 binary.as_deref(),
                 wall_ms,
-                reason,
+                reason.as_deref(),
             )
             .await
     }
@@ -1368,6 +1516,9 @@ where
         self.db
             .set_run_target(id, self.execution.target().triple())
             .await?;
+        self.db
+            .set_run_profile(id, &self.measurement_profile().await?)
+            .await?;
         self.db.finish_run(id, status, Some(error), perf).await?;
         Ok(())
     }
@@ -1380,7 +1531,18 @@ where
             return Ok(false);
         };
         self.db
-            .repo_finished_window(repo.id, &key, self.execution.target().triple())
+            .repo_finished_window(
+                repo.id,
+                &key,
+                self.execution.target().triple(),
+                &self.measurement_profile().await?,
+            )
+            .await
+    }
+
+    async fn measurement_profile(&self) -> Result<String> {
+        self.execution
+            .measurement_profile(&self.config.data_dir(), self.config.guest.memory_mb)
             .await
     }
 
@@ -1464,6 +1626,7 @@ struct LinkedTest {
     discovered: DiscoveredTest,
     logical: String,
     executable: PathBuf,
+    working_directory: PathBuf,
     /// Libtest path, or the cargo target name of a harness=false bench.
     score_name: String,
     guest_args: Vec<String>,
@@ -1485,6 +1648,7 @@ struct Pick {
     candidate_id: i64,
 }
 
+#[derive(Clone)]
 struct Found {
     discovered: DiscoveredTest,
     logical: String,
@@ -1506,12 +1670,16 @@ pub fn bench_reason(harness: bool, src: &str, uses_criterion: bool) -> Option<&'
 fn gather_tests(package: &ResolvedPackage, repo_config: &RepoConfig) -> Vec<Found> {
     let mut found = Vec::new();
     for target in &package.targets {
-        if !matches!(target.kind.as_str(), "lib" | "bin" | "test") {
+        if !matches!(target.kind.as_str(), "lib" | "bin" | "test")
+            || !target.harness
+            || !target.test_enabled
+        {
             continue;
         }
         let logical =
             selector::logical_harness(&package.workspace_root, &target.src_path, &target.kind);
         for mut test in selector::discover_harness(&target.src_path) {
+            test.harness = Some(logical.clone());
             if selector::glob_skipped(&test.fn_path, &repo_config.skip_tests)
                 || selector::glob_skipped(&short_name(&test.fn_path), &repo_config.skip_tests)
             {
@@ -1524,6 +1692,115 @@ fn gather_tests(package: &ResolvedPackage, repo_config: &RepoConfig) -> Vec<Foun
         }
     }
     found
+}
+
+fn selected_test_targets(
+    package: &ResolvedPackage,
+    selected: &[DiscoveredTest],
+) -> Vec<CargoTarget> {
+    package
+        .targets
+        .iter()
+        .filter(|target| {
+            let logical =
+                selector::logical_harness(&package.workspace_root, &target.src_path, &target.kind);
+            target.harness
+                && target.test_enabled
+                && selected
+                    .iter()
+                    .any(|test| test.skip.is_none() && test.harness.as_deref() == Some(&logical))
+        })
+        .cloned()
+        .collect()
+}
+
+fn requested_test_targets(
+    package: &ResolvedPackage,
+    found: &[Found],
+    config: &RepoConfig,
+) -> Option<Vec<CargoTarget>> {
+    if config.tests.is_empty() {
+        return None;
+    }
+    let mut logicals = Vec::new();
+    for raw in &config.tests {
+        let id = selector::parse_test_id(raw);
+        if let Some(harness) = id.harness {
+            logicals.push(harness);
+        } else {
+            let matched: Vec<_> = found
+                .iter()
+                .filter(|f| name_matches(&f.discovered.fn_path, &id.name))
+                .collect();
+            if matched.is_empty() {
+                return None;
+            }
+            logicals.extend(matched.iter().map(|f| f.logical.clone()));
+        }
+    }
+    Some(
+        package
+            .targets
+            .iter()
+            .filter(|target| {
+                target.harness
+                    && target.test_enabled
+                    && logicals.contains(&selector::logical_harness(
+                        &package.workspace_root,
+                        &target.src_path,
+                        &target.kind,
+                    ))
+            })
+            .cloned()
+            .collect(),
+    )
+}
+
+async fn active_tests(
+    execution: &crate::runtime::Execution,
+    found: &[Found],
+    harnesses: &[BuiltHarness],
+    timeout: u64,
+) -> Result<Vec<Found>> {
+    let mut active = Vec::new();
+    for harness in harnesses {
+        for listed in builder::list_tests_with(execution, &harness.executable, timeout).await? {
+            if listed.kind != "test" {
+                continue;
+            }
+            let matches: Vec<_> = found
+                .iter()
+                .filter(|f| {
+                    f.logical == harness.logical_name && f.discovered.fn_path == listed.name
+                })
+                .collect();
+            if let [item] = matches.as_slice() {
+                active.push((*item).clone());
+                continue;
+            }
+            let reason = if matches.is_empty() {
+                "generated test has no directly editable source function; add a plain #[test] wrapper for the workload"
+            } else {
+                "active test has multiple conditional source definitions; add a plain #[test] wrapper with a unique name"
+            };
+            active.push(Found {
+                logical: harness.logical_name.clone(),
+                discovered: DiscoveredTest {
+                    name: listed.name.clone(),
+                    fn_path: listed.name.clone(),
+                    file_fn_path: listed.name,
+                    file: harness.src_path.clone(),
+                    harness: Some(harness.logical_name.clone()),
+                    body: String::new(),
+                    body_bytes: 0,
+                    source: String::new(),
+                    skip: Some(reason.into()),
+                },
+            });
+        }
+    }
+    tracing::info!(tests = active.len(), "read active test inventory");
+    Ok(active)
 }
 
 fn select_tests(
@@ -1548,11 +1825,24 @@ fn select_tests(
             })
             .collect();
         if matches.is_empty() {
-            bail!("test {raw} was not found");
+            let names = found
+                .iter()
+                .take(10)
+                .map(|f| format!("{}::{}", f.logical, f.discovered.fn_path))
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!("test {raw} is not active for the selected target and features; available tests include: {names}");
         }
-        if matches.len() > 1 && id.harness.is_none() {
+        if matches.len() > 1 {
             let mut test = matches[0].discovered.clone();
-            test.skip = Some(format!("test {raw} is ambiguous; use tests/file.rs::{raw}"));
+            let choices = matches
+                .iter()
+                .map(|item| format!("{}::{}", item.logical, item.discovered.fn_path))
+                .collect::<Vec<_>>()
+                .join(", ");
+            test.skip = Some(format!(
+                "test {raw} is ambiguous; select one full test name: {choices}"
+            ));
             selected.push(test);
             continue;
         }
@@ -1585,11 +1875,14 @@ fn inject_selected(
         by_file
             .entry(test.file.clone())
             .or_default()
-            .push(test.fn_path.clone());
+            .push(test.file_fn_path.clone());
     }
-    for (file, names) in by_file {
+    for (file, mut names) in by_file {
+        names.sort();
+        names.dedup();
         let src = std::fs::read_to_string(&file)?;
-        let next = fence::inject_guards(&src, &names)?;
+        let next = fence::inject_guards(&src, &names)
+            .with_context(|| format!("insert fences in {}", file.display()))?;
         std::fs::write(file, next)?;
     }
     let _ = dest;
@@ -1599,12 +1892,17 @@ fn inject_selected(
 async fn link_harnesses(
     execution: &crate::runtime::Execution,
     dest: &Path,
+    package: &ResolvedPackage,
     selected: &[DiscoveredTest],
     harnesses: &[BuiltHarness],
     timeout: u64,
 ) -> Result<Vec<LinkedTest>> {
     let mut listed = Vec::new();
+    let mut source_paths = HashMap::new();
     for harness in harnesses {
+        for test in selector::discover_harness(&harness.src_path) {
+            source_paths.insert((harness.logical_name.clone(), test.fn_path), test.file);
+        }
         let tests = builder::list_tests_with(execution, &harness.executable, timeout).await?;
         for test in tests {
             listed.push((harness.clone(), test));
@@ -1615,33 +1913,45 @@ async fn link_harnesses(
         if test.skip.is_some() {
             let executable = harnesses
                 .iter()
-                .find(|harness| same_file(&harness.src_path, &test.file))
+                .find(|harness| test.harness.as_deref() == Some(&harness.logical_name))
                 .map(|harness| harness.executable.clone())
                 .unwrap_or_else(|| dest.join("target").join("missing"));
             linked.push(linked_test(
                 test.clone(),
-                listed
-                    .iter()
-                    .find(|(harness, _)| same_file(&harness.src_path, &test.file))
-                    .map(|(harness, _)| harness.logical_name.clone())
-                    .unwrap_or_else(|| "unknown".into()),
+                test.harness.clone().unwrap_or_else(|| "unknown".into()),
                 executable,
+                package.manifest_dir.clone(),
             ));
             continue;
         }
-        let Some((harness, _)) = listed.iter().find(|(_, item)| item.name == test.fn_path) else {
+        let Some((harness, _)) = listed.iter().find(|(harness, item)| {
+            item.name == test.fn_path
+                && test
+                    .harness
+                    .as_ref()
+                    .is_none_or(|name| name == &harness.logical_name)
+                && source_paths
+                    .get(&(harness.logical_name.clone(), test.fn_path.clone()))
+                    .is_some_and(|file| same_file(file, &test.file))
+        }) else {
             bail!("built harness did not list {}", test.fn_path);
         };
         linked.push(linked_test(
             test.clone(),
             harness.logical_name.clone(),
             harness.executable.clone(),
+            package.manifest_dir.clone(),
         ));
     }
     Ok(linked)
 }
 
-fn linked_test(discovered: DiscoveredTest, logical: String, executable: PathBuf) -> LinkedTest {
+fn linked_test(
+    discovered: DiscoveredTest,
+    logical: String,
+    executable: PathBuf,
+    working_directory: PathBuf,
+) -> LinkedTest {
     let guest_args = vec![
         discovered.fn_path.clone(),
         "--exact".into(),
@@ -1654,6 +1964,7 @@ fn linked_test(discovered: DiscoveredTest, logical: String, executable: PathBuf)
         discovered,
         logical,
         executable,
+        working_directory,
     }
 }
 
@@ -1679,6 +1990,8 @@ fn linked_bench(
             name: target.name.clone(),
             file: target.src_path.clone(),
             fn_path: "main".into(),
+            file_fn_path: "main".into(),
+            harness: Some(logical.clone()),
             body: source.clone(),
             body_bytes: source.len(),
             source,
@@ -1686,6 +1999,7 @@ fn linked_bench(
         },
         logical,
         executable,
+        working_directory: package.manifest_dir.clone(),
         score_name: target.name.clone(),
         guest_args: Vec::new(),
         bench: Some(target.name.clone()),
@@ -1770,30 +2084,40 @@ fn locate_dump(elf: &[u8], measurement: &Measurement) -> Result<HashMap<u64, Lin
     Ok(map)
 }
 
-fn collect_spans(worktree: &Path) -> HashMap<String, Vec<FnSpan>> {
+async fn collect_spans(worktree: &Path) -> Result<HashMap<String, Vec<FnSpan>>> {
     let mut map = HashMap::new();
-    for root in ["src", "tests", "benches"] {
-        walk_rs(&worktree.join(root), worktree, &mut map);
+    let files = crate::process::run(
+        worktree,
+        "git",
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--exclude=/target/",
+            "--",
+            "*.rs",
+        ],
+        &[],
+        std::time::Duration::from_secs(30),
+    )
+    .await;
+    if !files.success {
+        bail!("cannot list Rust source files: {}", files.combined());
     }
-    map
-}
-
-fn walk_rs(dir: &Path, worktree: &Path, map: &mut HashMap<String, Vec<FnSpan>>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk_rs(&path, worktree, map);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-            let text = std::fs::read_to_string(&path).unwrap_or_default();
-            if let Ok(rel) = path.strip_prefix(worktree) {
-                let key = rel.to_string_lossy().replace('\\', "/");
-                map.insert(key, selector::function_spans(&text));
-            }
+    for name in files.stdout.split('\0').filter(|name| !name.is_empty()) {
+        if name
+            .split('/')
+            .any(|part| part == "target" || part == ".git" || part == "..")
+        {
+            continue;
         }
+        let text = std::fs::read_to_string(worktree.join(name))
+            .with_context(|| format!("read Rust source {name}"))?;
+        map.insert(name.replace('\\', "/"), selector::function_spans(&text));
     }
+    Ok(map)
 }
 
 fn refreshed_hot(dest: &Path, hot: &HotFunction) -> HotFunction {
@@ -1815,7 +2139,7 @@ fn function_source(dest: &Path, test: &DiscoveredTest) -> String {
         .unwrap_or_else(|_| std::fs::read_to_string(dest.join(&test.file)).unwrap_or_default());
     selector::function_spans(&text)
         .into_iter()
-        .find(|span| span.path == test.fn_path)
+        .find(|span| span.path == test.file_fn_path)
         .map(|span| span.source)
         .unwrap_or_else(|| test.source.clone())
 }
@@ -1925,1130 +2249,41 @@ fn unique_scratch() -> String {
     )
 }
 
-impl Default for CargoHost {
-    fn default() -> Self {
-        Self
-    }
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use std::sync::atomic::AtomicUsize;
-
-    use super::*;
-    use object::{Object, ObjectSymbol};
-
-    #[test]
-    fn adaptive_benches_are_named() {
-        assert_eq!(
-            bench_reason(true, "fn bench() {}", false),
-            Some("adaptive bench")
-        );
-        assert_eq!(
-            bench_reason(false, "use criterion::Criterion;\nfn main() {}", false),
-            Some("adaptive bench")
-        );
-        assert_eq!(bench_reason(false, "fn main() { loop {} }", false), None);
-    }
-
-    #[test]
-    fn short_libtest_names_match_the_module_path() {
-        assert!(name_matches("tests::encode_batch", "encode_batch"));
-        assert!(name_matches("tests::encode_batch", "tests::encode_batch"));
-        assert!(!name_matches("tests::encode_batch", "encode"));
-    }
-
-    fn source(body: &str) -> String {
-        format!(
-            r#"
-#[inline(never)]
-pub fn encode(input: &[u8]) -> Vec<u8> {{
-    {body}
-}}
+#[cfg(test)]
+mod repair_tests;
 
 #[cfg(test)]
-mod tests {{
+mod source_path_tests {
     use super::*;
 
-    #[test]
-    fn tiny_assert() {{
-        assert_eq!(encode(b"a").len(), 1);
-    }}
-
-    #[test]
-    fn encode_batch() {{
-        let mut n = 0usize;
-        for _ in 0..10_000 {{
-            n += encode(b"abcd").len();
-        }}
-        assert_eq!(n, 40_000);
-    }}
-
-    #[test]
-    fn opens_socket() {{
-        let _ = std::net::TcpStream::connect("127.0.0.1:9");
-    }}
-}}
-"#
-        )
-    }
-
-    fn slow_source() -> String {
-        source(
-            "let mut out = Vec::with_capacity(input.len());\n    \
-             for &byte in input { out.push(byte.wrapping_add(1)); }\n    \
-             out",
-        )
-    }
-
-    fn git(dir: &Path, args: &[&str]) -> String {
-        let output = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?} {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).to_string()
-    }
-
-    fn init_fixture() -> tempfile::TempDir {
-        init_with(&slow_source())
-    }
-
-    fn init_with(lib_src: &str) -> tempfile::TempDir {
+    #[tokio::test]
+    async fn source_spans_include_workspace_and_custom_target_paths() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path();
-        std::fs::create_dir(path.join("src")).unwrap();
-        std::fs::write(path.join(".gitignore"), "/target\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("members/parser/code")).unwrap();
+        std::fs::create_dir_all(dir.path().join("target")).unwrap();
         std::fs::write(
-            path.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            dir.path().join("members/parser/code/entry.rs"),
+            "fn parse() {}\n",
         )
         .unwrap();
         std::fs::write(
-            path.join("noctum.toml"),
-            "package = \"fixture\"\ntimeout_seconds = 180\n",
+            dir.path().join("target/generated.rs"),
+            "fn generated() {}\n",
         )
         .unwrap();
-        std::fs::write(path.join("src/lib.rs"), lib_src).unwrap();
-        git(path, &["init"]);
-        git(path, &["config", "user.email", "test@example.com"]);
-        git(path, &["config", "user.name", "Test"]);
-        let lock = std::process::Command::new("cargo")
-            .args(["generate-lockfile"])
-            .current_dir(path)
-            .status()
-            .unwrap();
-        assert!(lock.success(), "cargo generate-lockfile");
-        git(path, &["add", "."]);
-        git(path, &["commit", "-m", "init"]);
-        dir
-    }
-
-    fn diff_to(dir: &Path, next: &str) -> String {
-        std::fs::write(dir.join("src/lib.rs"), next).unwrap();
-        let diff = git(dir, &["diff", "--", "src/lib.rs"]);
-        git(dir, &["checkout", "--", "src/lib.rs"]);
-        diff
-    }
-
-    struct Scripted;
-
-    impl Measurer for Scripted {
-        async fn measure(
-            &self,
-            req: &crate::ports::MeasureRequest,
-        ) -> Result<crate::ports::Measurement> {
-            let source =
-                std::fs::read_to_string(req.worktree.join("src/lib.rs")).unwrap_or_default();
-            let total = if source.contains("NOCTUM_SLOW") {
-                400_000
-            } else if source.contains("to_vec") {
-                80_000
-            } else {
-                200_000
-            };
-            let bytes = std::fs::read(&req.harness)?;
-            let addr = encode_pc(&bytes);
-            Ok(crate::ports::Measurement {
-                total,
-                stdout: b"test tests::encode_batch ... ok\n".to_vec(),
-                stderr: Vec::new(),
-                exit_code: 0,
-                wall_ms: 4,
-                dump: crate::profile::ProfileDump {
-                    total,
-                    blocks: vec![(addr, total * 9 / 10)],
-                    error: None,
-                },
-                map_start: 0,
-                map_end: u64::MAX,
-                load_bias: 0,
-                serial_log: String::new(),
-            })
-        }
-    }
-
-    fn encode_pc(bytes: &[u8]) -> u64 {
-        let file = object::File::parse(bytes).unwrap();
-        let mut fallback = 0u64;
-        for symbol in file.symbols() {
-            let Ok(name) = symbol.name() else { continue };
-            if symbol.address() == 0 {
-                continue;
-            }
-            let demangled = rustc_demangle::demangle(name).to_string();
-            if demangled.ends_with("::encode") {
-                return symbol.address();
-            }
-            if demangled.contains("encode") {
-                fallback = symbol.address();
-            }
-        }
-        fallback
-    }
-
-    struct Fixed {
-        diff: String,
-    }
-
-    impl Inferencer for Fixed {
-        async fn complete(
-            &self,
-            _messages: &[crate::ports::ChatMessage],
-            _cancel: &AtomicBool,
-        ) -> Result<crate::ports::Completion> {
-            Ok(crate::ports::Completion {
-                summary: "shorter encode".into(),
-                diff: self.diff.clone(),
-            })
-        }
-    }
-
-    async fn run_fixture(
-        diff: String,
-    ) -> (tempfile::TempDir, tempfile::TempDir, Database, i64, String) {
-        let repo = init_fixture();
-        let head = git(repo.path(), &["rev-parse", "HEAD"]);
-        let data = tempfile::tempdir().unwrap();
-        let config = crate::config::Config {
-            data_dir: Some(data.path().to_path_buf()),
-            gate: crate::config::GateConfig {
-                max_candidates: 1,
-                max_tests: 1,
-                ..crate::config::GateConfig::default()
-            },
-            ..crate::config::Config::default()
-        };
-        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
-        db.run_migrations().await.unwrap();
-        let id = db
-            .add_repository(&repo.path().display().to_string(), "fixture")
-            .await
-            .unwrap();
-        let night = Night::new(
-            db.clone(),
-            config,
-            Scripted,
-            Fixed { diff },
-            crate::builder::CargoHost,
-        );
-        let row = db.get_repository(id).await.unwrap().unwrap();
-        night
-            .run_repository(
-                &row,
-                &RunOptions {
-                    ignore_window: true,
-                    stop: Arc::new(AtomicBool::new(false)),
-                    asset_error: None,
-                    only_repo: None,
-                },
+        assert!(
+            crate::process::run(
+                dir.path(),
+                "git",
+                &["init", "-q"],
+                &[],
+                Duration::from_secs(10)
             )
             .await
-            .unwrap();
-        (repo, data, db, id, head)
-    }
-
-    #[tokio::test]
-    async fn canned_diff_commits_on_perf_and_leaves_the_clone() {
-        let fast = source("input.to_vec()");
-        let repo_for_diff = init_fixture();
-        let diff = diff_to(repo_for_diff.path(), &fast);
-        assert!(diff.contains("to_vec"), "{diff}");
-        let (repo, _data, db, id, head) = run_fixture(diff).await;
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let baselines = db.baselines_for_run(run.id).await.unwrap();
-        assert!(
-            baselines
-                .iter()
-                .any(|row| row.test_name.contains("opens_socket") && row.status == "skipped_env"),
-            "{baselines:?}"
+            .success
         );
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
-        assert!(
-            trials[0].symbol.contains("encode"),
-            "{:?}",
-            trials[0].symbol
-        );
-        let porcelain = git(repo.path(), &["status", "--porcelain"]);
-        assert!(porcelain.trim().is_empty(), "{porcelain}");
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
-        assert!(committed.contains("to_vec"), "{committed}");
-        assert!(!committed.contains("_noctum_guard"), "{committed}");
-        let manifest = git(repo.path(), &["show", "noctum/perf:Cargo.toml"]);
-        assert!(!manifest.contains("noctum-fence"), "{manifest}");
-    }
-
-    #[tokio::test]
-    async fn a_diff_that_drops_an_assertion_is_rejected_before_another_measurement() {
-        let repo_for_diff = init_fixture();
-        let broken = slow_source().replace("assert_eq!(n, 40_000);", "let _ = n;");
-        let diff = diff_to(repo_for_diff.path(), &broken);
-        let (repo, _data, db, id, head) = run_fixture(diff).await;
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].status, "rejected");
-        let reason = trials[0].reason.clone().unwrap_or_default();
-        assert!(
-            reason.contains("assert") || reason == "diff rejected",
-            "{reason}"
-        );
-        let perf = std::process::Command::new("git")
-            .args(["rev-parse", "--verify", "--quiet", "refs/heads/noctum/perf"])
-            .current_dir(repo.path())
-            .status()
-            .unwrap();
-        assert!(!perf.success(), "rejected diff was committed");
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        assert!(git(repo.path(), &["status", "--porcelain"])
-            .trim()
-            .is_empty());
-    }
-
-    fn no_perf(repo: &Path) {
-        let perf = std::process::Command::new("git")
-            .args(["rev-parse", "--verify", "--quiet", "refs/heads/noctum/perf"])
-            .current_dir(repo)
-            .status()
-            .unwrap();
-        assert!(!perf.success(), "a rejected diff was committed");
-    }
-
-    #[tokio::test]
-    async fn a_diff_that_breaks_another_assertion_is_rejected_by_the_host_suite() {
-        let repo_for_diff = init_fixture();
-        let broken = source("let _ = input;\n    Vec::new()");
-        let diff = diff_to(repo_for_diff.path(), &broken);
-        let (repo, _data, db, id, head) = run_fixture(diff).await;
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].status, "rejected");
-        assert_eq!(trials[0].reason.as_deref(), Some("host check failed"));
-        no_perf(repo.path());
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-    }
-
-    struct Sequenced {
-        diffs: Vec<String>,
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl Inferencer for Sequenced {
-        async fn complete(
-            &self,
-            _messages: &[crate::ports::ChatMessage],
-            _cancel: &AtomicBool,
-        ) -> Result<crate::ports::Completion> {
-            let index = self.calls.fetch_add(1, Ordering::SeqCst);
-            let diff = self
-                .diffs
-                .get(index)
-                .cloned()
-                .unwrap_or_else(|| self.diffs.last().cloned().unwrap_or_default());
-            Ok(crate::ports::Completion {
-                summary: format!("sample {}", index + 1),
-                diff,
-            })
-        }
-    }
-
-    /// The first sample fails the host suite, so the one allowed repair is drawn.
-    /// That repair lowers a fixed `for` bound. The rejection ends the candidate:
-    /// the third sample, which would clear the existing gate, is never requested.
-    #[tokio::test]
-    async fn a_lowered_for_bound_is_rejected_without_another_sample() {
-        let host_repo = init_fixture();
-        let host_fail = diff_to(host_repo.path(), &source("let _ = input;\n    Vec::new()"));
-        let bound_repo = init_fixture();
-        let lowered = slow_source().replace("0..10_000", "0..10");
-        let bound = diff_to(bound_repo.path(), &lowered);
-        assert!(
-            bound
-                .lines()
-                .any(|line| line.starts_with('+') && line.contains("0..10 {")),
-            "{bound}"
-        );
-        let keep_repo = init_fixture();
-        let keep = diff_to(keep_repo.path(), &source("input.to_vec()"));
-        assert!(keep.contains("to_vec"), "{keep}");
-
-        let calls = Arc::new(AtomicUsize::new(0));
-        let repo = init_fixture();
-        let head = git(repo.path(), &["rev-parse", "HEAD"]);
-        let data = tempfile::tempdir().unwrap();
-        let config = crate::config::Config {
-            data_dir: Some(data.path().to_path_buf()),
-            gate: crate::config::GateConfig {
-                max_candidates: 1,
-                max_tests: 1,
-                min_improvement_ratio: 0.01,
-                min_insn_delta: 10_000,
-                ..crate::config::GateConfig::default()
-            },
-            ..crate::config::Config::default()
-        };
-        assert_eq!(config.gate.min_improvement_ratio, 0.01);
-        assert_eq!(config.gate.min_insn_delta, 10_000);
-        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
-        db.run_migrations().await.unwrap();
-        let id = db
-            .add_repository(&repo.path().display().to_string(), "fixture")
-            .await
-            .unwrap();
-        let night = Night::new(
-            db.clone(),
-            config,
-            Scripted,
-            Sequenced {
-                diffs: vec![host_fail, bound, keep],
-                calls: calls.clone(),
-            },
-            crate::builder::CargoHost,
-        );
-        let row = db.get_repository(id).await.unwrap().unwrap();
-        night
-            .run_repository(
-                &row,
-                &RunOptions {
-                    ignore_window: true,
-                    stop: Arc::new(AtomicBool::new(false)),
-                    asset_error: None,
-                    only_repo: None,
-                },
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            2,
-            "host failure draws one repair; a lowered for-bound draws no further sample"
-        );
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].status, "rejected");
-        let reason = trials[0].reason.clone().unwrap_or_default();
-        assert!(reason.contains("lowers a fixed loop bound"), "{reason}");
-        let diff = trials[0].unified_diff.clone().unwrap_or_default();
-        assert!(
-            diff.lines()
-                .any(|line| line.starts_with('+') && line.contains("0..10 {")),
-            "{diff}"
-        );
-        assert!(!diff.contains("to_vec"), "{diff}");
-        assert!(trials[0].insn_count.is_none(), "{trials:?}");
-        no_perf(repo.path());
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        assert!(git(repo.path(), &["status", "--porcelain"])
-            .trim()
-            .is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_slower_diff_is_reset() {
-        let repo_for_diff = init_fixture();
-        let slower = source(
-            "let _marker = \"NOCTUM_SLOW\";\n    \
-             let mut out = Vec::with_capacity(input.len());\n    \
-             for &byte in input { out.push(byte.wrapping_add(1)); }\n    \
-             let _ = _marker;\n    \
-             out",
-        );
-        let diff = diff_to(repo_for_diff.path(), &slower);
-        let (repo, _data, db, id, head) = run_fixture(diff).await;
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].status, "rejected");
-        assert_eq!(trials[0].reason.as_deref(), Some("slower"));
-        no_perf(repo.path());
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        assert!(git(repo.path(), &["status", "--porcelain"])
-            .trim()
-            .is_empty());
-    }
-
-    fn two_hot(body: &str) -> String {
-        format!(
-            r#"
-#[inline(never)]
-pub fn helper(n: u64) -> u64 {{
-    let mut acc = 0u64;
-    let mut i = 0u64;
-    while i < 4 {{
-        acc = acc.wrapping_add(n);
-        i = i.wrapping_add(1);
-    }}
-    acc
-}}
-
-#[used]
-static KEEP_HELPER: fn(u64) -> u64 = helper;
-
-#[inline(never)]
-pub fn encode(input: &[u8]) -> Vec<u8> {{
-    let _ = std::hint::black_box(KEEP_HELPER(input.len() as u64));
-    {body}
-}}
-
-#[cfg(test)]
-mod tests {{
-    use super::*;
-
-    #[test]
-    fn tiny_assert() {{
-        assert_eq!(encode(b"a").len(), 1);
-    }}
-
-    #[test]
-    fn encode_batch() {{
-        let _ = std::hint::black_box(helper(4));
-        let mut n = 0usize;
-        for _ in 0..10_000 {{
-            n += encode(b"abcd").len();
-        }}
-        assert_eq!(n, 40_000);
-    }}
-
-    #[test]
-    fn opens_socket() {{
-        let _ = std::net::TcpStream::connect("127.0.0.1:9");
-    }}
-}}
-"#
-        )
-    }
-
-    fn slow_two() -> String {
-        two_hot(
-            "let mut out = Vec::with_capacity(input.len());\n    \
-             for &byte in input { out.push(byte.wrapping_add(1)); }\n    \
-             out",
-        )
-    }
-
-    fn marked(marker: &str) -> String {
-        two_hot(&format!("let _marker = \"{marker}\";\n    input.to_vec()"))
-    }
-
-    fn diff_between(from: &str, to: &str) -> String {
-        let dir = init_with(from);
-        std::fs::write(dir.path().join("src/lib.rs"), to).unwrap();
-        git(dir.path(), &["diff", "--", "src/lib.rs"])
-    }
-
-    fn two_total(source: &str) -> u64 {
-        if source.contains("COUNT_60") {
-            60_000
-        } else if source.contains("COUNT_150") {
-            150_000
-        } else if source.contains("COUNT_100") {
-            100_000
-        } else if source.contains("NOCTUM_SLOW") {
-            400_000
-        } else if source.contains("to_vec") {
-            80_000
-        } else {
-            200_000
-        }
-    }
-
-    /// A PC whose line is inside `name` in `src/lib.rs`. The symbol address
-    /// itself can land in an inlined callee's line table.
-    fn pc_in_function(bytes: &[u8], name: &str) -> u64 {
-        let file = object::File::parse(bytes).unwrap();
-        let needle = format!("::{name}");
-        for symbol in file.symbols() {
-            let Ok(raw) = symbol.name() else { continue };
-            if symbol.address() == 0 {
-                continue;
-            }
-            let demangled = rustc_demangle::demangle(raw).to_string();
-            if !(demangled.ends_with(&needle) || demangled == name) {
-                continue;
-            }
-            let start = symbol.address();
-            let size = symbol.size().max(1);
-            let step = (size / 8).max(1);
-            let mut probes = Vec::new();
-            let mut off = 0u64;
-            while off < size && probes.len() < 16 {
-                probes.push(start + off);
-                off += step;
-            }
-            let Ok(hits) = crate::profile::symbolize(bytes, &probes) else {
-                continue;
-            };
-            for (addr, hit) in probes.iter().zip(hits) {
-                let Some(hit) = hit else { continue };
-                if !hit.file.ends_with("src/lib.rs") || hit.line == 0 {
-                    continue;
-                }
-                let text = std::fs::read_to_string(&hit.file).unwrap_or_default();
-                let inside = selector::function_spans(&text).iter().any(|span| {
-                    span.path == name
-                        && hit.line as usize >= span.line_start
-                        && hit.line as usize <= span.line_end
-                });
-                if inside {
-                    return *addr;
-                }
-            }
-        }
-        0
-    }
-
-    fn two_measurement(
-        req: &crate::ports::MeasureRequest,
-        total: u64,
-    ) -> Result<crate::ports::Measurement> {
-        let bytes = std::fs::read(&req.harness)?;
-        let encode = pc_in_function(&bytes, "encode");
-        let helper = pc_in_function(&bytes, "helper");
-        assert!(
-            encode != 0 && helper != 0 && encode != helper,
-            "encode={encode:#x} helper={helper:#x}"
-        );
-        let blocks = vec![(encode, total * 6 / 10), (helper, total * 3 / 10)];
-        Ok(crate::ports::Measurement {
-            total,
-            stdout: b"test tests::encode_batch ... ok\n".to_vec(),
-            stderr: Vec::new(),
-            exit_code: 0,
-            wall_ms: 4,
-            dump: crate::profile::ProfileDump {
-                total,
-                blocks,
-                error: None,
-            },
-            map_start: 0,
-            map_end: u64::MAX,
-            load_bias: 0,
-            serial_log: String::new(),
-        })
-    }
-
-    struct TwoHot {
-        calls: Arc<AtomicUsize>,
-        diverge_at: Option<usize>,
-    }
-
-    impl Measurer for TwoHot {
-        async fn measure(
-            &self,
-            req: &crate::ports::MeasureRequest,
-        ) -> Result<crate::ports::Measurement> {
-            let n = self.calls.fetch_add(1, Ordering::SeqCst);
-            let source =
-                std::fs::read_to_string(req.worktree.join("src/lib.rs")).unwrap_or_default();
-            let mut total = two_total(&source);
-            if let Some(at) = self.diverge_at {
-                if n >= at {
-                    total = total.saturating_add((n - at + 1) as u64);
-                }
-            }
-            two_measurement(req, total)
-        }
-    }
-
-    async fn run_two<M, I>(
-        measurer: M,
-        inferencer: I,
-    ) -> (tempfile::TempDir, tempfile::TempDir, Database, i64, String)
-    where
-        M: Measurer,
-        I: Inferencer,
-    {
-        let repo = init_with(&slow_two());
-        let head = git(repo.path(), &["rev-parse", "HEAD"]);
-        let data = tempfile::tempdir().unwrap();
-        let config = crate::config::Config {
-            data_dir: Some(data.path().to_path_buf()),
-            gate: crate::config::GateConfig {
-                max_candidates: 2,
-                max_tests: 1,
-                min_improvement_ratio: 0.01,
-                min_insn_delta: 10_000,
-                ..crate::config::GateConfig::default()
-            },
-            ..crate::config::Config::default()
-        };
-        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
-        db.run_migrations().await.unwrap();
-        let id = db
-            .add_repository(&repo.path().display().to_string(), "fixture")
-            .await
-            .unwrap();
-        let night = Night::new(
-            db.clone(),
-            config,
-            measurer,
-            inferencer,
-            crate::builder::CargoHost,
-        );
-        let row = db.get_repository(id).await.unwrap().unwrap();
-        night
-            .run_repository(
-                &row,
-                &RunOptions {
-                    ignore_window: true,
-                    stop: Arc::new(AtomicBool::new(false)),
-                    asset_error: None,
-                    only_repo: None,
-                },
-            )
-            .await
-            .unwrap();
-        (repo, data, db, id, head)
-    }
-
-    fn assert_two_symbols(symbols: &[String]) {
-        assert!(
-            symbols.iter().any(|symbol| symbol.contains("encode"))
-                && symbols.iter().any(|symbol| symbol.contains("helper")),
-            "{symbols:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_accept_stacks_the_next_function_on_the_new_baseline() {
-        let first = diff_between(&slow_two(), &marked("COUNT_100"));
-        let second = diff_between(&marked("COUNT_100"), &marked("COUNT_60"));
-        assert!(first.contains("COUNT_100"), "{first}");
-        assert!(second.contains("COUNT_60"), "{second}");
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (repo, _data, db, id, head) = run_two(
-            TwoHot {
-                calls: Arc::new(AtomicUsize::new(0)),
-                diverge_at: None,
-            },
-            Sequenced {
-                diffs: vec![first, second],
-                calls: calls.clone(),
-            },
-        )
-        .await;
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let symbols: Vec<_> = db
-            .candidates_for_run(run.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|row| row.symbol)
-            .collect();
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            2,
-            "symbols={symbols:?} trials={trials:?}"
-        );
-        assert_two_symbols(&symbols);
-        assert_eq!(trials.len(), 2, "{trials:?}");
-        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
-        assert_eq!(trials[0].baseline_count, Some(200_000));
-        assert_eq!(trials[0].insn_count, Some(100_000));
-        assert!(
-            trials[0].symbol.contains("encode"),
-            "{:?}",
-            trials[0].symbol
-        );
-        assert_eq!(trials[1].status, "accepted", "{:?}", trials[1].reason);
-        assert_eq!(
-            trials[1].baseline_count,
-            Some(100_000),
-            "second candidate was scored against the original baseline"
-        );
-        assert_eq!(trials[1].insn_count, Some(60_000));
-        assert!(
-            trials[1].symbol.contains("helper"),
-            "{:?}",
-            trials[1].symbol
-        );
-        assert_eq!(
-            git(repo.path(), &["rev-list", "--count", "HEAD..noctum/perf"]).trim(),
-            "2"
-        );
-        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
-        assert!(committed.contains("COUNT_60"), "{committed}");
-        assert!(!committed.contains("_noctum_guard"), "{committed}");
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        assert!(git(repo.path(), &["status", "--porcelain"])
-            .trim()
-            .is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_later_candidate_that_only_beats_the_old_baseline_is_rejected() {
-        let first = diff_between(&slow_two(), &marked("COUNT_100"));
-        let second = diff_between(&marked("COUNT_100"), &marked("COUNT_150"));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (repo, _data, db, id, head) = run_two(
-            TwoHot {
-                calls: Arc::new(AtomicUsize::new(0)),
-                diverge_at: None,
-            },
-            Sequenced {
-                diffs: vec![first, second],
-                calls: calls.clone(),
-            },
-        )
-        .await;
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 2, "{trials:?}");
-        assert_eq!(trials[0].status, "accepted");
-        assert_eq!(trials[1].status, "rejected", "{:?}", trials[1].reason);
-        assert_eq!(trials[1].reason.as_deref(), Some("slower"));
-        assert_eq!(
-            trials[1].baseline_count,
-            Some(100_000),
-            "150_000 would clear the original 200_000 baseline"
-        );
-        assert_eq!(trials[1].insn_count, Some(150_000));
-        assert_eq!(
-            git(repo.path(), &["rev-list", "--count", "HEAD..noctum/perf"]).trim(),
-            "1"
-        );
-        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
-        assert!(committed.contains("COUNT_100"), "{committed}");
-        assert!(!committed.contains("COUNT_150"), "{committed}");
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        assert!(git(repo.path(), &["status", "--porcelain"])
-            .trim()
-            .is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_disagreed_rebaseline_does_not_score_the_next_candidate() {
-        let first = diff_between(&slow_two(), &marked("COUNT_100"));
-        let second = diff_between(&marked("COUNT_100"), &marked("COUNT_60"));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (repo, _data, db, id, head) = run_two(
-            TwoHot {
-                calls: Arc::new(AtomicUsize::new(0)),
-                diverge_at: Some(4),
-            },
-            Sequenced {
-                diffs: vec![first, second],
-                calls: calls.clone(),
-            },
-        )
-        .await;
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "a rebaseline that did not repeat still asked for the next diff"
-        );
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let symbols: Vec<_> = db
-            .candidates_for_run(run.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|row| row.symbol)
-            .collect();
-        assert_two_symbols(&symbols);
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
-        assert_eq!(
-            git(repo.path(), &["rev-list", "--count", "HEAD..noctum/perf"]).trim(),
-            "1"
-        );
-        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
-        assert!(committed.contains("COUNT_100"), "{committed}");
-        assert!(!committed.contains("COUNT_60"), "{committed}");
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-    }
-
-    struct Unmapped;
-
-    impl Measurer for Unmapped {
-        async fn measure(
-            &self,
-            _req: &crate::ports::MeasureRequest,
-        ) -> Result<crate::ports::Measurement> {
-            Ok(crate::ports::Measurement {
-                total: 50_000,
-                stdout: b"test tests::encode_batch ... ok\n".to_vec(),
-                stderr: Vec::new(),
-                exit_code: 0,
-                wall_ms: 4,
-                dump: crate::profile::ProfileDump {
-                    total: 50_000,
-                    blocks: vec![(0x7fff_ffff_0000, 50_000)],
-                    error: None,
-                },
-                map_start: 0,
-                map_end: u64::MAX,
-                load_bias: 0,
-                serial_log: String::new(),
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn an_unmapped_profile_does_not_invent_a_function() {
-        let repo = init_fixture();
-        let data = tempfile::tempdir().unwrap();
-        let config = crate::config::Config {
-            data_dir: Some(data.path().to_path_buf()),
-            gate: crate::config::GateConfig {
-                max_candidates: 1,
-                max_tests: 1,
-                ..crate::config::GateConfig::default()
-            },
-            ..crate::config::Config::default()
-        };
-        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
-        db.run_migrations().await.unwrap();
-        let id = db
-            .add_repository(&repo.path().display().to_string(), "fixture")
-            .await
-            .unwrap();
-        let night = Night::new(
-            db.clone(),
-            config,
-            Unmapped,
-            Fixed {
-                diff: String::new(),
-            },
-            crate::builder::CargoHost,
-        );
-        let row = db.get_repository(id).await.unwrap().unwrap();
-        night
-            .run_repository(
-                &row,
-                &RunOptions {
-                    ignore_window: true,
-                    stop: Arc::new(AtomicBool::new(false)),
-                    asset_error: None,
-                    only_repo: None,
-                },
-            )
-            .await
-            .unwrap();
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "error", "{:?}", run.error);
-        assert_eq!(
-            run.error.as_deref(),
-            Some("profile did not map guest PCs back to repository source")
-        );
-        assert!(db.trials_for_run(run.id).await.unwrap().is_empty());
-        assert!(db.candidates_for_run(run.id).await.unwrap().is_empty());
-        no_perf(repo.path());
-    }
-
-    struct BenchScripted;
-
-    impl Measurer for BenchScripted {
-        async fn measure(
-            &self,
-            req: &crate::ports::MeasureRequest,
-        ) -> Result<crate::ports::Measurement> {
-            assert!(
-                req.args.is_empty(),
-                "a fn main bench is not a libtest filter: {:?}",
-                req.args
-            );
-            assert!(
-                req.harness
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("fold")),
-                "measured {} instead of the fold bench",
-                req.harness.display()
-            );
-            let source =
-                std::fs::read_to_string(req.worktree.join("src/lib.rs")).unwrap_or_default();
-            let total = if source.contains("to_vec") {
-                80_000
-            } else {
-                200_000
-            };
-            let bytes = std::fs::read(&req.harness)?;
-            let addr = encode_pc(&bytes);
-            Ok(crate::ports::Measurement {
-                total,
-                stdout: b"fold\n".to_vec(),
-                stderr: Vec::new(),
-                exit_code: 0,
-                wall_ms: 4,
-                dump: crate::profile::ProfileDump {
-                    total,
-                    blocks: vec![(addr, total * 9 / 10)],
-                    error: None,
-                },
-                map_start: 0,
-                map_end: u64::MAX,
-                load_bias: 0,
-                serial_log: String::new(),
-            })
-        }
-    }
-
-    fn init_bench() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path();
-        std::fs::create_dir(path.join("src")).unwrap();
-        std::fs::create_dir(path.join("benches")).unwrap();
-        std::fs::write(path.join(".gitignore"), "/target\n").unwrap();
-        std::fs::write(
-            path.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-             [[bench]]\nname = \"fold\"\nharness = false\n\n\
-             [[bench]]\nname = \"legacy\"\nharness = true\n",
-        )
-        .unwrap();
-        std::fs::write(
-            path.join("noctum.toml"),
-            "package = \"fixture\"\nbenches = [\"fold\", \"legacy\"]\ntimeout_seconds = 180\n",
-        )
-        .unwrap();
-        std::fs::write(
-            path.join("src/lib.rs"),
-            "#[inline(never)]\npub fn encode(input: &[u8]) -> Vec<u8> {\n    \
-             let mut out = Vec::with_capacity(input.len());\n    \
-             for &byte in input { out.push(byte.wrapping_add(1)); }\n    out\n}\n",
-        )
-        .unwrap();
-        std::fs::write(
-            path.join("benches/fold.rs"),
-            "use fixture::encode;\n\nfn main() {\n    let mut n = 0usize;\n    \
-             for _ in 0..4_000 {\n        n = n.wrapping_add(encode(b\"abcd\").len());\n    }\n    \
-             assert_eq!(n, 16_000);\n}\n",
-        )
-        .unwrap();
-        std::fs::write(path.join("benches/legacy.rs"), "fn main() {}\n").unwrap();
-        git(path, &["init"]);
-        git(path, &["config", "user.email", "test@example.com"]);
-        git(path, &["config", "user.name", "Test"]);
-        let lock = std::process::Command::new("cargo")
-            .args(["generate-lockfile"])
-            .current_dir(path)
-            .status()
-            .unwrap();
-        assert!(lock.success(), "cargo generate-lockfile");
-        git(path, &["add", "."]);
-        git(path, &["commit", "-m", "init"]);
-        dir
-    }
-
-    #[tokio::test]
-    async fn a_listed_fn_main_bench_is_measured_and_can_be_kept() {
-        let repo = init_bench();
-        let head = git(repo.path(), &["rev-parse", "HEAD"]);
-        let fast =
-            "#[inline(never)]\npub fn encode(input: &[u8]) -> Vec<u8> {\n    input.to_vec()\n}\n";
-        std::fs::write(repo.path().join("src/lib.rs"), fast).unwrap();
-        let diff = git(repo.path(), &["diff", "--", "src/lib.rs"]);
-        git(repo.path(), &["checkout", "--", "src/lib.rs"]);
-        assert!(diff.contains("to_vec"), "{diff}");
-        let data = tempfile::tempdir().unwrap();
-        let config = crate::config::Config {
-            data_dir: Some(data.path().to_path_buf()),
-            gate: crate::config::GateConfig {
-                max_candidates: 1,
-                max_tests: 1,
-                ..crate::config::GateConfig::default()
-            },
-            ..crate::config::Config::default()
-        };
-        let db = Database::new(&data.path().join("perf.db")).await.unwrap();
-        db.run_migrations().await.unwrap();
-        let id = db
-            .add_repository(&repo.path().display().to_string(), "fixture")
-            .await
-            .unwrap();
-        let night = Night::new(
-            db.clone(),
-            config,
-            BenchScripted,
-            Fixed { diff },
-            crate::builder::CargoHost,
-        );
-        let row = db.get_repository(id).await.unwrap().unwrap();
-        night
-            .run_repository(
-                &row,
-                &RunOptions {
-                    ignore_window: true,
-                    stop: Arc::new(AtomicBool::new(false)),
-                    asset_error: None,
-                    only_repo: None,
-                },
-            )
-            .await
-            .unwrap();
-        let run = db.latest_run(id).await.unwrap().unwrap();
-        assert_eq!(run.status, "ok", "{:?}", run.error);
-        let baselines = db.baselines_for_run(run.id).await.unwrap();
-        assert!(
-            baselines.iter().any(|row| {
-                row.test_name == "legacy"
-                    && row.status == "skipped_env"
-                    && row.reason.as_deref() == Some("adaptive bench")
-            }),
-            "{baselines:?}"
-        );
-        assert!(
-            baselines
-                .iter()
-                .any(|row| row.test_name == "fold" && row.status == "measured"),
-            "{baselines:?}"
-        );
-        let trials = db.trials_for_run(run.id).await.unwrap();
-        assert_eq!(trials.len(), 1, "{trials:?}");
-        assert_eq!(trials[0].test_name, "fold", "{trials:?}");
-        assert_eq!(trials[0].status, "accepted", "{:?}", trials[0].reason);
-        assert!(trials[0].symbol.contains("encode"), "{trials:?}");
-        let porcelain = git(repo.path(), &["status", "--porcelain"]);
-        assert!(porcelain.trim().is_empty(), "{porcelain}");
-        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).trim(), head.trim());
-        let committed = git(repo.path(), &["show", "noctum/perf:src/lib.rs"]);
-        assert!(committed.contains("to_vec"), "{committed}");
-        let bench = git(repo.path(), &["show", "noctum/perf:benches/fold.rs"]);
-        assert!(!bench.contains("_noctum_guard"), "{bench}");
-        let manifest = git(repo.path(), &["show", "noctum/perf:Cargo.toml"]);
-        assert!(!manifest.contains("noctum-fence"), "{manifest}");
+        let spans = collect_spans(dir.path()).await.unwrap();
+        assert_eq!(spans["members/parser/code/entry.rs"][0].path, "parse");
+        assert!(!spans.contains_key("target/generated.rs"));
     }
 }

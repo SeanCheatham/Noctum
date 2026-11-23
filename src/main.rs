@@ -12,11 +12,12 @@ use noctum::daemon::Daemon;
 use noctum::db::Database;
 use noctum::lockfile::{self, AssetState};
 use noctum::model;
-use noctum::orchestrator::RunOptions;
-use noctum::qemu;
 use noctum::runtime;
 use noctum::web::start_server;
 use noctum::AppState;
+
+mod devex;
+mod run_cli;
 
 #[derive(Parser)]
 #[command(name = "noctum")]
@@ -32,6 +33,23 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create repository configuration and register the repository
+    Init {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(short, long)]
+        package: Option<String>,
+    },
+    /// Check setup and show instructions to correct each failure
+    Doctor {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
+    /// Show the latest run, accepted changes, and Git commands
+    Review {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
     Runtime {
         #[command(subcommand)]
         command: RuntimeCommand,
@@ -40,16 +58,31 @@ enum Command {
     Start,
     /// One pass, ignoring the window
     Run {
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all")]
         repo: Option<PathBuf>,
+        /// Run all enabled repositories
+        #[arg(long, conflicts_with = "test")]
+        all: bool,
+        /// Select one test by its full name or harness and test name
+        #[arg(long, value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        test: Option<String>,
+        /// Limit model requests, including repair requests
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+        max_attempts: Option<u32>,
+        /// Try functions again when their source is unchanged
+        #[arg(long)]
+        retry: bool,
+    },
+    /// Measure working source without model requests
+    Measure {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        test: Option<String>,
     },
     Model {
         #[command(subcommand)]
         command: ModelCommand,
-    },
-    Qemu {
-        #[command(subcommand)]
-        command: QemuCommand,
     },
     /// Daemon phase, lockfile state, and the latest run of each repository
     Status,
@@ -67,63 +100,71 @@ enum ModelCommand {
     Status,
 }
 
-#[derive(Subcommand)]
-enum QemuCommand {
-    /// Download the bundle named by qemu.lock.toml
-    Fetch,
-    /// Install a tarball built by qemu/build-bundle.sh after checking its sha256
-    Install {
-        /// Path to noctum-qemu-*.tar.gz
-        archive: PathBuf,
-    },
-}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+compile_error!("The Noctum host requires macOS on Apple silicon.");
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config_path = cli.config.clone().or_else(Config::default_config_path);
     let config = Config::load(cli.config.as_deref())?;
+    let log = if matches!(
+        &cli.command,
+        Some(Command::Run { .. } | Command::Measure { .. })
+    ) {
+        Some(run_cli::CommandLog::new(&config)?)
+    } else {
+        None
+    };
+    let trace_log = log.clone();
     tracing_subscriber::fmt()
         .with_env_filter(config.general.log_level.clone())
         .with_target(false)
+        .with_ansi(false)
+        .with_writer(move || run_cli::LogWriter(trace_log.clone()))
         .init();
 
     match cli.command.unwrap_or(Command::Start) {
+        Command::Init { repo, package } => {
+            devex::init(&config, &repo, package.as_deref(), cli.config.as_deref()).await
+        }
+        Command::Doctor { repo } => devex::doctor(&config, &repo, cli.config.as_deref()).await,
+        Command::Review { repo } => devex::review(&config, &repo, cli.config.as_deref()).await,
         Command::Start => start(config, config_path).await,
-        Command::Run { repo } => run_once(config, repo).await,
+        Command::Run {
+            repo,
+            all,
+            test,
+            max_attempts,
+            retry,
+        } => {
+            let repo = if all {
+                None
+            } else {
+                Some(repo.unwrap_or_else(|| PathBuf::from(".")))
+            };
+            run_cli::run(config, repo, test, max_attempts, false, retry, log.unwrap()).await
+        }
+        Command::Measure { repo, test } => {
+            run_cli::run(config, Some(repo), test, None, true, false, log.unwrap()).await
+        }
         Command::Model { command } => match command {
             ModelCommand::Pull => model::pull(&config.data_dir(), config.model.quant).await,
             ModelCommand::Status => model_status(&config).await,
         },
-        Command::Qemu { command } => match command {
-            QemuCommand::Fetch => qemu::fetch(&config.data_dir()).await,
-            QemuCommand::Install { archive } => {
-                qemu::install(&config.data_dir(), &archive)?;
-                Ok(())
-            }
-        },
         Command::Runtime { command } => match command {
             RuntimeCommand::Prepare => {
-                if cfg!(target_os = "macos") {
-                    let data = config.data_dir();
-                    tokio::select! {
-                        result = runtime::prepare_image(&data) => result,
-                        signal = tokio::signal::ctrl_c() => { signal?; anyhow::bail!("runtime preparation was cancelled"); },
-                    }
-                } else {
-                    qemu::fetch(&config.data_dir()).await
+                let data = config.data_dir();
+                tokio::select! {
+                    result = runtime::prepare_image(&data) => result,
+                    signal = tokio::signal::ctrl_c() => { signal?; anyhow::bail!("runtime preparation was cancelled"); },
                 }
             }
             RuntimeCommand::Status => {
-                if cfg!(target_os = "macos") {
-                    if !runtime::image_ready().await {
-                        anyhow::bail!("Linux worker is not ready; run noctum runtime prepare");
-                    }
-                    println!("Linux worker ready");
-                } else {
-                    lockfile::verify_qemu(&config.data_dir())?;
-                    println!("QEMU ready");
+                if !runtime::image_ready(&config.data_dir()).await {
+                    anyhow::bail!("Worker is not ready. Run noctum runtime prepare.");
                 }
+                println!("Worker is ready");
                 Ok(())
             }
         },
@@ -163,27 +204,6 @@ async fn start(config: Config, config_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-async fn run_once(config: Config, repo: Option<PathBuf>) -> Result<()> {
-    let db = open_db(&config).await?;
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let opts = RunOptions {
-        ignore_window: true,
-        stop: stop.clone(),
-        asset_error: None,
-        only_repo: repo.map(|p| p.canonicalize()).transpose()?,
-    };
-    let future = runtime::run_pass(db, config, opts);
-    tokio::pin!(future);
-    tokio::select! {
-        result = &mut future => result,
-        signal = tokio::signal::ctrl_c() => {
-            signal?;
-            stop.store(true, std::sync::atomic::Ordering::SeqCst);
-            future.await
-        }
-    }
-}
-
 async fn model_status(config: &Config) -> Result<()> {
     match lockfile::verify_model(&config.data_dir(), config.model.quant) {
         Ok(()) => println!("model ok"),
@@ -202,18 +222,14 @@ async fn status(config: &Config) -> Result<()> {
         stamp(lockfile::model_stamp(&data, config.model.quant))
     );
     println!("llama {}", stamp(lockfile::llama_stamp(&data)));
-    if cfg!(target_os = "macos") {
-        println!(
-            "worker {}",
-            if runtime::image_ready().await {
-                "ready"
-            } else {
-                "missing"
-            }
-        );
-    } else {
-        println!("qemu {}", stamp(lockfile::qemu_stamp(&data)));
-    }
+    println!(
+        "worker {}",
+        if runtime::image_ready(&data).await {
+            "ready"
+        } else {
+            "missing"
+        }
+    );
     if !config.database_path().is_file() {
         println!("phase idle");
         return Ok(());

@@ -1,6 +1,9 @@
 # Rust build artifacts
 /target/
 
+# Python build files
+__pycache__/
+
 # IDE
 .idea/
 .vscode/
@@ -28,3 +31,5 @@ Thumbs.db
 /qemu/fixtures/observed/target/
 
 CLAUDE.md
+runtime/host/.build/
+runtime/host/.swiftpm/

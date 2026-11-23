@@ -9,7 +9,6 @@ use crate::config::ModelQuant;
 use crate::hashutil::sha256_file;
 
 const MODEL_TOML: &str = include_str!("../model.lock.toml");
-const QEMU_TOML: &str = include_str!("../qemu.lock.toml");
 
 #[derive(Debug, Clone)]
 pub struct ModelLock {
@@ -33,10 +32,7 @@ struct ModelFile {
 #[serde(deny_unknown_fields)]
 struct RuntimeFile {
     tag: String,
-    linux_x86_64: Archive,
-    linux_aarch64: Archive,
     macos_aarch64: Archive,
-    macos_x86_64: Archive,
 }
 
 #[derive(Deserialize)]
@@ -62,14 +58,6 @@ struct Weights {
     bytes: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QemuLock {
-    pub id: String,
-    pub url: String,
-    pub sha256: String,
-}
-
 impl ModelLock {
     pub fn load() -> Result<Self> {
         Self::load_quant(ModelQuant::default())
@@ -82,10 +70,7 @@ impl ModelLock {
     fn for_platform(quant: ModelQuant, os: &str, arch: &str) -> Result<Self> {
         let file: ModelFile = toml::from_str(MODEL_TOML).context("parse model.lock.toml")?;
         let archive = match (os, arch) {
-            ("linux", "x86_64") => file.runtime.linux_x86_64,
-            ("linux", "aarch64") => file.runtime.linux_aarch64,
             ("macos", "aarch64") => file.runtime.macos_aarch64,
-            ("macos", "x86_64") => file.runtime.macos_x86_64,
             _ => bail!("model inference is not supported on {os} {arch}"),
         };
         let weights = match quant {
@@ -101,16 +86,6 @@ impl ModelLock {
             gguf_sha256: weights.sha256,
             gguf_bytes: weights.bytes,
         })
-    }
-}
-
-impl QemuLock {
-    pub fn load() -> Result<Self> {
-        toml::from_str(QEMU_TOML).context("parse qemu.lock.toml")
-    }
-
-    pub fn published(&self) -> bool {
-        !self.url.is_empty() && !self.sha256.is_empty()
     }
 }
 
@@ -147,15 +122,6 @@ pub fn gguf_path(data_dir: &Path, quant: ModelQuant) -> std::path::PathBuf {
     data_dir.join("models").join(lock.gguf_filename)
 }
 
-pub fn qemu_dir(data_dir: &Path) -> std::path::PathBuf {
-    let lock = QemuLock::load().expect("qemu lockfile");
-    data_dir.join("qemu").join(lock.id)
-}
-
-pub fn bundle_archive(data_dir: &Path) -> std::path::PathBuf {
-    qemu_dir(data_dir).join("bundle.tar.gz")
-}
-
 /// Full hash check used before a night and by `noctum model status`.
 pub fn verify_model(data_dir: &Path, quant: ModelQuant) -> Result<()> {
     let lock = ModelLock::load_quant(quant)?;
@@ -172,29 +138,6 @@ pub fn verify_model(data_dir: &Path, quant: ModelQuant) -> Result<()> {
     let len = std::fs::metadata(&gguf)?.len();
     if len != lock.gguf_bytes {
         bail!("model length is {len}, lockfile says {}", lock.gguf_bytes);
-    }
-    Ok(())
-}
-
-pub fn verify_qemu(data_dir: &Path) -> Result<()> {
-    let lock = QemuLock::load()?;
-    if lock.sha256.is_empty() {
-        bail!(
-            "QEMU bundle {} has no published url and sha256. Build it with qemu/build-bundle.sh and record the tarball hash in qemu.lock.toml",
-            lock.id
-        );
-    }
-    expect_hash(&bundle_archive(data_dir), &lock.sha256, "QEMU bundle")?;
-    for name in [
-        "qemu-system-x86_64",
-        "noctum_profile.so",
-        "vmlinuz",
-        "initramfs.cpio.gz",
-    ] {
-        let path = qemu_dir(data_dir).join(name);
-        if !path.is_file() {
-            bail!("QEMU bundle is missing {}", path.display());
-        }
     }
     Ok(())
 }
@@ -225,16 +168,6 @@ pub fn llama_stamp(data_dir: &Path) -> AssetState {
     } else {
         AssetState::Missing
     }
-}
-
-pub fn qemu_stamp(data_dir: &Path) -> AssetState {
-    let Ok(lock) = QemuLock::load() else {
-        return AssetState::Mismatch;
-    };
-    if lock.sha256.is_empty() {
-        return AssetState::Missing;
-    }
-    stamp_state(&bundle_archive(data_dir), &lock.sha256, None)
 }
 
 fn stamp_state(path: &Path, expected: &str, bytes: Option<u64>) -> AssetState {
@@ -285,12 +218,8 @@ mod tests {
         assert_eq!(lock.gguf_sha256.len(), 64);
         assert_eq!(lock.llama_cpp_sha256.len(), 64);
         assert_eq!(lock.gguf_bytes, 9_138_715_328);
-        for (os, arch, package) in [
-            ("linux", "x86_64", "linux-x64-cpu"),
-            ("linux", "aarch64", "linux-arm64-cpu"),
-            ("macos", "aarch64", "macos-arm64"),
-            ("macos", "x86_64", "macos-x64"),
-        ] {
+        {
+            let (os, arch, package) = ("macos", "aarch64", "macos-arm64");
             let small = ModelLock::for_platform(ModelQuant::Q2, os, arch).unwrap();
             let large = ModelLock::for_platform(ModelQuant::Q4, os, arch).unwrap();
             assert!(small.llama_cpp_url.contains(package));
@@ -304,18 +233,5 @@ mod tests {
             );
         }
         assert!(ModelLock::for_platform(ModelQuant::Q2, "windows", "x86_64").is_err());
-    }
-
-    #[test]
-    fn qemu_bundle_is_pinned_without_a_download_url() {
-        let lock = QemuLock::load().unwrap();
-        assert_eq!(lock.id, "qemu-9.2.0-linux-6.12.10");
-        assert!(lock.url.is_empty());
-        assert_eq!(lock.sha256.len(), 64);
-        assert!(lock.sha256.chars().all(|c| c.is_ascii_hexdigit()));
-        assert!(!lock.published());
-        let dir = tempfile::tempdir().unwrap();
-        let error = verify_qemu(dir.path()).unwrap_err().to_string();
-        assert!(error.contains("is missing"), "{error}");
     }
 }

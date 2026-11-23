@@ -1,0 +1,464 @@
+{
+  "passed": true,
+  "host": "macOS on Apple silicon",
+  "sdk": "0.57.0",
+  "rust_runtime_integrated": true,
+  "docker_adapter_removed": true,
+  "linux_host_support_removed": true,
+  "intel_guest_paths_removed": true,
+  "cold_setup_passed": true,
+  "cached_worker_update_passed": true,
+  "helper": {
+    "passed": true,
+    "binary_io": [
+      0,
+      255,
+      13,
+      10,
+      128
+    ],
+    "exit_code": 7,
+    "read_only_share": true,
+    "guest_network": true,
+    "source_growth_after_restart": true,
+    "new_session_id_after_restart": true,
+    "repeated_stop": true,
+    "pipe_closed_during_command": true,
+    "stop_seconds": 0.07113275001756847,
+    "scope": "Release Swift helper with a real VM.",
+    "sdk_version": "0.57.0",
+    "sdk_revision": "0ac42ce27c983074cb4d5f1137ffc2cc862d5338",
+    "helper_path": "target/release/noctum-host",
+    "helper_sha256": "9c9b3d039380e6203de37dcb66d68edae7e946edff907999477bbf8f031546dc",
+    "source_sha256": "0b639de1b792587f9e965126bdb7746bb41e675888ac9c9b3d01afe79d90fa0c",
+    "build_log": "/tmp/noctum-host-release-build.log",
+    "test_log": "/tmp/noctum-helper-release-final.log",
+    "kernel": "Verified Kata 4.3.1 asset. Kernel 6.18.56-208.",
+    "virtualization_entitlement": true,
+    "container_cli_on_test_path": false,
+    "macos": "27.2.1"
+  },
+  "worker_tests": {
+    "passed": true,
+    "tests": 4,
+    "counts": [
+      6011,
+      6011,
+      12011,
+      12011
+    ],
+    "active_command_cancellation": true,
+    "exclusive_disk_lease": true,
+    "controller_exit_cleanup": true,
+    "log": "/tmp/noctum-sdk-final-worker-tests.log"
+  },
+  "saved_response": {
+    "mode": "saved model response",
+    "responses_used": 1,
+    "retry_checked": false,
+    "run": {
+      "error": null,
+      "finished_at": "2026-11-23 01:20:16",
+      "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "id": 1,
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=981cca93270a59d867f11012e3d0138dfa492b4c4ea22c2ca4472dfe3c766fba",
+      "package": "base64",
+      "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "repository_id": 1,
+      "started_at": "2026-11-23 01:17:46",
+      "status": "ok",
+      "target": "aarch64-unknown-linux-musl",
+      "window_key": null
+    },
+    "tests": [
+      {
+        "binary_sha256": "e910571c932c5b6395e7cb7283d3cc15280e12942f9fd2c756a84bd4f262f671",
+        "harness": "unittests src/lib.rs",
+        "id": 1,
+        "insn_count": 2484989,
+        "reason": null,
+        "run_id": 1,
+        "status": "measured",
+        "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+        "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "wall_ms": 720
+      }
+    ],
+    "trials": [
+      {
+        "baseline_count": 2484989,
+        "candidate_id": 1,
+        "file": "src/engine/general_purpose/decode.rs",
+        "harness": "unittests src/lib.rs",
+        "host_check_passed": true,
+        "id": 1,
+        "improvement_ratio": -0.001400006197210531,
+        "insn_count": 2488468,
+        "model_summary": "Replaced the unrolled per-byte blocks in decode_chunk_8 with a single indexed loop that preserves the same lookup, first-invalid-byte error, accumulation, and output bytes.",
+        "reason": "slower",
+        "status": "rejected",
+        "stdout_matched": true,
+        "symbol": "decode_chunk_8",
+        "target": "aarch64-unknown-linux-musl",
+        "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "tool_output": null,
+        "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n--- a/src/engine/general_purpose/decode.rs\n+++ b/src/engine/general_purpose/decode.rs\n@@ -165,88 +165,38 @@\n /// Decode 8 bytes of input into 6 bytes of output.\n ///\n /// `input` is the 8 bytes to decode.\n /// `index_at_start_of_input` is the offset in the overall input (used for reporting errors\n /// accurately)\n /// `decode_table` is the lookup table for the particular base64 alphabet.\n /// `output` will have its first 6 bytes overwritten\n // yes, really inline (worth 30-50% speedup)\n #[inline(always)]\n fn decode_chunk_8(\n     input: &[u8],\n     index_at_start_of_input: usize,\n     decode_table: &[u8; 256],\n     output: &mut [u8],\n ) -> Result<(), DecodeError> {\n-    let morsel = decode_table[usize::from(input[0])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n-    }\n-    let mut accum = u64::from(morsel) << 58;\n-\n-    let morsel = decode_table[usize::from(input[1])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 1,\n-            input[1],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 52;\n-\n-    let morsel = decode_table[usize::from(input[2])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 2,\n-            input[2],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 46;\n-\n-    let morsel = decode_table[usize::from(input[3])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 3,\n-            input[3],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 40;\n-\n-    let morsel = decode_table[usize::from(input[4])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 4,\n-            input[4],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 34;\n-\n-    let morsel = decode_table[usize::from(input[5])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 5,\n-            input[5],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 28;\n-\n-    let morsel = decode_table[usize::from(input[6])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 6,\n-            input[6],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 22;\n-\n-    let morsel = decode_table[usize::from(input[7])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 7,\n-            input[7],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 16;\n-\n-    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n-\n-    Ok(())\n+    let mut accum = 0u64;\n+    for (i, &byte) in input.iter().enumerate() {\n+        let morsel = decode_table[usize::from(byte)];\n+        if morsel == INVALID_VALUE {\n+            return Err(DecodeError::InvalidByte(index_at_start_of_input + i, byte));\n+        }\n+        accum |= u64::from(morsel) << (58 - 6 * i);\n+    }\n+    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n+    Ok(())\n }\n"
+      }
+    ]
+  },
+  "native_model": {
+    "command": [
+      "/Users/sean/git/Noctum/target/release/noctum",
+      "--config",
+      "/tmp/noctum-compat.qtBzNE/config.toml",
+      "run",
+      "--repo",
+      "/tmp/noctum-apple-cli-project-20261122",
+      "--test",
+      "decode::tests::decode_engine_estimation_works_for_various_lengths",
+      "--max-attempts",
+      "1",
+      "--retry"
+    ],
+    "states": [
+      {
+        "seconds": 0.01758379102102481,
+        "workers": [],
+        "models": []
+      },
+      {
+        "seconds": 16.800788124994142,
+        "workers": [
+          {
+            "pid": 80792,
+            "rss_kib": 151616
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 18.426746166020166,
+        "workers": [
+          {
+            "pid": 80809,
+            "rss_kib": 162912
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 20.043244125001365,
+        "workers": [
+          {
+            "pid": 80842,
+            "rss_kib": 130512
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 21.46618225000566,
+        "workers": [
+          {
+            "pid": 80858,
+            "rss_kib": 3264
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 61.00970095800585,
+        "workers": [
+          {
+            "pid": 81119,
+            "rss_kib": 144960
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 62.42884233299992,
+        "workers": [
+          {
+            "pid": 81135,
+            "rss_kib": 140832
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 66.9474400409963,
+        "workers": [
+          {
+            "pid": 81169,
+            "rss_kib": 32256
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 68.36355920799542,
+        "workers": [
+          {
+            "pid": 81188,
+            "rss_kib": 2624
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 70.65912162500899,
+        "workers": [],
+        "models": []
+      },
+      {
+        "seconds": 70.87767924999935,
+        "workers": [
+          {
+            "pid": 81209,
+            "rss_kib": 163008
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 73.1795061659941,
+        "workers": [],
+        "models": [
+          {
+            "pid": 81244,
+            "rss_kib": 80016
+          }
+        ]
+      },
+      {
+        "seconds": 320.70743845801917,
+        "workers": [],
+        "models": []
+      },
+      {
+        "seconds": 320.9293073330191,
+        "workers": [
+          {
+            "pid": 82427,
+            "rss_kib": 7440
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 322.53070283299894,
+        "workers": [
+          {
+            "pid": 82455,
+            "rss_kib": 7088
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 376.533099332999,
+        "workers": [],
+        "models": []
+      },
+      {
+        "seconds": 376.75269091600785,
+        "workers": [
+          {
+            "pid": 83609,
+            "rss_kib": 163104
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 378.1318695830123,
+        "workers": [
+          {
+            "pid": 83625,
+            "rss_kib": 140896
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 412.5512669160089,
+        "workers": [
+          {
+            "pid": 83862,
+            "rss_kib": 151408
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 413.9266835000017,
+        "workers": [
+          {
+            "pid": 83881,
+            "rss_kib": 3744
+          }
+        ],
+        "models": []
+      },
+      {
+        "seconds": 416.37207625000156,
+        "workers": [
+          {
+            "pid": 83902,
+            "rss_kib": 162864
+          }
+        ],
+        "models": []
+      }
+    ],
+    "overlap": [],
+    "passed": true,
+    "exit_code": 0,
+    "final_processes": {
+      "workers": [],
+      "models": []
+    },
+    "source_preserved": true,
+    "worker_seen": true,
+    "model_seen": true,
+    "worker_seen_after_model": true,
+    "sample_interval_seconds": 0.2,
+    "run": {
+      "id": 11,
+      "repository_id": 9,
+      "git_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "package": "base64",
+      "started_at": "2026-11-23 01:20:58",
+      "finished_at": "2026-11-23 01:27:36",
+      "status": "ok",
+      "error": null,
+      "window_key": null,
+      "perf_sha": "e14400697453bcc85997119b874bc03d9601d0af",
+      "target": "aarch64-unknown-linux-musl",
+      "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=1024;bundle=981cca93270a59d867f11012e3d0138dfa492b4c4ea22c2ca4472dfe3c766fba"
+    },
+    "trials": [
+      {
+        "id": 9,
+        "candidate_id": 9,
+        "status": "rejected",
+        "reason": "below ratio",
+        "model_summary": "Replaced the unrolled per-byte blocks in decode_chunk_8 with a single fixed-length loop that preserves the same first-invalid-byte error and output bytes, reducing per-call instruction overhead while keeping the test's fixed loop and assertions intact.",
+        "unified_diff": "diff --git a/src/engine/general_purpose/decode.rs b/src/engine/general_purpose/decode.rs\n--- a/src/engine/general_purpose/decode.rs\n+++ b/src/engine/general_purpose/decode.rs\n@@ -165,87 +165,25 @@\n /// `output` will have its first 6 bytes overwritten\n // yes, really inline (worth 30-50% speedup)\n #[inline(always)]\n fn decode_chunk_8(\n     input: &[u8],\n     index_at_start_of_input: usize,\n     decode_table: &[u8; 256],\n     output: &mut [u8],\n ) -> Result<(), DecodeError> {\n-    let morsel = decode_table[usize::from(input[0])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(index_at_start_of_input, input[0]));\n-    }\n-    let mut accum = u64::from(morsel) << 58;\n-\n-    let morsel = decode_table[usize::from(input[1])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 1,\n-            input[1],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 52;\n-\n-    let morsel = decode_table[usize::from(input[2])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 2,\n-            input[2],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 46;\n-\n-    let morsel = decode_table[usize::from(input[3])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 3,\n-            input[3],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 40;\n-\n-    let morsel = decode_table[usize::from(input[4])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 4,\n-            input[4],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 34;\n-\n-    let morsel = decode_table[usize::from(input[5])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 5,\n-            input[5],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 28;\n-\n-    let morsel = decode_table[usize::from(input[6])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 6,\n-            input[6],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 22;\n-\n-    let morsel = decode_table[usize::from(input[7])];\n-    if morsel == INVALID_VALUE {\n-        return Err(DecodeError::InvalidByte(\n-            index_at_start_of_input + 7,\n-            input[7],\n-        ));\n-    }\n-    accum |= u64::from(morsel) << 16;\n-\n-    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n-\n-    Ok(())\n+    let mut accum = 0u64;\n+    for (i, &b) in input.iter().enumerate() {\n+        let morsel = decode_table[usize::from(b)];\n+        if morsel == INVALID_VALUE {\n+            return Err(DecodeError::InvalidByte(\n+                index_at_start_of_input + i,\n+                input[i],\n+            ));\n+        }\n+        accum |= u64::from(morsel) << (58 - 6 * i);\n+    }\n+    output[..6].copy_from_slice(&accum.to_be_bytes()[..6]);\n+    Ok(())\n }\n",
+        "baseline_count": 2485012,
+        "insn_count": 2484460,
+        "improvement_ratio": 0.00022213172411239866,
+        "host_check_passed": 1,
+        "stdout_matched": 1,
+        "tool_output": null
+      }
+    ]
+  },
+  "source_build_logs": [
+    "/tmp/noctum-sdk-release-build.log",
+    "/tmp/noctum-sdk-final-prepare.log",
+    "/tmp/noctum-sdk-final-refresh.log"
+  ],
+  "unit_tests_passed": true,
+  "clippy_passed": true,
+  "format_passed": true,
+  "binary_sha256": {
+    "noctum": "cb8f388d3df9bbc3e4cbc44d1ab7e8dc7e6f01ba8c5cf01d65b4cc7c5851b4b7",
+    "noctum-host": "9c9b3d039380e6203de37dcb66d68edae7e946edff907999477bbf8f031546dc"
+  },
+  "unit_test_count": 111,
+  "initial_sdk_measurement_commands": [
+    {
+      "project": {
+        "name": "base64",
+        "url": "https://github.com/marshallpierce/rust-base64.git",
+        "revision": "e14400697453bcc85997119b874bc03d9601d0af",
+        "package": "base64",
+        "test": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+        "require_optimization_eligible": true
+      },
+      "measurements": [
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "60b036e69808460bd67beef2a076d465705a0cd0",
+            "package": "base64",
+            "started_at": "2026-11-23 00:50:42",
+            "finished_at": "2026-11-23 00:51:41",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "60b036e69808460bd67beef2a076d465705a0cd0",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=b439e86c1d8446d04f340159e5f6593ea0a4ebd0576ec7fb09214c88170d34a6"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+              "status": "measured",
+              "insn_count": 2484332,
+              "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+              "binary_sha256": "cea764f911cc40b0068b387d7547ab0a968b3b03bf631dcadb24175920282b06",
+              "wall_ms": 886,
+              "reason": null
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795395038736835000-56298/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "451d258da23908ff462b25b348a3fe26a0710589ff416ac342ef4a97d6059630"
+        },
+        {
+          "run": {
+            "id": 1,
+            "repository_id": 1,
+            "git_sha": "ca0270d5c50bde4f768d024329dd6ea704087df3",
+            "package": "base64",
+            "started_at": "2026-11-23 00:51:44",
+            "finished_at": "2026-11-23 00:52:42",
+            "status": "ok",
+            "error": null,
+            "window_key": null,
+            "perf_sha": "ca0270d5c50bde4f768d024329dd6ea704087df3",
+            "target": "aarch64-unknown-linux-musl",
+            "measurement_profile": "ram-insn-v2;cpu=cortex-a72;memory=512;bundle=b439e86c1d8446d04f340159e5f6593ea0a4ebd0576ec7fb09214c88170d34a6"
+          },
+          "tests": [
+            {
+              "id": 1,
+              "run_id": 1,
+              "harness": "unittests src/lib.rs",
+              "test_name": "decode::tests::decode_engine_estimation_works_for_various_lengths",
+              "status": "measured",
+              "insn_count": 2484332,
+              "stdout_sha256": "1214b8f97f57068a0e8be69c52dd863264240af1bbeb0d0d93148ba10d0fbe51",
+              "binary_sha256": "cea764f911cc40b0068b387d7547ab0a968b3b03bf631dcadb24175920282b06",
+              "wall_ms": 760,
+              "reason": null
+            }
+          ],
+          "database": "/private/tmp/noctum-compat.qtBzNE/data/measurements/run-1795395101495764000-56743/results.db",
+          "optimization_eligible": true,
+          "noctum_sha256": "451d258da23908ff462b25b348a3fe26a0710589ff416ac342ef4a97d6059630"
+        }
+      ],
+      "passed": true,
+      "supported": true,
+      "source_state": {
+        "head": "e14400697453bcc85997119b874bc03d9601d0af",
+        "index": "e410735384c533c0486200df4f1bb9e2ec963e7eb7e54e034e065ca53abe3e41",
+        "branches": "",
+        "source_sha256": "de8a35b500cf85ba61d76f761b138a9df8dcd7f98540b01194c38324badfc19e"
+      }
+    }
+  ],
+  "release_archive": "/tmp/noctum-sdk-release-package/noctum-aarch64-apple-darwin.tar.gz",
+  "release_archive_verified": true,
+  "helper_uses_system_dynamic_libraries_only": true,
+  "worker_assets_ready": true,
+  "no_worker_model_or_helper_left_running": true
+}

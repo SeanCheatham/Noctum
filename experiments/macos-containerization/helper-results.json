@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "binary_io": [
+    0,
+    255,
+    13,
+    10,
+    128
+  ],
+  "exit_code": 7,
+  "read_only_share": true,
+  "guest_network": true,
+  "source_growth_after_restart": true,
+  "new_session_id_after_restart": true,
+  "repeated_stop": true,
+  "pipe_closed_during_command": true,
+  "stop_seconds": 0.07113275001756847,
+  "scope": "Release Swift helper with a real VM.",
+  "sdk_version": "0.57.0",
+  "sdk_revision": "0ac42ce27c983074cb4d5f1137ffc2cc862d5338",
+  "helper_path": "target/release/noctum-host",
+  "helper_sha256": "9c9b3d039380e6203de37dcb66d68edae7e946edff907999477bbf8f031546dc",
+  "source_sha256": "0b639de1b792587f9e965126bdb7746bb41e675888ac9c9b3d01afe79d90fa0c",
+  "build_log": "/tmp/noctum-host-release-build.log",
+  "test_log": "/tmp/noctum-helper-release-final.log",
+  "kernel": "Verified Kata 4.3.1 asset. Kernel 6.18.56-208.",
+  "virtualization_entitlement": true,
+  "container_cli_on_test_path": false,
+  "macos": "27.2.1"
+}

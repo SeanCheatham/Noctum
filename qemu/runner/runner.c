@@ -11,10 +11,77 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <termios.h>
+
+static int send_bytes(int fd, const unsigned char *data, size_t size, uint64_t *hash)
+{
+    if (hash) {
+        for (size_t i = 0; i < size; i++) {
+            *hash = (*hash ^ data[i]) * UINT64_C(0x100000001b3);
+        }
+    }
+    while (size) {
+        ssize_t n = write(fd, data, size);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return -1;
+        data += n;
+        size -= (size_t)n;
+    }
+    return 0;
+}
+
+static int send_integer(int fd, uint64_t value, uint64_t *hash)
+{
+    unsigned char bytes[8];
+    for (int i = 0; i < 8; i++) bytes[i] = (unsigned char)(value >> (i * 8));
+    return send_bytes(fd, bytes, sizeof bytes, hash);
+}
+
+static int send_result(const char *device, const char **paths)
+{
+    const unsigned char magic[] = "\nNOCTUM_RESULT_V1\n";
+    uint64_t hash = UINT64_C(0xcbf29ce484222325), total = 0;
+    struct termios settings;
+    int fd = open(device, O_WRONLY | O_NOCTTY);
+    int result = -1;
+    if (fd < 0) return -1;
+    if (tcgetattr(fd, &settings) < 0) goto done;
+    cfmakeraw(&settings);
+    if (tcsetattr(fd, TCSANOW, &settings) < 0) goto done;
+    if (send_bytes(fd, magic, sizeof magic - 1, NULL) < 0) goto done;
+    for (int i = 0; i < 4; i++) {
+        struct stat status;
+        unsigned char buffer[16384];
+        FILE *input = fopen(paths[i], "rb");
+        if (!input) goto done;
+        if (fstat(fileno(input), &status) < 0 || status.st_size < 0
+            || (uint64_t)status.st_size > UINT64_C(67108864) - total) {
+            fclose(input);
+            goto done;
+        }
+        uint64_t remaining = (uint64_t)status.st_size;
+        total += remaining;
+        if (send_integer(fd, remaining, &hash) < 0) { fclose(input); goto done; }
+        while (remaining) {
+            size_t size = remaining < sizeof buffer ? (size_t)remaining : sizeof buffer;
+            size_t n = fread(buffer, 1, size, input);
+            if (!n || send_bytes(fd, buffer, n, &hash) < 0) { fclose(input); goto done; }
+            remaining -= n;
+        }
+        fclose(input);
+    }
+    if (send_integer(fd, hash, NULL) < 0 || tcdrain(fd) < 0) goto done;
+    result = 0;
+done:
+    close(fd);
+    return result;
+}
 
 static void trim(char *s)
 {
@@ -88,8 +155,8 @@ int main(int argc, char **argv)
     pid_t pid;
     int status = 0;
 
-    if (argc != 3) {
-        fprintf(stderr, "usage: runner <job> <scratch>\n");
+    if (argc != 3 && argc != 4) {
+        fprintf(stderr, "usage: runner <job> <scratch> [result-device]\n");
         return 2;
     }
     job = fopen(argv[1], "r");
@@ -158,5 +225,9 @@ int main(int argc, char **argv)
         write_maps(pid, args[0], map_path);
     }
     write_exit(exit_path, status);
+    if (argc == 4) {
+        const char *paths[] = {stdout_path, stderr_path, map_path, exit_path};
+        if (send_result(argv[3], paths) < 0) return 7;
+    }
     return 0;
 }

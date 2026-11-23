@@ -97,6 +97,7 @@ pub struct RepoConfig {
     pub benches: Vec<String>,
     pub features: Vec<String>,
     pub all_features: bool,
+    pub no_default_features: bool,
     pub protected_paths: Vec<String>,
     pub check_command: String,
     #[serde(default = "default_timeout")]
@@ -122,6 +123,7 @@ impl Default for RepoConfig {
             benches: Vec::new(),
             features: Vec::new(),
             all_features: false,
+            no_default_features: false,
             protected_paths: Vec::new(),
             check_command: String::new(),
             timeout_seconds: 600,

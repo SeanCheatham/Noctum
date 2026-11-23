@@ -90,6 +90,10 @@ impl Daemon {
             stop: self.stop.clone(),
             asset_error: None,
             only_repo,
+            test: None,
+            max_attempts: None,
+            measurement_only: false,
+            retry: false,
         };
         if let Err(err) = crate::runtime::run_pass(self.db.clone(), config, opts).await {
             tracing::error!("night pass failed: {err}");

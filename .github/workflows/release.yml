@@ -1,103 +1,42 @@
 name: Release
-
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ["v*.*.*"]
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   build-release:
-    name: Build ${{ matrix.target }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
-    runs-on: ${{ matrix.os }}
+    name: macOS ARM64
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} --bin noctum
-
-      - name: Strip binary
-        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the host tools
         run: |
-          binary=target/${{ matrix.target }}/release/noctum
-          if [ "${{ runner.os }}" = macOS ]; then
-            strip -x "$binary"
-            codesign --force --sign - "$binary"
-          else
-            strip "$binary"
-          fi
-
-      - name: Create archive
-        shell: bash
+          sh scripts/build-host.sh release
+          cargo build --release --locked --bin noctum
+          strip -x target/release/noctum
+          codesign --force --sign - target/release/noctum
+          codesign --verify --strict target/release/noctum-host
+      - name: Create the archive
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf noctum-${{ matrix.target }}.tar.gz noctum
-          shasum -a 256 noctum-${{ matrix.target }}.tar.gz > noctum-${{ matrix.target }}.tar.gz.sha256
-
+          cd target/release
+          tar czf noctum-aarch64-apple-darwin.tar.gz noctum noctum-host
+          shasum -a 256 noctum-aarch64-apple-darwin.tar.gz > noctum-aarch64-apple-darwin.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: noctum-binary-${{ matrix.target }}
+          name: noctum-macos-arm64
           path: |
-            target/${{ matrix.target }}/release/noctum-${{ matrix.target }}.tar.gz
-            target/${{ matrix.target }}/release/noctum-${{ matrix.target }}.tar.gz.sha256
-
-  qemu-bundle:
-    name: Build QEMU bundle
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config python3 ninja-build meson \
-            flex bison bc cpio libelf-dev libssl-dev \
-            libglib2.0-dev libpixman-1-dev libattr1-dev
-
-      - name: Build the measurement bundle
-        run: sh qemu/build-bundle.sh
-
-      - name: Upload bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: noctum-qemu-bundle
-          path: qemu/out/*.tar.gz
-
-  create-release:
-    name: Create Release
-    needs: build-release
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download the binary
-        uses: actions/download-artifact@v4
-        with:
-          pattern: noctum-binary-*
-          merge-multiple: true
-          path: artifacts
-
-      - name: Create Release
+            target/release/noctum-aarch64-apple-darwin.tar.gz
+            target/release/noctum-aarch64-apple-darwin.tar.gz.sha256
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            target/release/noctum-aarch64-apple-darwin.tar.gz
+            target/release/noctum-aarch64-apple-darwin.tar.gz.sha256
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

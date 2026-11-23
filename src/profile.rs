@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use object::{Object, ObjectSegment, ObjectSymbol};
+use object::{Object, ObjectSegment, ObjectSymbol, SegmentFlags};
 
 use crate::selector::FnSpan;
 
@@ -234,13 +234,15 @@ pub fn symbolize(bytes: &[u8], addrs: &[u64]) -> Result<Vec<Option<LineHit>>> {
 
 pub fn elf_load_bias(bytes: &[u8], mapped_base: u64) -> Result<u64> {
     let elf = object::File::parse(bytes).context("parse measured ELF")?;
-    let image_base = elf
+    let executable_base = elf
         .segments()
+        .filter(|segment| {
+            matches!(segment.flags(), SegmentFlags::Elf { p_flags } if p_flags & object::elf::PF_X != 0)
+        })
         .filter(|segment| segment.file_range().1 > 0)
-        .filter_map(|segment| segment.address().checked_sub(segment.file_range().0))
-        .min()
-        .context("measured ELF has no load segment")?;
-    Ok(mapped_base.wrapping_sub(image_base))
+        .find_map(|segment| segment.address().checked_sub(segment.file_range().0))
+        .context("measured ELF has no executable load segment")?;
+    Ok(mapped_base.wrapping_sub(executable_base))
 }
 
 pub fn elf_has_repo_line(bytes: &[u8], worktree: &Path) -> Result<bool> {
@@ -311,6 +313,33 @@ fn read_u64(bytes: &[u8], off: usize) -> Result<u64> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn load_bias_uses_the_executable_segment() {
+        let mut elf = vec![0u8; 0x2000];
+        elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+        elf[16..18].copy_from_slice(&2u16.to_le_bytes());
+        elf[18..20].copy_from_slice(&183u16.to_le_bytes());
+        elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes());
+        elf[52..54].copy_from_slice(&64u16.to_le_bytes());
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes());
+        elf[56..58].copy_from_slice(&2u16.to_le_bytes());
+        for (index, flags, offset, address) in [
+            (0, 4u32, 0u64, 0x200000u64),
+            (1, 5u32, 0x1000u64, 0x211000u64),
+        ] {
+            let header = 64 + index * 56;
+            elf[header..header + 4].copy_from_slice(&1u32.to_le_bytes());
+            elf[header + 4..header + 8].copy_from_slice(&flags.to_le_bytes());
+            elf[header + 8..header + 16].copy_from_slice(&offset.to_le_bytes());
+            elf[header + 16..header + 24].copy_from_slice(&address.to_le_bytes());
+            elf[header + 32..header + 40].copy_from_slice(&0x1000u64.to_le_bytes());
+            elf[header + 40..header + 48].copy_from_slice(&0x1000u64.to_le_bytes());
+        }
+        assert_eq!(elf_load_bias(&elf, 0x210000).unwrap(), 0);
+        assert_eq!(elf_load_bias(&elf, 0x7f00210000).unwrap(), 0x7f00000000);
+    }
 
     #[test]
     fn parses_a_dump_and_drops_kernel_pcs() {
