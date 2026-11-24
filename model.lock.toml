@@ -9,13 +9,13 @@ url = "https://github.com/unslothai/llama.cpp/releases/download/b12588-mix-c0c3d
 sha256 = "229def18e27ed740ec4f3a6508f084b25630e08d8a87ada40b00622fc496ceb8"
 
 [models.q2]
-url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/Inkling-2-Mini-UD-Q2_K_XL.gguf"
+url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/8078d149286eec7193795413b9e0643da6d11fa1/Old_Support/Inkling-2-Mini-UD-Q2_K_XL.gguf_file"
 filename = "Inkling-2-Mini-UD-Q2_K_XL.gguf"
 sha256 = "20292e8142b69535ca88a5d04439d0fdeb4dc698d44c002dca706dcf92901441"
 bytes = 9138715328
 
 [models.q4]
-url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/Inkling-2-Mini-UD-Q4_K_M.gguf"
+url = "https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/8078d149286eec7193795413b9e0643da6d11fa1/Old_Support/Inkling-2-Mini-UD-Q4_K_M.gguf_file"
 filename = "Inkling-2-Mini-UD-Q4_K_M.gguf"
 sha256 = "f90c5a4df44d335ac9f9eea2a15c31d6c5a377b1b3cd9ff7fc2cf123f3cdf7e1"
 bytes = 16610543328

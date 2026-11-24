@@ -223,6 +223,12 @@ mod tests {
             let small = ModelLock::for_platform(ModelQuant::Q2, os, arch).unwrap();
             let large = ModelLock::for_platform(ModelQuant::Q4, os, arch).unwrap();
             assert!(small.llama_cpp_url.contains(package));
+            for lock in [&small, &large] {
+                let revision = lock.gguf_url.split("/resolve/").nth(1).unwrap();
+                let revision = revision.split('/').next().unwrap();
+                assert_eq!(revision.len(), 40);
+                assert!(revision.chars().all(|c| c.is_ascii_hexdigit()));
+            }
             assert_eq!(small.llama_cpp_sha256, large.llama_cpp_sha256);
             assert_ne!(small.gguf_sha256, large.gguf_sha256);
             assert!(large.gguf_filename.contains("UD-Q4_K_M"));

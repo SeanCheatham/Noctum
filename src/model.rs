@@ -404,7 +404,10 @@ pub async fn download_verified(url: &str, dest: &Path, expected: &str) -> Result
                     return Ok(());
                 }
                 let _ = std::fs::remove_file(&partial);
-                last = Some(anyhow::anyhow!("checksum mismatch: got {got}"));
+                last = Some(anyhow::anyhow!(
+                    "checksum mismatch for {} from {url}: expected {expected}, got {got}",
+                    dest.display()
+                ));
             }
             Err(err) => {
                 let _ = std::fs::remove_file(&partial);
@@ -756,9 +759,14 @@ mod tests {
             .mount(&bad)
             .await;
         let dest = dir.path().join("bad.bin");
-        assert!(download_verified(&bad.uri(), &dest, &expected)
+        let error = download_verified(&bad.uri(), &dest, &expected)
             .await
-            .is_err());
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&dest.display().to_string()));
+        assert!(error.contains(&bad.uri()));
+        assert!(error.contains(&format!("expected {expected}")));
+        assert!(error.contains(&format!("got {}", crate::hashutil::sha256_bytes(b"nope"))));
         assert!(!dest.exists());
     }
 }

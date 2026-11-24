@@ -59,6 +59,16 @@ Keep `target/release/noctum` and `target/release/noctum-host` in the same instal
 
 The release archive contains both host binaries. The installer checks the archive checksum and the helper signature.
 
+Developers can build and install both host tools from the current checkout:
+
+```bash
+./install_local.sh
+```
+
+The script installs into `${CARGO_HOME:-$HOME/.cargo}/bin`, usually `~/.cargo/bin`.
+Use `--debug` for a debug build. Use `--bin-dir PATH` to select another installation directory.
+The script reports when that directory is absent from `PATH`.
+
 ## First run
 
 ```bash

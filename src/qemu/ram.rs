@@ -119,8 +119,15 @@ impl<W: Write> Archive<W> {
             #[cfg(not(unix))]
             let mode = 0o644;
             self.entry(name, 0o100000 | mode, &body)?;
+        } else if metadata.is_dir() {
+            if self.directories.insert(PathBuf::from(name)) {
+                self.entry(name, 0o040755, &[])?;
+            }
         } else {
-            bail!("guest input {} is not a file or link", source.display());
+            bail!(
+                "guest input {} is not a file, link, or directory",
+                source.display()
+            );
         }
         Ok(())
     }
@@ -288,7 +295,7 @@ mod tests {
             Compression::fast(),
         );
         encoder.finish().unwrap();
-        for path in ["member/fixtures", "target"] {
+        for path in ["member/fixtures", "target", "vendor/cmark-gfm"] {
             fs::create_dir_all(root.join(path)).unwrap();
         }
         fs::write(root.join("member/fixtures/input.bin"), b"\0\xff\n").unwrap();
@@ -297,6 +304,22 @@ mod tests {
             crate::process::run(&root, "git", &["init", "-q"], &[], Duration::from_secs(10))
                 .await
                 .success
+        );
+        assert!(
+            crate::process::run(
+                &root,
+                "git",
+                &[
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    "160000,2f13eeedfe9906c72a1843b03552550af7bee29a,vendor/cmark-gfm",
+                ],
+                &[],
+                Duration::from_secs(10),
+            )
+            .await
+            .success
         );
         let request = MeasureRequest {
             worktree: root.clone(),
@@ -314,6 +337,7 @@ mod tests {
             .read_to_end(&mut bytes)
             .unwrap();
         let mut files = std::collections::BTreeMap::new();
+        let mut modes = std::collections::BTreeMap::new();
         let mut offset = 0;
         loop {
             let header = &bytes[offset..offset + 110];
@@ -322,12 +346,14 @@ mod tests {
                 usize::from_str_radix(std::str::from_utf8(&header[range]).unwrap(), 16).unwrap()
             };
             let size = number(54..62);
+            let mode = number(14..22);
             let name_len = number(94..102);
             let name = std::str::from_utf8(&bytes[offset + 110..offset + 110 + name_len - 1])
                 .unwrap()
                 .to_string();
             offset = (offset + 110 + name_len + 3) & !3;
             files.insert(name.clone(), bytes[offset..offset + size].to_vec());
+            modes.insert(name.clone(), mode);
             offset = (offset + size + 3) & !3;
             if name == "TRAILER!!!" {
                 break;
@@ -335,6 +361,8 @@ mod tests {
         }
         assert_eq!(files["work/member/fixtures/input.bin"], b"\0\xff\n");
         assert_eq!(files["work/target/harness"], b"test binary");
+        assert_eq!(modes["work/vendor/cmark-gfm"], 0o040755);
+        assert!(files["work/vendor/cmark-gfm"].is_empty());
         assert_eq!(
             files[root.strip_prefix("/").unwrap().to_str().unwrap()],
             b"/work"
