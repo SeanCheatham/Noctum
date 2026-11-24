@@ -44,6 +44,9 @@ pub struct TrialTemplate {
     pub ratio: String,
     pub diff: String,
     pub tool_output: String,
+    pub memory_before: String,
+    pub memory_after: String,
+    pub analysis: String,
 }
 
 #[derive(Template)]
@@ -57,6 +60,7 @@ pub struct SettingsTemplate {
     pub max_candidates: u32,
     pub max_tests: u32,
     pub max_scan: u32,
+    pub optimization: String,
     pub host: String,
     pub port: u16,
     pub model_lock: String,
@@ -75,6 +79,7 @@ pub struct BaselineRow {
     pub test_name: String,
     pub status: String,
     pub insn_count: String,
+    pub memory: String,
     pub reason: String,
 }
 
@@ -84,6 +89,8 @@ pub struct TrialRow {
     pub test_name: String,
     pub before: String,
     pub after: String,
+    pub memory_before: String,
+    pub memory_after: String,
     pub result: String,
     pub why: String,
     pub summary: String,

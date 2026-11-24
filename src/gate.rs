@@ -21,36 +21,43 @@ pub enum GateDecision {
     Reject { reason: &'static str },
 }
 
-pub fn decide(input: &GateInput) -> GateDecision {
+fn checks(input: &GateInput) -> Option<GateDecision> {
     if !input.diff_ok {
-        return GateDecision::Reject {
+        return Some(GateDecision::Reject {
             reason: "diff rejected",
-        };
+        });
     }
     if !input.repeats_match {
-        return GateDecision::Reject {
+        return Some(GateDecision::Reject {
             reason: "nondeterministic",
-        };
+        });
     }
     if !input.guest_ok {
-        return GateDecision::Reject {
+        return Some(GateDecision::Reject {
             reason: "guest failed",
-        };
+        });
     }
     if !input.host_ok {
-        return GateDecision::Reject {
+        return Some(GateDecision::Reject {
             reason: "host check failed",
-        };
+        });
     }
     if !input.stdout_matches {
-        return GateDecision::Reject {
+        return Some(GateDecision::Reject {
             reason: "stdout mismatch",
-        };
+        });
     }
     if !input.stderr_matches {
-        return GateDecision::Reject {
+        return Some(GateDecision::Reject {
             reason: "stderr mismatch",
-        };
+        });
+    }
+    None
+}
+
+pub fn decide(input: &GateInput) -> GateDecision {
+    if let Some(decision) = checks(input) {
+        return decision;
     }
     if input.baseline < input.min_insn_delta {
         return GateDecision::Reject {
@@ -80,6 +87,70 @@ pub fn decide(input: &GateInput) -> GateDecision {
     GateDecision::Accept { improvement, delta }
 }
 
+pub fn decide_resources(
+    input: &GateInput,
+    config: &crate::optimization::OptimizationConfig,
+    baseline: Option<crate::optimization::MemoryStats>,
+    candidate: Option<crate::optimization::MemoryStats>,
+) -> GateDecision {
+    use crate::optimization::Goal;
+    if let Some(decision) = checks(input) {
+        return decision;
+    }
+    if config.goal == Goal::Cpu {
+        return decide(input);
+    }
+    let (Some(before), Some(after)) = (baseline, candidate) else {
+        return GateDecision::Reject {
+            reason: "missing memory measurement",
+        };
+    };
+    let within = |old: u64, new: u64, limit: f64| {
+        new <= old || (old > 0 && (new - old) as f64 / old as f64 <= limit)
+    };
+    if !within(
+        input.baseline,
+        input.candidate,
+        config.max_cpu_increase_ratio,
+    ) {
+        return GateDecision::Reject {
+            reason: "instruction increase exceeds limit",
+        };
+    }
+    if !within(
+        before.allocations,
+        after.allocations,
+        config.max_memory_increase_ratio,
+    ) || !within(
+        before.allocated_bytes,
+        after.allocated_bytes,
+        config.max_memory_increase_ratio,
+    ) {
+        return GateDecision::Reject {
+            reason: "memory increase exceeds limit",
+        };
+    }
+    let old = before.value(config.memory_metric);
+    let new = after.value(config.memory_metric);
+    let memory_win = old > new
+        && old - new >= config.min_memory_delta
+        && (old - new) as f64 / old as f64 >= config.min_memory_ratio;
+    let cpu_win = matches!(decide(input), GateDecision::Accept { .. });
+    if !memory_win && !(config.goal == Goal::Balanced && cpu_win) {
+        return GateDecision::Reject {
+            reason: "below memory improvement floor",
+        };
+    }
+    GateDecision::Accept {
+        improvement: if input.baseline == 0 {
+            0.0
+        } else {
+            (input.baseline as f64 - input.candidate as f64) / input.baseline as f64
+        },
+        delta: input.baseline.saturating_sub(input.candidate),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +168,105 @@ mod tests {
             min_improvement_ratio: 0.01,
             min_insn_delta: 10_000,
         }
+    }
+
+    #[test]
+    fn memory_goals_enforce_both_resource_limits() {
+        use crate::optimization::{Goal, MemoryMetric, MemoryStats, OptimizationConfig};
+        let stats = |allocations, allocated_bytes| {
+            Some(MemoryStats {
+                allocations,
+                allocated_bytes,
+            })
+        };
+        let mut input = ok_input();
+        input.candidate = input.baseline;
+        let mut config = OptimizationConfig {
+            goal: Goal::Memory,
+            ..Default::default()
+        };
+        assert!(matches!(
+            decide_resources(&input, &config, stats(10, 1000), stats(10, 500)),
+            GateDecision::Accept { .. }
+        ));
+        assert_eq!(
+            decide_resources(&input, &config, None, stats(10, 500)),
+            GateDecision::Reject {
+                reason: "missing memory measurement"
+            }
+        );
+        assert_eq!(
+            decide_resources(&input, &config, stats(10, 1000), stats(11, 500)),
+            GateDecision::Reject {
+                reason: "memory increase exceeds limit"
+            }
+        );
+        input.candidate += 100;
+        assert_eq!(
+            decide_resources(&input, &config, stats(10, 1000), stats(10, 500)),
+            GateDecision::Reject {
+                reason: "instruction increase exceeds limit"
+            }
+        );
+        config.max_cpu_increase_ratio = 0.01;
+        assert!(matches!(
+            decide_resources(&input, &config, stats(10, 1000), stats(10, 500)),
+            GateDecision::Accept { .. }
+        ));
+        config.memory_metric = MemoryMetric::Allocations;
+        assert!(matches!(
+            decide_resources(&input, &config, stats(10, 1000), stats(9, 1000)),
+            GateDecision::Accept { .. }
+        ));
+        assert!(matches!(
+            decide_resources(&input, &config, stats(10, 1000), stats(10, 500)),
+            GateDecision::Reject { .. }
+        ));
+    }
+
+    #[test]
+    fn balanced_accepts_either_win_and_keeps_correctness_checks() {
+        use crate::optimization::{Goal, MemoryStats, OptimizationConfig};
+        let config = OptimizationConfig {
+            goal: Goal::Balanced,
+            ..Default::default()
+        };
+        let stats = Some(MemoryStats {
+            allocations: 10,
+            allocated_bytes: 1000,
+        });
+        let mut input = ok_input();
+        assert!(matches!(
+            decide_resources(&input, &config, stats, stats),
+            GateDecision::Accept { .. }
+        ));
+        input.candidate = input.baseline;
+        assert!(matches!(
+            decide_resources(&input, &config, stats, stats),
+            GateDecision::Reject { .. }
+        ));
+        input.stdout_matches = false;
+        assert_eq!(
+            decide_resources(
+                &input,
+                &config,
+                stats,
+                Some(MemoryStats {
+                    allocations: 1,
+                    allocated_bytes: 1
+                })
+            ),
+            GateDecision::Reject {
+                reason: "stdout mismatch"
+            }
+        );
+        input.stdout_matches = true;
+        input.baseline = 0;
+        input.candidate = 1;
+        assert!(matches!(
+            decide_resources(&input, &config, stats, stats),
+            GateDecision::Reject { .. }
+        ));
     }
 
     #[test]

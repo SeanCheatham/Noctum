@@ -84,6 +84,14 @@ fn join(prefix: &str, name: &str) -> String {
 }
 
 pub fn add_fence_dependency(manifest: &str, fence_dir: &Path) -> Result<String> {
+    add_fence_dependency_with_memory(manifest, fence_dir, false)
+}
+
+pub fn add_fence_dependency_with_memory(
+    manifest: &str,
+    fence_dir: &Path,
+    memory: bool,
+) -> Result<String> {
     let mut value: Value = toml::from_str(manifest).context("parse Cargo.toml")?;
     let table = value.as_table_mut().context("Cargo.toml is not a table")?;
     let dev = table
@@ -97,6 +105,12 @@ pub fn add_fence_dependency(manifest: &str, fence_dir: &Path) -> Result<String> 
         "path".into(),
         Value::String(fence_dir.to_string_lossy().to_string()),
     );
+    if memory {
+        dep.insert(
+            "features".into(),
+            Value::Array(vec![Value::String("memory".into())]),
+        );
+    }
     dev_table.insert("noctum-fence".into(), Value::Table(dep));
     toml::to_string(&value).context("write Cargo.toml")
 }

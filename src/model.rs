@@ -64,12 +64,10 @@ including indentation. Put every changed line inside a hunk.";
         input.hot.source,
         input.test_source
     );
-    if input.hot.is_test {
-        for (name, source) in input.callee_sources {
-            user.push_str(&format!(
-                "\nDirect callee {name}:\n```rust\n{source}\n```\n"
-            ));
-        }
+    for (name, source) in input.callee_sources {
+        user.push_str(&format!(
+            "\nDirect callee {name}:\n```rust\n{source}\n```\n"
+        ));
     }
     if let Some(diff) = input.repair_diff {
         user.push_str("\nThe previous diff failed the build or the test suite. Use the original source above as the base for a replacement diff.\n");

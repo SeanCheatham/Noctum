@@ -88,7 +88,7 @@ pub fn check_config_security(_config_path: &Path) -> ConfigSecurityCheck {
     ConfigSecurityCheck::NotSupported
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct RepoConfig {
     pub package: Option<String>,

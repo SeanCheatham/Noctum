@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Component, Path};
 
+use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{Expr, ExprForLoop, ItemFn, Lit};
 
@@ -48,6 +49,58 @@ pub fn check_diff(
             let patched = apply_hunks(original, &file.hunks)?;
             check_test_edits(original, &patched, test_name)?;
         }
+    }
+    Ok(())
+}
+
+/// Keep edits inside one function and preserve its signature.
+pub fn check_function_scope(
+    diff: &str,
+    files: &HashMap<String, String>,
+    file: &str,
+    name: &str,
+) -> Result<(), String> {
+    let parsed = parse_diff(diff)?;
+    if parsed.len() != 1 || parsed[0].path != file {
+        return Err("diff must change only the selected function file".into());
+    }
+    let before = files
+        .get(file)
+        .ok_or("selected function source is missing")?;
+    let after = apply_hunks(before, &parsed[0].hunks)?;
+    let span = |text: &str| {
+        crate::selector::function_spans(text)
+            .into_iter()
+            .find(|span| span.path == name)
+    };
+    let old = span(before).ok_or("selected function is missing")?;
+    let new = span(&after).ok_or("diff removes or renames the selected function")?;
+    if before.replacen(&old.source, "", 1) != after.replacen(&new.source, "", 1) {
+        return Err("diff changes code outside the selected function".into());
+    }
+    let old_fn =
+        syn::parse_str::<ItemFn>(&old.source).map_err(|_| "cannot parse selected function")?;
+    let new_fn =
+        syn::parse_str::<ItemFn>(&new.source).map_err(|_| "cannot parse replacement function")?;
+    if old.source[..old_fn.sig.span().byte_range().end]
+        != new.source[..new_fn.sig.span().byte_range().end]
+    {
+        return Err("diff changes the selected function signature or attributes".into());
+    }
+    struct UnsafeBlocks(usize);
+    impl<'ast> Visit<'ast> for UnsafeBlocks {
+        fn visit_expr_unsafe(&mut self, expression: &'ast syn::ExprUnsafe) {
+            self.0 += 1;
+            syn::visit::visit_expr_unsafe(self, expression);
+        }
+    }
+    let unsafe_count = |function: &ItemFn| {
+        let mut visitor = UnsafeBlocks(0);
+        visitor.visit_block(&function.block);
+        visitor.0
+    };
+    if unsafe_count(&new_fn) > unsafe_count(&old_fn) {
+        return Err("diff adds an unsafe block".into());
     }
     Ok(())
 }
@@ -860,5 +913,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("loop bound"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    fn diff(before: &str, after: &str) -> String {
+        format!("diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-{before}\n+{after}\n")
+    }
+
+    #[test]
+    fn permits_only_the_selected_body() {
+        let before = "fn hot() -> u32 { 1 + 0 } fn other() {}";
+        let files = HashMap::from([("src/lib.rs".into(), format!("{before}\n"))]);
+        assert!(check_function_scope(
+            &diff(before, "fn hot() -> u32 { 1 } fn other() {}"),
+            &files,
+            "src/lib.rs",
+            "hot"
+        )
+        .is_ok());
+        for after in [
+            "fn hot() -> u32 { 1 } fn other() { work(); }",
+            "fn hot() -> u64 { 1 } fn other() {}",
+            "fn hot() -> u32 { unsafe { work() } } fn other() {}",
+            "fn hot() -> u32 { fn nested() -> u32 { unsafe { work() } } nested() } fn other() {}",
+        ] {
+            assert!(
+                check_function_scope(&diff(before, after), &files, "src/lib.rs", "hot").is_err(),
+                "{after}"
+            );
+        }
     }
 }

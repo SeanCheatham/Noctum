@@ -118,6 +118,8 @@ async fn repair_uses_the_original_source_as_its_base() {
         test_name: "selected".into(),
         harness: "unittests src/lib.rs".into(),
         blob: String::new(),
+        search_key: String::new(),
+        analysis: analysis::FunctionAnalysis::default(),
         candidate_id: 0,
     };
     let test = ScoredTest {
@@ -141,6 +143,7 @@ async fn repair_uses_the_original_source_as_its_base() {
             bench: None,
         },
         baseline: Measurement {
+            memory: None,
             total: 20_000,
             stdout: Vec::new(),
             stderr: Vec::new(),

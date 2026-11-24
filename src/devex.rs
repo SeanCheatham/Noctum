@@ -474,6 +474,17 @@ async fn review_report(db: &Database, root: &Path, command: &str) -> Result<Stri
             count(trial.baseline_count),
             count(trial.insn_count)
         )?;
+        if trial.memory_before_json.is_some() || trial.memory_after_json.is_some() {
+            writeln!(
+                text,
+                "Memory: {} -> {}",
+                noctum::optimization::memory_text(trial.memory_before_json.as_deref()),
+                noctum::optimization::memory_text(trial.memory_after_json.as_deref())
+            )?;
+        }
+        if let Some(analysis) = &trial.analysis_json {
+            writeln!(text, "Source analysis: {analysis}")?;
+        }
         if let Some(ratio) = trial.improvement_ratio {
             writeln!(text, "Reduction: {:.2}%", ratio * 100.0)?;
         }

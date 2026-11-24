@@ -77,11 +77,7 @@ pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>)
                 if r.measurement_profile.is_empty() {
                     "legacy-tb-v1".into()
                 } else {
-                    r.measurement_profile
-                        .split(';')
-                        .next()
-                        .unwrap_or_default()
-                        .to_string()
+                    r.measurement_profile.clone()
                 }
             })
             .unwrap_or_default(),
@@ -111,6 +107,7 @@ pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>)
                 test_name: row.test_name,
                 status: row.status,
                 insn_count: row.insn_count.map(|n| n.to_string()).unwrap_or_default(),
+                memory: crate::optimization::memory_text(row.memory_json.as_deref()),
                 reason: row.reason.unwrap_or_default(),
             })
             .collect(),
@@ -122,6 +119,12 @@ pub async fn repository(State(state): State<Arc<AppState>>, Path(id): Path<i64>)
                     id: row.id,
                     symbol: row.symbol,
                     test_name: row.test_name,
+                    memory_before: crate::optimization::memory_text(
+                        row.memory_before_json.as_deref(),
+                    ),
+                    memory_after: crate::optimization::memory_text(
+                        row.memory_after_json.as_deref(),
+                    ),
                     before: count_text(row.baseline_count),
                     after: count_text(row.insn_count),
                     result,
@@ -144,6 +147,9 @@ pub async fn trial(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> R
     };
     let (outcome, why) = trial_words(&trial.status, trial.reason.as_deref());
     let page = TrialTemplate {
+        memory_before: crate::optimization::memory_text(trial.memory_before_json.as_deref()),
+        memory_after: crate::optimization::memory_text(trial.memory_after_json.as_deref()),
+        analysis: trial.analysis_json.unwrap_or_default(),
         target: trial.target,
         test_name: trial.test_name,
         symbol: trial.symbol,
@@ -207,6 +213,7 @@ fn settings_page(config: &Config, saved: bool) -> SettingsTemplate {
         max_candidates: config.gate.max_candidates,
         max_tests: config.gate.max_tests,
         max_scan: config.gate.max_scan,
+        optimization: toml::to_string_pretty(&config.optimization).unwrap_or_default(),
         host: config.web.host.clone(),
         port: config.web.port,
         model_lock: model
@@ -558,7 +565,7 @@ mod tests {
         assert!(html.contains(">1990000<"), "{html}");
         assert!(
             html.contains(
-                "<td>80000</td>\n            <td></td>\n            <td>rejected</td>\n            <td>bound cheat</td>"
+                "<td>80000</td>\n            <td></td>\n            <td>not measured</td>\n            <td>not measured</td>\n            <td>rejected</td>\n            <td>bound cheat</td>"
             ),
             "{html}"
         );

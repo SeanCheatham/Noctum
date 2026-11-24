@@ -16,13 +16,14 @@
 <h2>Baselines</h2>
 <div class="table-wrapper">
 <table>
-    <thead><tr><th>Test</th><th>Status</th><th>Instructions</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Test</th><th>Status</th><th>Instructions</th><th>Memory</th><th>Reason</th></tr></thead>
     <tbody>
     {% for row in baselines %}
         <tr>
             <td>{{ row.test_name }}</td>
             <td>{{ row.status }}</td>
             <td>{{ row.insn_count }}</td>
+            <td>{{ row.memory }}</td>
             <td>{{ row.reason }}</td>
         </tr>
     {% endfor %}
@@ -39,9 +40,11 @@
             <th>Test</th>
             <th>Before</th>
             <th>After</th>
+            <th>Memory before</th>
+            <th>Memory after</th>
             <th>Result</th>
             <th>Why</th>
-            <th>Ratio</th>
+            <th>Instruction reduction ratio</th>
             <th>Summary</th>
         </tr>
     </thead>
@@ -52,6 +55,8 @@
             <td>{{ row.test_name }}</td>
             <td>{{ row.before }}</td>
             <td>{{ row.after }}</td>
+            <td>{{ row.memory_before }}</td>
+            <td>{{ row.memory_after }}</td>
             <td>{{ row.result }}</td>
             <td>{{ row.why }}</td>
             <td>{{ row.ratio }}</td>

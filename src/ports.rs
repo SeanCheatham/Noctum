@@ -26,6 +26,8 @@ pub struct MeasureRequest {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Measurement {
     pub total: u64,
+    #[serde(default)]
+    pub memory: Option<crate::optimization::MemoryStats>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub exit_code: i32,
@@ -39,7 +41,8 @@ pub struct Measurement {
 
 impl Measurement {
     pub fn matches(&self, other: &Measurement) -> bool {
-        self.total == other.total
+        self.memory == other.memory
+            && self.total == other.total
             && comparable_stdout(&self.stdout) == comparable_stdout(&other.stdout)
             && self.stderr == other.stderr
             && self.exit_code == other.exit_code
@@ -132,6 +135,7 @@ mod tests {
     #[test]
     fn repeated_measurements_must_keep_error_output() {
         let first = Measurement {
+            memory: None,
             total: 20_000,
             stdout: b"ok\n".to_vec(),
             stderr: vec![0, 255, 13, 10],
@@ -149,6 +153,12 @@ mod tests {
         };
         let mut second = first.clone();
         assert!(first.matches(&second));
+        second.memory = Some(crate::optimization::MemoryStats {
+            allocations: 1,
+            allocated_bytes: 10,
+        });
+        assert!(!first.matches(&second));
+        second.memory = None;
         second.stderr[1] = 254;
         assert!(!first.matches(&second));
     }

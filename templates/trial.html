@@ -13,9 +13,13 @@
     {% endif %}
     {% if baseline != "" %}<p>Before {{ baseline }} instructions</p>{% endif %}
     {% if candidate != "" %}<p>After {{ candidate }} instructions</p>{% endif %}
-    <p>Ratio {{ ratio }}</p>
+    <p>Instruction reduction ratio {{ ratio }}</p>
+    <p>Memory before: {{ memory_before }}</p>
+    <p>Memory after: {{ memory_after }}</p>
     <p>{{ summary }}</p>
 </div>
+<h2>Source analysis</h2>
+<pre style="white-space: pre-wrap;">{{ analysis }}</pre>
 <h2>Diff</h2>
 <pre style="white-space: pre-wrap; background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border);">{{ diff }}</pre>
 <h2>Tool output</h2>

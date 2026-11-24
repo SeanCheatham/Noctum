@@ -17,6 +17,7 @@ pub struct Config {
     pub gate: GateConfig,
     pub guest: GuestConfig,
     pub model: ModelConfig,
+    pub optimization: crate::optimization::OptimizationConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
 }
@@ -243,6 +244,7 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.optimization.validate()?;
         if self.schedule.start_hour > 23 || self.schedule.end_hour > 23 {
             bail!("schedule hours must be 0-23");
         }

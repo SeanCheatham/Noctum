@@ -50,6 +50,13 @@ enum Command {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
     },
+    /// Analyze Rust functions without builds or model requests
+    Analyze {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     Runtime {
         #[command(subcommand)]
         command: RuntimeCommand,
@@ -127,6 +134,43 @@ async fn main() -> Result<()> {
     match cli.command.unwrap_or(Command::Start) {
         Command::Init { repo, package } => {
             devex::init(&config, &repo, package.as_deref(), cli.config.as_deref()).await
+        }
+        Command::Analyze { repo, json } => {
+            let root = devex::repository_root(&repo).await?;
+            let protected = if root.join("noctum.toml").exists() {
+                noctum::repo_config::RepoConfig::load(&root)?.protected_paths
+            } else {
+                Vec::new()
+            };
+            let functions = noctum::analysis::inventory(&root, &protected).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&functions)?);
+            } else {
+                println!("Syntax analysis. Types and call targets are not resolved.");
+                for function in &functions {
+                    println!(
+                        "{}:{} {}{}: {} memory sites, loop depth {}",
+                        function.file,
+                        function.line_start,
+                        function.function,
+                        if function.protected {
+                            " [protected]"
+                        } else {
+                            ""
+                        },
+                        function.analysis.memory_sites(),
+                        function.analysis.max_loop_depth
+                    );
+                    for finding in &function.analysis.findings {
+                        println!(
+                            "  {}:{} {}: {}",
+                            function.file, finding.line, finding.kind, finding.detail
+                        );
+                    }
+                }
+                println!("Functions: {}", functions.len());
+            }
+            Ok(())
         }
         Command::Doctor { repo } => devex::doctor(&config, &repo, cli.config.as_deref()).await,
         Command::Review { repo } => devex::review(&config, &repo, cli.config.as_deref()).await,

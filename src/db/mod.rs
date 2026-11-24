@@ -163,6 +163,27 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
+        for (table, name, definition) in [
+            ("test_baselines", "memory_json", "TEXT"),
+            ("candidates", "analysis_json", "TEXT"),
+            ("candidates", "search_key", "TEXT NOT NULL DEFAULT ''"),
+            ("trials", "memory_before_json", "TEXT"),
+            ("trials", "memory_after_json", "TEXT"),
+        ] {
+            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(&self.pool)
+                .await?;
+            if !columns
+                .iter()
+                .any(|row| row.get::<String, _>("name") == name)
+            {
+                sqlx::query(&format!(
+                    "ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                ))
+                .execute(&self.pool)
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -513,47 +534,106 @@ impl Database {
     }
 
     pub async fn candidates_for_run(&self, run_id: i64) -> Result<Vec<Candidate>> {
-        Ok(sqlx::query_as(
-            "SELECT id, run_id, test_name, harness, rank, symbol, file, line_start, line_end,
-                    exclusive_count, share, file_blob
-             FROM candidates
-             WHERE run_id = ?
-             ORDER BY rank, id",
+        Ok(
+            sqlx::query_as("SELECT * FROM candidates WHERE run_id = ? ORDER BY rank, id")
+                .bind(run_id)
+                .fetch_all(&self.pool)
+                .await?,
         )
-        .bind(run_id)
-        .fetch_all(&self.pool)
-        .await?)
+    }
+
+    async fn trial_select(&self) -> Result<String> {
+        let columns = sqlx::query("PRAGMA table_info(candidates)")
+            .fetch_all(&self.pool)
+            .await?;
+        let analysis = if columns
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "analysis_json")
+        {
+            "c.analysis_json"
+        } else {
+            "NULL AS analysis_json"
+        };
+        Ok(format!("SELECT r.target, t.*, {analysis}, c.test_name, c.harness, c.symbol, c.file
+            FROM trials t JOIN candidates c ON c.id = t.candidate_id JOIN runs r ON r.id = c.run_id"))
     }
 
     pub async fn trials_for_run(&self, run_id: i64) -> Result<Vec<Trial>> {
-        Ok(sqlx::query_as(
-            "SELECT r.target, t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
-                    t.baseline_count, t.insn_count, t.improvement_ratio, t.host_check_passed,
-                    t.stdout_matched, t.tool_output, c.test_name, c.harness, c.symbol, c.file
-             FROM trials t
-             JOIN candidates c ON c.id = t.candidate_id
-             JOIN runs r ON r.id = c.run_id
-             WHERE c.run_id = ?
-             ORDER BY t.id",
-        )
-        .bind(run_id)
-        .fetch_all(&self.pool)
-        .await?)
+        let query = format!(
+            "{} WHERE c.run_id = ? ORDER BY t.id",
+            self.trial_select().await?
+        );
+        Ok(sqlx::query_as(&query)
+            .bind(run_id)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     pub async fn trial(&self, id: i64) -> Result<Option<Trial>> {
-        Ok(sqlx::query_as(
-            "SELECT r.target, t.id, t.candidate_id, t.status, t.reason, t.model_summary, t.unified_diff,
-                    t.baseline_count, t.insn_count, t.improvement_ratio, t.host_check_passed,
-                    t.stdout_matched, t.tool_output, c.test_name, c.harness, c.symbol, c.file
-             FROM trials t
-             JOIN candidates c ON c.id = t.candidate_id
-             JOIN runs r ON r.id = c.run_id
-             WHERE t.id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?)
+        let query = format!("{} WHERE t.id = ?", self.trial_select().await?);
+        Ok(sqlx::query_as(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?)
+    }
+
+    pub async fn set_candidate_analysis(
+        &self,
+        id: i64,
+        analysis: &crate::analysis::FunctionAnalysis,
+        search_key: &str,
+    ) -> Result<()> {
+        sqlx::query("UPDATE candidates SET analysis_json = ?, search_key = ? WHERE id = ?")
+            .bind(serde_json::to_string(analysis)?)
+            .bind(search_key)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_baseline_memory(
+        &self,
+        run_id: i64,
+        harness: &str,
+        test: &str,
+        stats: Option<crate::optimization::MemoryStats>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE test_baselines SET memory_json = ? WHERE run_id = ? AND harness = ? AND test_name = ?")
+            .bind(stats.map(|s| serde_json::to_string(&s)).transpose()?).bind(run_id).bind(harness).bind(test).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn set_trial_memory(
+        &self,
+        id: i64,
+        before: Option<crate::optimization::MemoryStats>,
+        after: Option<crate::optimization::MemoryStats>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE trials SET memory_before_json = ?, memory_after_json = ? WHERE id = ?")
+            .bind(before.map(|s| serde_json::to_string(&s)).transpose()?)
+            .bind(after.map(|s| serde_json::to_string(&s)).transpose()?)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn search_exists(
+        &self,
+        repository_id: i64,
+        file: &str,
+        symbol: &str,
+        key: &str,
+        target: &str,
+        profile: &str,
+    ) -> Result<bool> {
+        let found: Option<(i64,)> = sqlx::query_as(
+            "SELECT t.id FROM trials t JOIN candidates c ON c.id = t.candidate_id JOIN runs r ON r.id = c.run_id
+             WHERE r.repository_id = ? AND c.file = ? AND c.symbol = ? AND c.search_key = ?
+             AND r.target = ? AND r.measurement_profile = ? AND t.status != 'error' LIMIT 1")
+            .bind(repository_id).bind(file).bind(symbol).bind(key).bind(target).bind(profile).fetch_optional(&self.pool).await?;
+        Ok(found.is_some())
     }
 
     pub async fn accepted_delta(&self, run_id: i64) -> Result<i64> {
@@ -689,5 +769,125 @@ mod tests {
             .unwrap());
         db.set_run_target(run, arm).await.unwrap();
         assert_eq!(db.trials_for_run(run).await.unwrap()[0].target, arm);
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn search_identity_and_resource_history_survive_migration() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("perf.db");
+        let db = Database::new(&path).await.unwrap();
+        db.run_migrations().await.unwrap();
+        db.run_migrations().await.unwrap();
+        let repo = db.add_repository("/repo", "repo").await.unwrap();
+        let run = db.insert_run(repo, "head", None, "ok", None).await.unwrap();
+        db.set_run_profile(run, "profile").await.unwrap();
+        let target = "x86_64-unknown-linux-musl";
+        let candidate = db
+            .insert_candidate(
+                run,
+                "test",
+                "lib",
+                0,
+                "work",
+                "src/lib.rs",
+                1,
+                3,
+                50,
+                0.001,
+                "blob",
+            )
+            .await
+            .unwrap();
+        db.set_candidate_analysis(
+            candidate,
+            &crate::analysis::analyze("fn work() { Vec::<u8>::new(); }", 1),
+            "key",
+        )
+        .await
+        .unwrap();
+        let trial = db
+            .insert_trial(
+                candidate,
+                "rejected",
+                Some("no change"),
+                None,
+                None,
+                Some(100),
+                Some(100),
+                None,
+                true,
+                true,
+                None,
+            )
+            .await
+            .unwrap();
+        let stats = Some(crate::optimization::MemoryStats {
+            allocations: 3,
+            allocated_bytes: 48,
+        });
+        db.set_trial_memory(trial, stats, stats).await.unwrap();
+        assert!(db
+            .search_exists(repo, "src/lib.rs", "work", "key", target, "profile")
+            .await
+            .unwrap());
+        for (file, key, profile) in [
+            ("other.rs", "key", "profile"),
+            ("src/lib.rs", "new", "profile"),
+            ("src/lib.rs", "key", "memory"),
+        ] {
+            assert!(!db
+                .search_exists(repo, file, "work", key, target, profile)
+                .await
+                .unwrap());
+        }
+        let row = db.trial(trial).await.unwrap().unwrap();
+        assert!(row.analysis_json.is_some());
+        assert_eq!(
+            serde_json::from_str::<crate::optimization::MemoryStats>(
+                row.memory_before_json.as_deref().unwrap()
+            )
+            .unwrap(),
+            crate::optimization::MemoryStats {
+                allocations: 3,
+                allocated_bytes: 48
+            }
+        );
+        for statement in [
+            "ALTER TABLE candidates DROP COLUMN analysis_json",
+            "ALTER TABLE candidates DROP COLUMN search_key",
+            "ALTER TABLE trials DROP COLUMN memory_before_json",
+            "ALTER TABLE trials DROP COLUMN memory_after_json",
+            "ALTER TABLE test_baselines DROP COLUMN memory_json",
+        ] {
+            sqlx::query(statement).execute(&db.pool).await.unwrap();
+        }
+        let reader = Database::open_read_only(&path).await.unwrap();
+        assert!(reader
+            .trial(trial)
+            .await
+            .unwrap()
+            .unwrap()
+            .memory_before_json
+            .is_none());
+        assert!(reader.trials_for_run(run).await.unwrap()[0]
+            .analysis_json
+            .is_none());
+        assert_eq!(
+            reader.candidates_for_run(run).await.unwrap()[0].search_key,
+            ""
+        );
+        db.run_migrations().await.unwrap();
+        assert!(db
+            .trial(trial)
+            .await
+            .unwrap()
+            .unwrap()
+            .analysis_json
+            .is_none());
     }
 }

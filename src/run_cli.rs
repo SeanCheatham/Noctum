@@ -252,6 +252,12 @@ async fn run_inner(
             if let Some(count) = baseline.insn_count {
                 report.push_str(&format!(", {count} instructions"));
             }
+            if baseline.memory_json.is_some() {
+                report.push_str(&format!(
+                    ", {}",
+                    noctum::optimization::memory_text(baseline.memory_json.as_deref())
+                ));
+            }
             if let Some(reason) = baseline.reason {
                 report.push_str(&format!(" ({reason})"));
             }
@@ -277,6 +283,16 @@ async fn run_inner(
                     .map(|reason| format!(": {reason}"))
                     .unwrap_or_default()
             ));
+            if trial.memory_before_json.is_some() || trial.memory_after_json.is_some() {
+                report.push_str(&format!(
+                    "  Memory: {} -> {}\n",
+                    noctum::optimization::memory_text(trial.memory_before_json.as_deref()),
+                    noctum::optimization::memory_text(trial.memory_after_json.as_deref())
+                ));
+            }
+            if let Some(analysis) = trial.analysis_json {
+                log.save(&format!("Trial {} source analysis:\n{analysis}", trial.id))?;
+            }
             if let Some(output) = trial.tool_output {
                 log.save(&format!("Trial {} tool output:\n{output}", trial.id))?;
             }

@@ -468,6 +468,7 @@ fn read_measurement(
     let (load_bias, map_start, map_end) =
         parse_map(&std::fs::read_to_string(scratch.join("map")).unwrap_or_default());
     Ok(Measurement {
+        memory: None,
         total: dump.total,
         stdout,
         stderr,

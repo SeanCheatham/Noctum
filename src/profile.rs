@@ -107,6 +107,32 @@ pub fn rank(
     protected: &[String],
     test_name: &str,
 ) -> RankedProfile {
+    rank_with_floor(
+        dump,
+        map_start,
+        map_end,
+        load_bias,
+        locate,
+        spans_by_file,
+        worktree,
+        protected,
+        test_name,
+        0.01,
+    )
+}
+
+pub fn rank_with_floor(
+    dump: &ProfileDump,
+    map_start: u64,
+    map_end: u64,
+    load_bias: u64,
+    locate: impl Fn(u64) -> Option<LineHit>,
+    spans_by_file: &HashMap<String, Vec<FnSpan>>,
+    worktree: &Path,
+    protected: &[String],
+    test_name: &str,
+    min_share: f64,
+) -> RankedProfile {
     if dump.error.is_some() || dump.total == 0 {
         return RankedProfile {
             functions: Vec::new(),
@@ -144,7 +170,7 @@ pub fn rank(
     let mut ranked = Vec::new();
     for ((file, name), exclusive) in counts {
         let share = exclusive as f64 / dump.total as f64;
-        if share < 0.01 {
+        if share < min_share {
             continue;
         }
         let span = spans_by_file
@@ -443,6 +469,31 @@ mod tests {
             "a sub-1% in-repo hit is still a mapping"
         );
         assert!(ranked.functions.is_empty(), "{ranked:?}");
+        let swept = rank_with_floor(
+            &dump,
+            0,
+            0x100,
+            0,
+            |addr| {
+                Some(LineHit {
+                    file: if addr == 0x10 {
+                        "/repo/src/lib.rs"
+                    } else {
+                        "/repo/fixtures/data.rs"
+                    }
+                    .into(),
+                    line: 1,
+                })
+            },
+            &spans,
+            Path::new("/repo"),
+            &["fixtures/**".into()],
+            "encode_batch",
+            0.0,
+        );
+        assert_eq!(swept.functions.len(), 1);
+        assert_eq!(swept.functions[0].name, "encode");
+        assert_eq!(swept.functions[0].exclusive, 50);
     }
 
     #[test]

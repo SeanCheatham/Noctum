@@ -3,9 +3,9 @@
 [![CI](https://github.com/SeanCheatham/Noctum/workflows/CI/badge.svg)](https://github.com/SeanCheatham/Noctum/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 
-Noctum is a local overnight daemon for Rust repositories. While the machine is idle it builds a test as a static musl binary, counts the guest instructions that test runs, and asks a local model for a smaller version. A change is kept only when the same count comes back twice, the test still passes, and the instruction count drops by at least the configured floor. Anything else is reset.
+Noctum is a local overnight daemon for Rust repositories. While the machine is idle it builds a test as a static musl binary, counts the guest instructions that test runs, and asks a local model for a smaller version. With the default CPU goal, a change is kept only when repeated counts agree, the test still passes, and the instruction count drops by at least the configured floor. Memory and balanced goals can also keep measured allocation reductions within configured limits. Rejected changes are reset.
 
-The score is that instruction count. Wall-clock time is recorded for the dashboard and is never used to accept or reject.
+The CPU score is the guest instruction count. Memory goals use successful Rust allocation requests or requested bytes. Wall-clock time is recorded for the dashboard and is never used to accept or reject.
 
 Version 0.2.0 replaces the earlier mutation-testing product. The old database is left unopened. There is no compatibility flag.
 
@@ -21,7 +21,7 @@ From 22:00 to 06:00, one pass per repository:
 
 `noctum run` and the dashboard "run now" button ignore the window and the one-pass rule.
 
-A test is eligible when two runs agree and the count is at least `min_insn_delta` (default 10,000). A candidate is kept when it is also at least `min_improvement_ratio` (default 1%) cheaper. A diff that drops or rewrites an assertion, lowers a fixed loop bound, or fails the suite is rejected. The model gets one repair if the build or the host suite fails, and no repair if the diff itself is invalid. Before a repair request, Noctum restores the original source. The request includes that source, the failed diff, and the test output. The replacement diff must apply to the original source.
+For the CPU goal, a test is eligible when two runs agree and the count is at least `min_insn_delta` (default 10,000). A candidate is kept when it is also at least `min_improvement_ratio` (default 1%) cheaper. A diff that drops or rewrites an assertion, lowers a fixed loop bound, or fails the suite is rejected. The model gets one repair if the build or the host suite fails, and no repair if the diff itself is invalid. Before a repair request, Noctum restores the original source. The request includes that source, the failed diff, and the test output. The replacement diff must apply to the original source.
 
 ## Prerequisites
 
@@ -134,6 +134,54 @@ Measurement reports are saved under `measurements/RUN_NAME/` in the data directo
 
 Both commands show the current step, elapsed time, and log path. Logs are saved under `logs/` in the data directory. The commands use the same run lock as the daemon. Control-C requests a stop and waits for cleanup. A build failure, missing test, failed repeat check, or run with no stable count gives a nonzero exit status. Skip messages include instructions for fixed workloads, clocks, network access, test attributes, and bench configuration.
 
+## Function sweeps and memory goals
+
+Set the search goal and selection method in the application configuration:
+
+```toml
+[optimization]
+goal = "balanced"                 # cpu, memory, or balanced
+selection = "sweep"               # hot or sweep
+memory_metric = "allocated_bytes" # allocated_bytes or allocations
+min_memory_delta = 1024           # units of the selected memory metric
+min_memory_ratio = 0.01
+max_cpu_increase_ratio = 0.0
+max_memory_increase_ratio = 0.0
+```
+
+The default goal is `cpu`, and the default selection is `hot`. Existing CPU builds do not use the measurement allocator. The default memory floor is one unit and one percent. Use a larger `min_memory_delta` to require a larger reduction. Ratios in this section must be from zero to one.
+
+`hot` selects functions with at least one percent of the measured instructions. `sweep` includes all functions that the measured guest addresses map to source, including those below one percent. Sweep selection excludes test functions. Memory goals also include functions below one percent and exclude test functions. Compiler inlining and debug information can limit source attribution. A function without mapped execution is not selected for a model request.
+
+The sweep uses the existing test, scan, candidate, and model request limits. It starts with functions that consume the most measured instructions. Memory goals first rank functions by the number of possible allocation, copy, and growth sites. Each selected function gets one proposal and, if the build or suite fails, at most one repair. Non-test patches must change only that function body. The signature, attributes, other functions, and test workloads must stay unchanged. Added unsafe blocks are rejected.
+
+Completed trials suppress another request under the same search conditions. The search identity includes the function file, selected workload and harness, measured binary hash, repository configuration, model lock, goal, limits, and measurement profile. Changes to these inputs permit another trial. Model errors remain eligible for retry. Use `run --retry` to bypass completed trial history.
+
+Before each model request, Noctum checks the function syntax for possible allocations, copies, buffer growth, searches inside loops, loop depth, named calls, and effects such as locks and unsafe blocks. The request includes these findings and available same-file callee source. Findings do not resolve types or call targets. They do not prove that an allocation occurs or that a change will help. No additional analyzer installation is required.
+
+Inspect the function inventory without a worker, model, Cargo build, or repository registration:
+
+```bash
+noctum analyze --repo /path/to/repo
+noctum analyze --repo /path/to/repo --json
+```
+
+This command reads current tracked and non-ignored Rust files. It includes protected functions in the report and marks them as protected. It does not change source or create run history. The inventory includes functions without measurement workloads; these functions need representative workloads before optimization.
+
+### Memory measurements and acceptance
+
+The `memory` and `balanced` goals enable a measurement allocator in the fence crate. The allocator delegates to Rust's system allocator. It counts successful allocation and zeroed-allocation requests inside the fence, plus successful reallocation requests. A reallocation counts as one request and its full new requested size. Deallocation does not reduce total allocated bytes. Counters cover the measured process, including its Rust threads. Allocations in other processes or through separate native allocators are excluded. Libtest can allocate on another thread during this window. A fixed `harness = false` benchmark can isolate a single-threaded workload more closely.
+
+These values are allocation traffic. They are not peak heap size, retained memory, resident memory, or GPU memory. Existing custom global allocators are not supported. Source attributes are checked before a model request; an allocator supplied through a dependency or macro can instead cause a measurement build error.
+
+Both memory counters and the instruction count must repeat exactly. A missing or invalid allocator record fails the run checks. Allocator records are removed from measurement error output before output comparison. Application output bytes are kept. CPU-only runs keep all output bytes without allocator record processing.
+
+The `memory` goal requires the selected memory metric to decrease by both memory floors. The `balanced` goal accepts either that memory reduction or a CPU reduction that meets both CPU floors. Both goals enforce the permitted instruction increase and the permitted increase in each memory counter. The default permits no increase. A zero baseline permits no increase even when a ratio limit is set.
+
+Memory instrumentation adds instructions. Its instruction counts have a separate allocator profile and must be compared only with the same instrumentation. The package suite checks the patch without the injected fence dependency before candidate measurement. These checks do not establish native elapsed-time improvements.
+
+Run reports, `review`, and the dashboard show memory counts where available. Trials also save source findings. Old history remains readable; old rows have no memory measurements. The dashboard Settings page shows the optimization configuration. Edit the application file and restart the daemon to change it.
+
 ## Configuration
 
 Copy `config.example.toml` to `~/Library/Application Support/com.noctum.noctum/config.toml`. Use `--config` to select another file. The schedule, the keep floor, the web bind, and the guest memory live there. The model quant is selected in `[model]`. Model files and server packages are fixed in `model.lock.toml`. Worker assets are fixed in `runtime/assets.lock.toml`. The guest build script checks source archive hashes.
@@ -215,6 +263,14 @@ The live worker tests need a prepared data directory. Set `NOCTUM_TEST_RUNTIME_D
 ```bash
 cargo test --locked --test macos_worker -- --ignored --nocapture --test-threads=1
 ```
+
+Run the complete memory sweep check with the same environment:
+
+```bash
+cargo test --locked --test macos_optimization -- --ignored --nocapture --test-threads=1
+```
+
+This test uses a fixed model response. It checks allocation reduction, acceptance, saved results, and preservation of the original repository. It does not need model files.
 
 These tests check repeated counts, raw output bytes, changed source files, and shutdown after the controller exits. `tests/host_helper.py` checks the Swift helper alone with a real VM.
 

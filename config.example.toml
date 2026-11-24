@@ -32,3 +32,15 @@ memory_mb = 1024
 [model]
 # Q2 is the default for 16 GB machines. Q4 needs more memory and disk space.
 quant = "q2"
+
+[optimization]
+# Use sweep to include all functions mapped by the measured workloads.
+selection = "hot"
+# Memory and balanced goals enable the measurement allocator.
+goal = "cpu"
+memory_metric = "allocated_bytes"
+min_memory_delta = 1
+min_memory_ratio = 0.01
+# Memory and balanced goals check all three resource limits.
+max_cpu_increase_ratio = 0.0
+max_memory_increase_ratio = 0.0

@@ -50,6 +50,8 @@ pub struct TestBaseline {
     pub binary_sha256: Option<String>,
     pub wall_ms: Option<i64>,
     pub reason: Option<String>,
+    #[sqlx(default)]
+    pub memory_json: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -66,6 +68,10 @@ pub struct Candidate {
     pub exclusive_count: i64,
     pub share: f64,
     pub file_blob: String,
+    #[sqlx(default)]
+    pub analysis_json: Option<String>,
+    #[sqlx(default)]
+    pub search_key: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -83,6 +89,12 @@ pub struct Trial {
     pub host_check_passed: bool,
     pub stdout_matched: bool,
     pub tool_output: Option<String>,
+    #[sqlx(default)]
+    pub memory_before_json: Option<String>,
+    #[sqlx(default)]
+    pub memory_after_json: Option<String>,
+    #[sqlx(default)]
+    pub analysis_json: Option<String>,
     pub test_name: String,
     pub harness: String,
     pub symbol: String,

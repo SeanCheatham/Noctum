@@ -7,3 +7,6 @@ license = "MIT OR Apache-2.0"
 description = "Drop guard that emits the Noctum measurement fences"
 
 [dependencies]
+
+[features]
+memory = []

@@ -2,6 +2,7 @@
 //! pinned QEMU guest, asks a local model for a change at a hot function, and
 //! keeps the change only when that same test uses fewer guest instruction callbacks.
 
+pub mod analysis;
 pub mod builder;
 pub mod config;
 pub mod daemon;
@@ -12,6 +13,7 @@ pub mod gate;
 pub mod hashutil;
 pub mod lockfile;
 pub mod model;
+pub mod optimization;
 pub mod orchestrator;
 pub mod ports;
 pub mod process;
